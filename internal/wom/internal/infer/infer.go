@@ -245,6 +245,10 @@ type group struct {
 	// conflicts is how many of those units the group matched more than one
 	// distinct value in.
 	conflicts int
+	// distinct is how many different values the group holds across the corpus.
+	// A field describes its record, so its value changes from one record to
+	// the next; one that never changes is describing the site.
+	distinct int
 }
 
 // groupMatches buckets matches by the location they generalize to. When bases
@@ -271,7 +275,7 @@ func groupMatches(matches []scored, bases map[*graph.Node]bool) []group {
 		sp, cf := reach(byKey[k], bases)
 		out = append(out, group{
 			key: k, disc: discs[k], matches: byKey[k],
-			spread: sp, conflicts: cf,
+			spread: sp, conflicts: cf, distinct: distinctValues(byKey[k]),
 		})
 	}
 	return out
@@ -349,8 +353,8 @@ func bestGroup(groups []group) *group {
 		}
 	}
 	sort.SliceStable(groups, func(i, j int) bool {
-		gi := groups[i].confidence() * reachFactor(groups[i].spread, widest)
-		gj := groups[j].confidence() * reachFactor(groups[j].spread, widest)
+		gi := groups[i].confidence() * reachFactor(groups[i].spread, widest) * groups[i].variety()
+		gj := groups[j].confidence() * reachFactor(groups[j].spread, widest) * groups[j].variety()
 		if gi != gj {
 			return gi > gj
 		}
@@ -558,6 +562,44 @@ func agreement(spread, conflicts int) float64 {
 		share = 1
 	}
 	return 1 - conflictPenalty*share
+}
+
+// distinctValues counts the different texts a group holds.
+func distinctValues(matches []scored) int {
+	seen := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		seen[m.node.Text()] = true
+	}
+	return len(seen)
+}
+
+// monotonyPenalty is how much a location is discounted for saying the same
+// thing about every record.
+//
+// A penalty rather than a veto, because a field really can be constant: a paper
+// with one reporter has one byline. It only has to be enough to lose to a rival
+// that varies.
+const monotonyPenalty = 0.5
+
+// monotonyFloor is how many records a location must cover before never changing
+// means anything. Below it, one value is simply a small sample.
+const monotonyFloor = 5
+
+// variety discounts a location whose value is the same on every record it
+// covers.
+//
+// A field describes its record, so it changes from one to the next; a value
+// that never changes is describing the site. On the news corpus the `section`
+// property resolved to <p class="kicker">Other items that may interest you</p>,
+// a related-articles heading, filled on 211 records with one distinct value.
+// The label was not wrong: kicker is a real name for a section line, and the
+// site uses it for furniture. Nothing about the markup says which; only the
+// values do.
+func (g group) variety() float64 {
+	if g.spread < monotonyFloor || g.distinct > 1 {
+		return 1
+	}
+	return monotonyPenalty
 }
 
 // reachWeight is how much of a location's standing rests on how much of the

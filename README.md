@@ -42,7 +42,7 @@ article.
 | author | 0 | **301 / 52** | nothing at all |
 | published | 224 / 74 | **249 / 204** | |
 | summary | 470 / 470 | 473 / 470 | og:description, already correct |
-| section | 1 / 1 | 204 / 1 | still furniture, see below |
+| section | 1 / 1 | **166 / 19** | a related-articles heading |
 
 ### Ten live feeds
 
@@ -67,9 +67,14 @@ reading the code:
 | `rel` was never read as a label | `rel="canonical"` unused despite 10/13 sites at perfect precision |
 | Layout classes were read as labels | `class="text-3xl"` and `class="brand"` named fields |
 | The sequence model averaged a distribution into a confidence | Every score fell by about a third, and further as the schema grew |
+| A value that never changed was still read as a field | `section` was one heading repeated on 211 records |
 
-`section` is filled on 204 records with one distinct value, which is the
-signature of site furniture rather than an article field. It is known and open.
+The last of those is worth stating on its own, because no amount of reading the
+markup finds it. `section` resolved to
+`<p class="kicker">Other items that may interest you</p>`, and `kicker` is a
+real name for a section line, so the label was correct. What marked it was that
+211 records shared one value. A field describes its record and so changes from
+one to the next; a value that never changes is describing the site.
 
 ## Installation
 
