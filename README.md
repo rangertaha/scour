@@ -20,6 +20,57 @@ implemented yet. Expect commands and flags to change. The module is not
 published, so `go install` will not work until the first release; clone and
 `go build ./cmd/scour` in the meantime.
 
+## Measured
+
+Extraction is judged on two live corpora rather than on fixtures. The HTML one
+is 808 pages crawled from 19 news sites in English, Greek, Russian and French;
+the feed one is ten live RSS and Atom feeds. Both are re-measured after every
+change to inference.
+
+Per field, how many of the extracted records carry a value, and how many
+distinct values those are. Distinctness is the number that matters: a field
+whose value is the same on every page of a site is describing the site, not the
+article.
+
+### 808 HTML pages, 19 sites
+
+| Field | Before | After | What it had found |
+| --- | --- | --- | --- |
+| records | 503 | **713** | |
+| title | 243 / 10 | **644 / 627** | the site's name, one per site |
+| link | 77 / 4 | **713 / 700** | preconnect hints naming CDNs |
+| author | 0 | **301 / 52** | nothing at all |
+| published | 224 / 74 | **249 / 204** | |
+| summary | 470 / 470 | 473 / 470 | og:description, already correct |
+| section | 1 / 1 | 204 / 1 | still furniture, see below |
+
+### Ten live feeds
+
+| | Records |
+| --- | --- |
+| Before | 9 |
+| After | **266** |
+
+### What the corpora exposed
+
+Every one of these was found by running against live data and measuring, not by
+reading the code:
+
+| Fault | Effect |
+| --- | --- |
+| A field's location was fixed before the record's container was known | A feed's logo beat the article; 45 articles became 1 |
+| The container was always the deepest ancestor | It was `/html/head` on every site, so the article's own markup was never a candidate |
+| Support counted matches, not independent observations | A locator was rewarded for being ambiguous |
+| Reach did not count at all | A body div on one site beat a meta tag on thirteen |
+| HTML tag names were discarded as labels | `<h1>` is on 13/13 sites and `<time>` on 10/13, both ignored |
+| An attribute's own name was a full-weight label | `<link rel="alternate" title="...">` outscored the headline |
+| `rel` was never read as a label | `rel="canonical"` unused despite 10/13 sites at perfect precision |
+| Layout classes were read as labels | `class="text-3xl"` and `class="brand"` named fields |
+| The sequence model averaged a distribution into a confidence | Every score fell by about a third, and further as the schema grew |
+
+`section` is filled on 204 records with one distinct value, which is the
+signature of site furniture rather than an article field. It is known and open.
+
 ## Installation
 
 ```
