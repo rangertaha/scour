@@ -504,7 +504,34 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 
 		key, err := c.cache.Put(ctx, rawURL, r.Body)
 		if err != nil {
+			// A page whose body could not be stored has not been fetched in
+			// any useful sense: the row would say it was, carry a key, and
+			// have nothing behind it, and every later stage would skip it
+			// without saying why. Recording the failure keeps it retryable and
+			// makes a misconfigured page store loud instead of quiet, which
+			// matters because the store is the one part of the pipeline that
+			// can be pointed somewhere unreachable and still let a crawl look
+			// like it worked.
 			slog.Error("cache write failed", "url", rawURL, "err", err)
+
+			st.mu.Lock()
+			st.failed++
+			st.mu.Unlock()
+
+			failed := store.Fetched{
+				EntityID:   entityID,
+				URL:        rawURL,
+				ParentURL:  r.Ctx.Get(ctxParent),
+				Depth:      r.Request.Depth,
+				Score:      scoreFrom(r.Ctx.Get(ctxScore), opts.Scorer, rawURL, "", r.Request.Depth),
+				Status:     store.URLFailed,
+				StatusCode: r.StatusCode,
+				Latency:    latency,
+			}
+			if err := c.sink.Fetched(ctx, failed); err != nil {
+				slog.Error("record failure failed", "url", rawURL, "err", err)
+			}
+			return
 		}
 
 		st.mu.Lock()
@@ -787,4 +814,11 @@ func MarshalRequest(rawURL, parentURL string, depth int, score float64) ([]byte,
 		return nil, fmt.Errorf("marshal request for %q: %w", rawURL, err)
 	}
 	return data, nil
+}
+
+// WithCache returns a crawler that keeps bodies somewhere else.
+func (c *Crawler) WithCache(pages cache.Store) *Crawler {
+	clone := *c
+	clone.cache = pages
+	return &clone
 }

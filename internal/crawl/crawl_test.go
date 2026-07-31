@@ -4,7 +4,9 @@ package crawl
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -591,3 +593,53 @@ func TestQueueSurvivesAnInterruptedCrawl(t *testing.T) {
 		t.Error("the resumed crawl fetched nothing")
 	}
 }
+
+// A page whose body could not be stored has not been fetched in any useful
+// sense: the row would say it was, carry a key, and have nothing behind it,
+// and every later stage would skip it without saying why. A page store is the
+// one part of the pipeline that can be pointed somewhere unreachable while a
+// crawl still looks like it worked.
+func TestAFailedCacheWriteIsAFailedFetch(t *testing.T) {
+	srv := site(t)
+	c, s, cfg := harness(t)
+	e, targets := entity(t, s, srv.URL)
+
+	c = c.WithCache(refusingCache{})
+
+	result, err := c.Run(context.Background(), Options{
+		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 2,
+		Scorer: score.Fixed(1),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = cfg
+
+	if result.Fetched != 0 {
+		t.Errorf("reported %d fetched with nothing stored", result.Fetched)
+	}
+	if result.Failed == 0 {
+		t.Error("a page that could not be stored was not counted as failed")
+	}
+
+	var ok int64
+	if err := s.DB().Model(&store.URL{}).
+		Where("entity_id = ? AND status = ?", e.ID, store.URLFetched).
+		Count(&ok).Error; err != nil {
+		t.Fatal(err)
+	}
+	if ok != 0 {
+		t.Errorf("%d urls recorded as fetched with no body behind them", ok)
+	}
+}
+
+// refusingCache is a page store that cannot be written to, which is what a
+// bucket with the wrong endpoint or no credentials looks like.
+type refusingCache struct{}
+
+func (refusingCache) Put(context.Context, string, []byte) (string, error) {
+	return "", errors.New("no")
+}
+func (refusingCache) Get(context.Context, string) ([]byte, error) { return nil, fs.ErrNotExist }
+func (refusingCache) Has(context.Context, string) bool            { return false }
+func (refusingCache) Stats(context.Context) (cache.Stats, error)  { return cache.Stats{}, nil }
