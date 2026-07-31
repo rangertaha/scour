@@ -459,3 +459,16 @@ func (s *Store) PropertiesFor(ctx context.Context, entityID uint, domain string)
 	}
 	return out, nil
 }
+
+// TargetsFor returns an entity's crawl targets.
+func (s *Store) TargetsFor(ctx context.Context, entityID uint) ([]Target, error) {
+	var out []Target
+	err := s.db.WithContext(ctx).
+		Where("entity_id = ?", entityID).
+		Order("id").
+		Find(&out).Error
+	if err != nil {
+		return nil, fmt.Errorf("targets for entity %d: %w", entityID, err)
+	}
+	return out, nil
+}

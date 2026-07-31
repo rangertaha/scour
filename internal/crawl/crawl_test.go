@@ -362,28 +362,28 @@ func TestCancellationStopsTheCrawl(t *testing.T) {
 
 func TestSubdomainScope(t *testing.T) {
 	targets := []store.Target{{Kind: store.TargetDomain, Value: "example.com"}}
-	sc, err := newScope(targets)
+	sc, err := NewScope(targets)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sc.allows("http://www.example.com/cars/") {
+	if !sc.Allows("http://www.example.com/cars/") {
 		t.Error("www should be in scope")
 	}
-	if !sc.allows("http://example.com/cars/") {
+	if !sc.Allows("http://example.com/cars/") {
 		t.Error("the domain itself should be in scope")
 	}
-	if sc.allows("http://shop.example.com/") {
+	if sc.Allows("http://shop.example.com/") {
 		t.Error("a subdomain must be out of scope without --subdomains")
 	}
 
 	targets[0].Subdomains = true
-	if sc, err = newScope(targets); err != nil {
+	if sc, err = NewScope(targets); err != nil {
 		t.Fatal(err)
 	}
-	if !sc.allows("http://shop.example.com/") {
+	if !sc.Allows("http://shop.example.com/") {
 		t.Error("a subdomain must be in scope with --subdomains")
 	}
-	if sc.allows("http://example.com.evil.test/") {
+	if sc.Allows("http://example.com.evil.test/") {
 		t.Error("a lookalike domain must not match")
 	}
 }
@@ -391,22 +391,22 @@ func TestSubdomainScope(t *testing.T) {
 // A URL target is narrower than a domain target: it keeps the crawl under the
 // seed's own directory.
 func TestURLTargetStaysUnderItsDirectory(t *testing.T) {
-	sc, err := newScope([]store.Target{
+	sc, err := NewScope([]store.Target{
 		{Kind: store.TargetURL, Value: "http://www.example.com/cars/listing.html"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sc.allows("http://www.example.com/cars/other.html") {
+	if !sc.Allows("http://www.example.com/cars/other.html") {
 		t.Error("a sibling under the same directory should be in scope")
 	}
-	if !sc.allows("http://shop.example.com/cars/x") {
+	if !sc.Allows("http://shop.example.com/cars/x") {
 		t.Error("a leading label should be allowed, as the old expression did")
 	}
-	if sc.allows("http://www.example.com/boats/") {
+	if sc.Allows("http://www.example.com/boats/") {
 		t.Error("another directory must be out of scope")
 	}
-	if sc.allows("http://elsewhere.test/cars/") {
+	if sc.Allows("http://elsewhere.test/cars/") {
 		t.Error("another host must be out of scope")
 	}
 }
@@ -414,11 +414,11 @@ func TestURLTargetStaysUnderItsDirectory(t *testing.T) {
 // An entity with no targets is unrestricted rather than closed, which is what
 // the old empty filter list meant.
 func TestAnEmptyScopeAllowsEverything(t *testing.T) {
-	sc, err := newScope(nil)
+	sc, err := NewScope(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sc.allows("http://anything.test/") {
+	if !sc.Allows("http://anything.test/") {
 		t.Error("an empty scope should not close the crawl")
 	}
 }
@@ -441,7 +441,7 @@ func TestScopeHandlesAListRatherThanAHandful(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
-	sc, err := newScope(list)
+	sc, err := NewScope(list)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,10 +451,10 @@ func TestScopeHandlesAListRatherThanAHandful(t *testing.T) {
 	if perTarget > 512 {
 		t.Errorf("%.0f bytes per target; a compiled expression each was about 5000", perTarget)
 	}
-	if !sc.allows("https://site12345.example/news/story") {
+	if !sc.Allows("https://site12345.example/news/story") {
 		t.Error("a target in the list should be in scope")
 	}
-	if sc.allows("https://unrelated.test/news/") {
+	if sc.Allows("https://unrelated.test/news/") {
 		t.Error("a host outside the list should not be")
 	}
 }

@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/rangertaha/scour/internal/bus"
+	"github.com/rangertaha/scour/internal/crawl"
 	"github.com/rangertaha/scour/internal/store"
 )
 
@@ -19,11 +21,38 @@ import (
 type StoreService struct {
 	bus   *bus.Bus
 	store *store.Store
+
+	// scopes caches one scope per entity. Deciding what is in scope belongs
+	// here because this is the process that holds the targets: a crawler in
+	// another process cannot be handed a scope built from a million of them,
+	// so it reports every link it finds and the decision is made once, here.
+	mu     sync.Mutex
+	scopes map[uint]*crawl.Scope
 }
 
 // NewStore returns the store service.
 func NewStore(b *bus.Bus, s *store.Store) *StoreService {
-	return &StoreService{bus: b, store: s}
+	return &StoreService{bus: b, store: s, scopes: map[uint]*crawl.Scope{}}
+}
+
+// scopeFor returns the entity's scope, building it once.
+func (s *StoreService) scopeFor(ctx context.Context, entityID uint) (*crawl.Scope, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sc, ok := s.scopes[entityID]; ok {
+		return sc, nil
+	}
+
+	targets, err := s.store.TargetsFor(ctx, entityID)
+	if err != nil {
+		return nil, err
+	}
+	sc, err := crawl.NewScope(targets)
+	if err != nil {
+		return nil, err
+	}
+	s.scopes[entityID] = sc
+	return sc, nil
 }
 
 // Role implements [Service].
@@ -81,14 +110,28 @@ func (s *StoreService) handleFetched(ctx context.Context, data []byte) error {
 	return nil
 }
 
-// handleDiscovered records one discovered link.
+// handleDiscovered records one discovered link that is inside the entity.
+//
+// The single-process crawler checks the scope itself before queueing, but the
+// bus path never did, so a link to anywhere at all was recorded as discovered
+// for the entity. Doing it here rather than in the crawler is also what lets a
+// crawler stay stateless: it reports every link it saw and needs to know
+// nothing about what the entity covers.
 func (s *StoreService) handleDiscovered(ctx context.Context, data []byte) error {
 	var ev bus.Discovered
 	if err := json.Unmarshal(data, &ev); err != nil {
 		return nil //nolint:nilerr // deliberate: poison message
 	}
 
-	err := s.store.Discovered(ctx, ev.EntityID, ev.URL, ev.ParentURL, ev.Depth, ev.Score)
+	sc, err := s.scopeFor(ctx, ev.EntityID)
+	if err != nil {
+		return fmt.Errorf("scope for entity %d: %w", ev.EntityID, err)
+	}
+	if !sc.Allows(ev.URL) {
+		return nil
+	}
+
+	err = s.store.Discovered(ctx, ev.EntityID, ev.URL, ev.ParentURL, ev.Depth, ev.Score)
 	if err != nil {
 		return fmt.Errorf("store discovered %s: %w", ev.URL, err)
 	}

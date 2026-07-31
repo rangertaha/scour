@@ -10,7 +10,7 @@ import (
 	"github.com/rangertaha/scour/internal/store"
 )
 
-// scope decides whether a URL is inside an entity's targets.
+// Scope decides whether a URL is inside an entity's targets.
 //
 // This used to be a regular expression per target, handed to colly as
 // URLFilters. That is fine for the handful of targets a person types and
@@ -24,7 +24,7 @@ import (
 // Checking a URL walks the labels of its hostname, which is a handful of map
 // lookups whatever the list's length, and the memory is the hostnames
 // themselves rather than an automaton apiece.
-type scope struct {
+type Scope struct {
 	// hosts holds domain targets that do not cover subdomains. The stored key
 	// is the target as given; a leading "www." on the candidate is ignored,
 	// which is what the old expression's (www\.)? did.
@@ -40,9 +40,9 @@ type scope struct {
 	dirs map[string][]string
 }
 
-// newScope builds the scope for a set of targets.
-func newScope(targets []store.Target) (*scope, error) {
-	s := &scope{
+// NewScope builds the scope for a set of targets.
+func NewScope(targets []store.Target) (*Scope, error) {
+	s := &Scope{
 		hosts: make(map[string]bool),
 		trees: make(map[string]bool),
 		dirs:  make(map[string][]string),
@@ -89,12 +89,12 @@ func newScope(targets []store.Target) (*scope, error) {
 
 // empty reports whether the scope names nothing, in which case the crawl is
 // unrestricted rather than closed.
-func (s *scope) empty() bool {
+func (s *Scope) empty() bool {
 	return len(s.hosts) == 0 && len(s.trees) == 0 && len(s.dirs) == 0
 }
 
-// allows reports whether a URL is inside the scope.
-func (s *scope) allows(rawURL string) bool {
+// Allows reports whether a URL is inside the scope.
+func (s *Scope) Allows(rawURL string) bool {
 	if s.empty() {
 		return true
 	}

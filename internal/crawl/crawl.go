@@ -152,7 +152,7 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 	// Scope is enforced on the way into the queue rather than by colly's
 	// URLFilters, which is a linear scan of one compiled expression per target.
 	// See scope for what that cost on a real list.
-	sc, err := newScope(opts.Targets)
+	sc, err := NewScope(opts.Targets)
 	if err != nil {
 		return nil, err
 	}
@@ -408,7 +408,7 @@ const (
 )
 
 // register wires the callbacks. This is the whole integration with colly.
-func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pending *crawlqueue.Storage, sc *scope, opts Options, st *state) {
+func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pending *crawlqueue.Storage, sc *Scope, opts Options, st *state) {
 	entityID := opts.Entity.ID
 
 	// Attach the timing and lineage this request will be recorded with, and
@@ -646,13 +646,13 @@ const seedBatch = 500
 // entirely, and is safe because every call happens inside an active request:
 // the loop only terminates when the queue is empty and nothing is in flight,
 // and this row lands before that request reports itself complete.
-func enqueue(pending *crawlqueue.Storage, sc *scope, r *colly.Request) error {
+func enqueue(pending *crawlqueue.Storage, sc *Scope, r *colly.Request) error {
 	// Out-of-scope links are dropped here rather than filtered on the way out.
 	// colly checks its URLFilters when a request is dequeued, so a link that
 	// was never going to be fetched would still be stored, scored and read
 	// back first. Refusing it at the door keeps the frontier to pages the
 	// crawl might actually visit.
-	if !sc.allows(r.URL.String()) {
+	if !sc.Allows(r.URL.String()) {
 		return nil
 	}
 	data, err := r.Marshal()
