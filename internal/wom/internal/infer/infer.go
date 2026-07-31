@@ -10,6 +10,7 @@ import (
 	"context"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/rangertaha/scour/internal/wom/internal/graph"
 	"github.com/rangertaha/scour/internal/wom/internal/match"
@@ -132,7 +133,20 @@ const maxValueLength = 4096
 // isCandidateValue reports whether a node could hold a field's value.
 func isCandidateValue(n *graph.Node) bool {
 	text := n.Text()
-	return text != "" && len(text) <= maxValueLength && !isProgram(n)
+	return text != "" && len(text) <= maxValueLength && !isProgram(n) && !isNamespace(n)
+}
+
+// isNamespace reports whether a node is an XML namespace declaration.
+//
+// A namespace is machinery, not data, and it competes with the value it
+// annotates on equal terms. Every <dc:creator> in a feed carries an xmlns node
+// holding "http://purl.org/dc/elements/1.1/", and because a namespaced element
+// lends its name to everything inside it, that URI is labelled "creator" just as
+// the byline is. The two scored identically for `author` on the Guardian's feed,
+// and the attribute won the tie on nothing better than sorting before text().
+func isNamespace(n *graph.Node) bool {
+	return n.Kind == graph.KindAttribute &&
+		(n.Name == "xmlns" || strings.HasPrefix(n.Name, "xmlns:"))
 }
 
 // isProgram reports whether a node is the source text of a script or a
@@ -631,7 +645,17 @@ func (e *Engine) scoreContainers(ctx context.Context, fields []schema.Prop, cont
 	perRegion := make([][]*graph.Node, 0, len(containers))
 	regions := make([][][]float64, 0, len(containers))
 	for _, c := range containers {
-		leaves := graph.ValueNodes(c)
+		// The same filter as the first pass. Without it the second pass sees
+		// nodes the first one ruled out, so a namespace declaration or an inline
+		// script can win a field it was never eligible for: the Guardian's
+		// author came back as the xmlns on <dc:creator> rather than the byline
+		// beside it.
+		leaves := make([]*graph.Node, 0, 16)
+		for _, n := range graph.ValueNodes(c) {
+			if isCandidateValue(n) {
+				leaves = append(leaves, n)
+			}
+		}
 		if len(leaves) == 0 {
 			continue
 		}

@@ -5,6 +5,8 @@ package wom_test
 import (
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/rangertaha/scour/internal/wom"
@@ -236,4 +238,63 @@ func TestAChannelOnlyFieldDoesNotWidenTheRecord(t *testing.T) {
 	if got := countRecords(t, feedWithChannelDate, prop); got != 3 {
 		t.Errorf("extracted %d records, want 3 (a channel-level date widened the container)", got)
 	}
+}
+
+// fieldValues extracts body and returns, per field name, the distinct values.
+func fieldValues(t *testing.T, body string, prop wom.Prop) map[string][]string {
+	t.Helper()
+	w := wom.New()
+	if err := w.AddBody("https://example.com/feed/", "application/rss+xml", []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	model, err := w.Model(prop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string][]string{}
+	for _, rec := range model.Extract(w) {
+		for _, f := range rec.Items {
+			if f.Value != "" {
+				out[f.Name] = append(out[f.Name], f.Value)
+			}
+		}
+	}
+	return out
+}
+
+// A namespace declaration is machinery, not data, and it used to beat the value
+// it annotates. The parser hangs an xmlns node holding
+// "http://purl.org/dc/elements/1.1/" off every <dc:creator>, and since a
+// namespaced element lends its name to what is inside it, that URI is labelled
+// "creator" exactly as the byline is. The two scored the same and the attribute
+// won the tie by sorting before text().
+func TestANamespaceIsNotAByline(t *testing.T) {
+	prop := wom.Prop{Name: "article", Props: []wom.Prop{
+		{Name: "title"},
+		{Name: "author", Aliases: []string{"creator", "byline"}},
+		{Name: "published", Aliases: []string{"pubdate"}, Type: wom.TypeDate},
+		{Name: "summary", Aliases: []string{"description"}},
+	}}
+
+	got := fieldValues(t, feed, prop)
+	if len(got["author"]) == 0 {
+		t.Fatalf("no author extracted; got fields %v", keysOf(got))
+	}
+	for _, v := range got["author"] {
+		if strings.Contains(v, "://") {
+			t.Errorf("author came back as a namespace URI: %q", v)
+		}
+	}
+	if got["author"][0] != "Jane Doe" {
+		t.Errorf("author = %q, want %q", got["author"][0], "Jane Doe")
+	}
+}
+
+func keysOf(m map[string][]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
