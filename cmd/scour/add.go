@@ -52,7 +52,8 @@ func newAddCmd(a *app) *cobra.Command {
 	fl.StringArrayVar(&f.types, "type", nil, "restrict crawls to a content type (repeatable)")
 	fl.StringVar(&f.template, "template", "", "start from a built-in schema: see scour list templates")
 	fl.StringVarP(&f.prop, "prop", "p", "", "add a property")
-	fl.StringVar(&f.propType, "prop-type", "", "the property's type: string, number, date")
+	fl.StringVar(&f.propType, "prop-type", "",
+		"the property's type: string, number, bool, date, url, email (date covers times)")
 	fl.StringVarP(&f.example, "example", "e", "", "an example value for the property")
 	fl.BoolVar(&f.subdomains, "subdomains", false, "follow subdomains of the added domains")
 	fl.IntVar(&f.depth, "depth", 0, "depth limit for the added targets (0 for the configured default)")
