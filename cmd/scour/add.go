@@ -192,7 +192,13 @@ func runAdd(cmd *cobra.Command, a *app, name string, f addFlags) error {
 	}
 
 	if len(changes) == 0 {
-		cmd.Printf("entity %s\n", entity.Name)
+		// The entity exists now, which is worth saying, but on its own it can
+		// do nothing: it has no targets to crawl and no properties to look for.
+		// Naming it and stopping tells someone their command worked when what
+		// it did was leave them exactly where they were.
+		cmd.Printf("entity %s: nothing added yet, so there is nothing to crawl\n\n", entity.Name)
+		cmd.Printf("Add what to look for, and where to look:\n%s\n\n", cmd.Example)
+		cmd.Printf("Then: scour crawl %s\nSee also: scour add --help\n", entity.Name)
 		return nil
 	}
 	for _, change := range changes {

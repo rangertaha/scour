@@ -243,3 +243,30 @@ func TestTaughtRegexMustCompile(t *testing.T) {
 		t.Error("--regex without --prop should be rejected")
 	}
 }
+
+// An entity with nothing in it can do nothing: no targets to crawl, no
+// properties to look for. Naming it and stopping told someone their command had
+// worked when what it did was leave them where they were.
+func TestAddingNothingSaysWhatToAdd(t *testing.T) {
+	dir := t.TempDir()
+	out := runOK(t, dir, "add", "thing")
+
+	for _, want := range []string{"nothing added yet", "scour crawl thing", "--help"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output does not mention %q:\n%s", want, out)
+		}
+	}
+	// The examples are the useful part, so they have to actually be there.
+	if !strings.Contains(out, "-p make -e Ford") {
+		t.Errorf("no examples shown:\n%s", out)
+	}
+
+	// Once it has something, the report is the change and nothing else.
+	added := runOK(t, dir, "add", "thing", "-p", "make", "-e", "Ford")
+	if strings.Contains(added, "nothing added yet") {
+		t.Errorf("still nagging after a property was added:\n%s", added)
+	}
+	if !strings.Contains(added, "property make") {
+		t.Errorf("output = %s", added)
+	}
+}
