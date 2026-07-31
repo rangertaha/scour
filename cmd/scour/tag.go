@@ -148,7 +148,7 @@ func runTag(c context.Context, a *app, name string, f tagFlags) error {
 	if len(f.append) == 0 && len(f.delete) == 0 && len(f.update) == 0 {
 		if len(words) == 0 {
 			a.Printf("%s: %s%s has no tags yet\n\n", entity.Name, f.prop, where)
-			a.Printf("Teach it what a page might call it:\n  scour tag %s -p %s --append byline\n",
+			a.Printf("Teach it what a page might call it:\n  scour tag %s -p %s --append '<word>'\n",
 				entity.Name, f.prop)
 			return nil
 		}

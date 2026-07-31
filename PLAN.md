@@ -149,7 +149,7 @@ shape before it has settled. The one exception is the module's own tooling
 a test that does not shell out.
 
 ```
-cmd/scour/              cobra commands, one file per verb
+cmd/scour/              urfave/cli commands, one file per verb
 internal/wom/           the document engine: graph, parse, match, seq, infer, model
 internal/config/        config.toml, env, flag precedence
 internal/bus/           embedded NATS, JetStream setup, subjects, codecs
@@ -383,7 +383,7 @@ Each is independently useful and independently demoable.
 
 M1 and M2 are done. Everything from M2.5 on is still ahead.
 
-**M1. Skeleton.** *(done)* go.mod, cobra CLI, config precedence, gorm store on sqlite,
+**M1. Skeleton.** *(done)* go.mod, CLI, config precedence, gorm store on sqlite,
 `scour add`, `scour list`, `scour remove`. No crawling. Proves the config and
 storage layers.
 
@@ -408,15 +408,15 @@ than aborting requests: colly marks a request visited *before* the callback that
 would abort it, so aborting burns the URL and makes the stop unresumable.
 
 **M3. wom integration.** *(done)* Parse with wom, `scour train` via
-`w.Model(schema...)`, `scour rules`, `scour search`, `scour valid`/`invalid`/
-`unlabel`, `model.Train` on labelled items. The README's core loop now works end
+`w.Model(schema...)`, `scour rules`, `scour search`, `scour invalid`,
+`model.Train` on labelled items. The README's core loop now works end
 to end.
 
 Two things learned. wom's `SynthesizeURI` dropped the trailing slash from
 directory-style URLs, so induced locators matched none of the pages they came
 from and extraction returned nothing; fixed in `internal/pattern/regex.go` and
 covered by a test. And records are reconciled by
-fingerprint rather than replaced, because `scour valid <id>` is given ids a user
+fingerprint rather than replaced, because labelling is given ids a user
 read off a search: renumbering them on every retrain would label the wrong rows.
 
 **M4. Real scoring.** *(done)* Naive bayes over URL, anchor and depth tokens,
@@ -907,7 +907,7 @@ Mirrors what `wom` already does, so the two repos feel like one codebase.
 
 - Standard library first. A dependency needs a reason that survives the question
   "what happens when this is unmaintained in two years".
-- Current set: colly, gorm, nats-server and nats.go, chromedp, cobra, and the
+- Current set: colly, gorm, nats-server and nats.go, chromedp, urfave/cli, and the
   Anthropic SDK behind the LLM matcher. `internal/wom` is scour's own code, so
   what it needs is a direct dependency like any other: `ledongthuc/pdf`,
   `tdewolff/parse/v2`, `golang.org/x/net`. Everything else needs an argument.

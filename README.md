@@ -181,6 +181,27 @@ scour add vehicle -p price -e '$42,000'
 Declaring properties a site does not publish is fine. They simply go unfilled,
 and the fields that are present are still found.
 
+Teach a property the other words a page might label it with. `scour add -a` only
+ever adds one; `scour tag` shows the set and edits it:
+
+```
+scour tag vehicle -p make
+scour tag vehicle -p make --append manufacturer --append 'built by'
+scour tag vehicle -p make --delete brand
+scour tag vehicle -p make --update make --update marque
+```
+
+Each flag carries one word and repeats, because a word is often a phrase:
+`'pickup truck'`, `'model year'`, `'asking price'`. Splitting one argument on
+spaces would eventually cut one of those in half.
+
+Scope it to a site with `--on`, so what one publisher calls a byline does not
+overwrite what the next one calls it:
+
+```
+scour tag news -p author --on example.com --append 'staff writer'
+```
+
 Then crawl, following links up to a given depth. Discovered URLs come back
 ranked by probability. On the first run there is no trained model yet, so scour
 scores links from the aliases and property examples alone; every later crawl
@@ -343,14 +364,24 @@ scour search vehicle --exclude-type pdf --limit 50
 already belong to one of your own properties, as it does above.
 
 Record 1088 is a false positive: scour read prose off the page as if it were a
-spec table. Label what is right and what is wrong, then retrain. Every label
-sharpens both the scoring model and the extraction rules, so the next crawl
-makes fewer of the same mistakes:
+spec table. Mark it wrong and retrain. A wrong record is held out of the next
+training run, so both the scoring model and the extraction rules stop making
+that mistake:
 
 ```
-scour valid vehicle 1042 1043
 scour invalid vehicle 1088
 scour train vehicle
+```
+
+The command line marks records wrong and not right. Marking one right is not
+merely a note: at least one confirmed record is what tells `scour train` to fit
+the field-order chain, so a run with none keeps the induced locators and trains
+nothing else. That verdict is currently reachable only through the HTTP API and
+the MCP server, both of which accept `valid`, `invalid` and `unlabelled`:
+
+```
+curl -X POST http://localhost:8080/v1/entities/vehicle/records/1042/label \
+  -H 'Content-Type: application/json' -d '{"label":"valid"}'
 ```
 
 Check on a crawl in progress, or on where one left off. Crawls resume from the
@@ -397,6 +428,10 @@ output, and `--limit <n>` to cap the rows returned.
 | `scour add <name> -u <url>` | Add a single URL as a crawl target |
 | `scour add <name> -p <prop> -e <example>` | Add a property with an example value |
 | `scour add <name> --type <type>` | Restrict this entity's crawls to a content type |
+| `scour tag <name> -p <prop>` | List the words a property might be labelled with |
+| `scour tag <name> -p <prop> -a <word>` | Add a word (repeatable) |
+| `scour tag <name> -p <prop> -d <word>` | Remove a word (repeatable) |
+| `scour tag <name> -p <prop> -u <word>` | Replace the whole set (repeatable) |
 | `scour import <name> --urls <file>` | Load URLs from a file, one per line |
 | `scour import <name> --domains <file>` | Load domains from a file, one per line |
 | `scour import <name> --props <file>` | Load properties and examples from a CSV |
@@ -410,7 +445,6 @@ output, and `--limit <n>` to cap the rows returned.
 | `scour search <name> --confidence <p>` | Search extracted records at or above a confidence |
 | `scour search <name> --type <type>` | Search only records extracted from a content type |
 | `scour search <name> --exclude-type <type>` | Search everything except a content type |
-| `scour valid <name> <id>...` | Label records as correct |
 | `scour invalid <name> <id>...` | Label records as wrong |
 | `scour top` | Watch every entity live, and start, stop or train one |
 | `scour start <name>` | Let an entity be crawled again |
@@ -423,7 +457,8 @@ output, and `--limit <n>` to cap the rows returned.
 | `scour mcp` | Run as an MCP server over stdio |
 | `scour server --listen <addr>` | Run as a service, serving the HTTP API and MCP |
 
-`--depth` has no short form, because `-d` already means domain.
+`--depth` has no short form, because `-d` already means domain. On `scour tag`,
+`-d` means `--delete` and a domain is given with `--on`.
 
 ### Exporting
 
