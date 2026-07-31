@@ -33,6 +33,11 @@ type Storage struct {
 	// score, so this package stays free of scoring logic.
 	scoreOf func(data []byte) float64
 
+	// refill adds more seeds when the queue runs dry, returning how many it
+	// added. It is set by the crawler, which is the only part that knows what
+	// the seeds are.
+	refill func() int
+
 	mu     sync.Mutex
 	frozen atomic.Bool
 }
@@ -49,6 +54,28 @@ func (s *Storage) SetScorer(f func(data []byte) float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.scoreOf = f
+}
+
+// SetRefill installs the function consulted when the queue is empty.
+//
+// Seeds are queued a batch at a time rather than all at once, so an empty queue
+// does not necessarily mean an exhausted crawl: it may only mean the next batch
+// has not been asked for yet.
+func (s *Storage) SetRefill(f func() int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refill = f
+}
+
+// topUp adds the next batch of seeds, returning how many were added.
+func (s *Storage) topUp() int {
+	s.mu.Lock()
+	f := s.refill
+	s.mu.Unlock()
+	if f == nil {
+		return 0
+	}
+	return f()
 }
 
 // Init implements colly's queue.Storage. The schema comes from the store's
@@ -92,6 +119,10 @@ func (s *Storage) GetRequest() ([]byte, error) {
 		return nil, store.ErrQueueEmpty
 	}
 	data, err := s.store.PopQueue(s.ctx, s.entityID)
+	if errors.Is(err, store.ErrQueueEmpty) && s.topUp() > 0 {
+		// Empty only meant the next batch of seeds had not been queued yet.
+		data, err = s.store.PopQueue(s.ctx, s.entityID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +135,16 @@ func (s *Storage) QueueSize() (int, error) {
 	if s.frozen.Load() {
 		return 0, nil
 	}
-	return s.store.QueueSize(s.ctx, s.entityID)
+	n, err := s.store.QueueSize(s.ctx, s.entityID)
+	if err != nil || n > 0 {
+		return n, err
+	}
+	// colly stops its loop when the queue reports empty, so an empty queue with
+	// seeds still unqueued has to top up here too, not only on the read.
+	if s.topUp() > 0 {
+		return s.store.QueueSize(s.ctx, s.entityID)
+	}
+	return 0, nil
 }
 
 // IsEmpty reports whether the queue has been drained, distinguishing that from

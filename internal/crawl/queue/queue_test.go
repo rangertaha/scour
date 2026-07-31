@@ -183,3 +183,71 @@ func TestEntitiesHaveSeparateQueues(t *testing.T) {
 		t.Errorf("err = %v, want the other entity's queue to be empty", err)
 	}
 }
+
+// Seeds are queued a batch at a time, so an empty queue does not mean an
+// exhausted crawl: it may only mean the next batch has not been asked for.
+// A list of a million targets wrote a 660MB write-ahead log and fetched nothing
+// before this, because every seed was queued before the first request went out.
+func TestAnEmptyQueueAsksForMoreSeeds(t *testing.T) {
+	s, _, _ := harness(t)
+
+	var calls, left int
+	left = 3
+	s.SetRefill(func() int {
+		calls++
+		if left == 0 {
+			return 0
+		}
+		left--
+		if err := s.AddRequest([]byte("seed")); err != nil {
+			t.Errorf("AddRequest: %v", err)
+		}
+		return 1
+	})
+
+	// Each read drains the queue and asks for the next seed.
+	for i := range 3 {
+		data, err := s.GetRequest()
+		if err != nil {
+			t.Fatalf("read %d: %v", i, err)
+		}
+		if string(data) != "seed" {
+			t.Fatalf("read %d = %q", i, data)
+		}
+	}
+
+	// Once the seeds run out the queue is genuinely empty and says so, rather
+	// than looping forever asking for more.
+	if _, err := s.GetRequest(); !errors.Is(err, store.ErrQueueEmpty) {
+		t.Errorf("err = %v, want ErrQueueEmpty once the seeds are exhausted", err)
+	}
+	if calls == 0 {
+		t.Error("the refill was never consulted")
+	}
+}
+
+// colly stops its loop on an empty queue, so the size has to top up too, not
+// only the read.
+func TestQueueSizeAsksForMoreSeeds(t *testing.T) {
+	s, _, _ := harness(t)
+
+	asked := false
+	s.SetRefill(func() int {
+		if asked {
+			return 0
+		}
+		asked = true
+		if err := s.AddRequest([]byte("seed")); err != nil {
+			t.Errorf("AddRequest: %v", err)
+		}
+		return 1
+	})
+
+	n, err := s.QueueSize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("QueueSize = %d, want 1 after topping up", n)
+	}
+}

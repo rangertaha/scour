@@ -539,6 +539,11 @@ pool      = 2                        # tabs rendering at once
 timeout   = "45s"                    # per render, not per request
 exec_path = ""                       # browser binary; empty means find one
 
+[bus]
+url       = ""                       # NATS server; empty runs an embedded one in-process
+store_dir = ""                       # where the embedded broker keeps JetStream data;
+                                     # empty keeps streams in memory
+
 [model]
 scorer    = "bayes"                  # URL scoring: bayes or embed
 vectors   = ""                       # word vectors, for the embed scorer

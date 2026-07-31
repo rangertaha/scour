@@ -187,26 +187,43 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 
 	c.register(ctx, collector, pending, sc, opts, st)
 
+	// Seeds go in a batch at a time, topped up as the frontier drains, rather
+	// than all at once. A list of a million targets wrote a 660MB write-ahead
+	// log before fetching anything, and the crawl had to be killed having
+	// fetched nothing at all: every seed was queued before the first request
+	// went out. Nothing needs them queued in advance, since at most --max-pages
+	// of them will ever be read.
+	seeds := seedURLs(opts.Targets)
+	pending.SetRefill(func() int {
+		n := 0
+		for len(seeds) > 0 && n < seedBatch {
+			seed := seeds[0]
+			seeds = seeds[1:]
+			// Depth 1, matching what Collector.Visit would have used, so
+			// --depth keeps meaning the same number of levels it did before
+			// the queue.
+			u, err := url.Parse(seed)
+			if err != nil {
+				slog.Warn("seed not queued", "url", seed, "err", err)
+				continue
+			}
+			req := &colly.Request{
+				URL:     u,
+				Method:  "GET",
+				Depth:   1,
+				Headers: &http.Header{},
+				Ctx:     colly.NewContext(),
+			}
+			if err := enqueue(pending, sc, req); err != nil {
+				slog.Warn("seed not queued", "url", seed, "err", err)
+				continue
+			}
+			n++
+		}
+		return n
+	})
+
 	start := time.Now()
-	for _, seed := range seedURLs(opts.Targets) {
-		// Depth 1, matching what Collector.Visit would have used, so --depth
-		// keeps meaning the same number of levels it did before the queue.
-		u, err := url.Parse(seed)
-		if err != nil {
-			slog.Warn("seed not queued", "url", seed, "err", err)
-			continue
-		}
-		req := &colly.Request{
-			URL:     u,
-			Method:  "GET",
-			Depth:   1,
-			Headers: &http.Header{},
-			Ctx:     colly.NewContext(),
-		}
-		if err := enqueue(pending, sc, req); err != nil {
-			slog.Warn("seed not queued", "url", seed, "err", err)
-		}
-	}
 	if err := q.Run(collector); err != nil && !errors.Is(err, store.ErrQueueEmpty) {
 		return nil, fmt.Errorf("run queue: %w", err)
 	}
@@ -613,6 +630,13 @@ func queuedScore(data []byte) float64 {
 	}
 	return v
 }
+
+// seedBatch is how many targets are queued at once.
+//
+// Large enough that topping up is rare and the queue always has work for every
+// thread, small enough that a list of a million targets does not become a
+// million rows before the first fetch.
+const seedBatch = 500
 
 // enqueue writes a request straight to the queue storage.
 //

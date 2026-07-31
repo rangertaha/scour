@@ -68,7 +68,7 @@ func (a *app) busCrawler(ctx context.Context, crawler *crawl.Crawler, entity str
 }
 
 func newRunCmd(a *app) *cobra.Command {
-	var roles string
+	var roles, busURL string
 
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -87,6 +87,15 @@ func newRunCmd(a *app) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&roles, "role", "", "components to run: store, crawl, or all (default all)")
+	cmd.Flags().StringVar(&busURL, "bus-url", "",
+		"NATS server to use instead of the embedded one (default from [bus] url in the config)")
+	// The flag was advertised in the help and the examples before it existed,
+	// so the documented command failed with "unknown flag".
+	cmd.PreRun = func(*cobra.Command, []string) {
+		if busURL != "" {
+			a.cfg.Bus.URL = busURL
+		}
+	}
 	return cmd
 }
 
