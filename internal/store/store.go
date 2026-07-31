@@ -59,6 +59,12 @@ func Open(dsn string) (*Store, error) {
 	if err := db.Exec("PRAGMA journal_mode = WAL").Error; err != nil {
 		return nil, fmt.Errorf("enable write-ahead logging: %w", err)
 	}
+	// Without this a writer that finds the lock held fails immediately rather
+	// than waiting, so reading the status of a running crawl is a coin toss.
+	// WAL lets readers through regardless; this is for the writes.
+	if err := db.Exec("PRAGMA busy_timeout = 10000").Error; err != nil {
+		return nil, fmt.Errorf("set busy timeout: %w", err)
+	}
 
 	if err := limitPool(db); err != nil {
 		return nil, err
@@ -147,6 +153,24 @@ func (s *Store) settleDomains() error {
 	// A database that has never had the column, or has never had the table,
 	// has nothing to repair.
 	if !s.db.Migrator().HasTable(&Property{}) || !s.db.Migrator().HasColumn(&Property{}, "domain") {
+		return nil
+	}
+
+	// Whether there is anything to repair is a read, and almost always the
+	// answer is no. Opening a write transaction to find that out made every
+	// command take the write lock, so `scour status` during a crawl failed with
+	// SQLITE_BUSY: a repair that runs once was costing every open afterwards.
+	var pending int64
+	err := s.db.Raw(`
+		SELECT COUNT(*) FROM properties WHERE domain IS NULL
+		   OR id IN (
+		      SELECT MAX(id) FROM properties
+		      GROUP BY entity_id, name, COALESCE(domain, '')
+		      HAVING COUNT(*) > 1)`).Scan(&pending).Error
+	if err != nil {
+		return fmt.Errorf("check for property domains to settle: %w", err)
+	}
+	if pending == 0 {
 		return nil
 	}
 
