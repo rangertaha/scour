@@ -29,11 +29,35 @@ type Alias struct {
 // Property is an attribute an entity should have. Example is a sample value,
 // which is what lets induction recognise other values of the same kind.
 type Property struct {
-	ID       uint   `gorm:"primaryKey"`
-	EntityID uint   `gorm:"uniqueIndex:idx_prop_entity_name;not null"`
-	Name     string `gorm:"uniqueIndex:idx_prop_entity_name;not null"`
-	Type     string
-	Example  string
+	ID       uint `gorm:"primaryKey"`
+	EntityID uint `gorm:"uniqueIndex:idx_prop_entity_name;not null"`
+	// Domain scopes the property to one site. Empty is the entity's default,
+	// which every site starts from.
+	//
+	// A schema describes what is wanted; a site describes how it says it. Those
+	// are not the same thing, and one example cannot serve both: teaching that
+	// the byline on one paper reads "Hannah McLeod" says nothing about the next
+	// paper, and stored entity-wide it would overwrite what the last site
+	// taught. So a taught example belongs to the site it was taught on.
+	Domain  string `gorm:"uniqueIndex:idx_prop_entity_name"`
+	Name    string `gorm:"uniqueIndex:idx_prop_entity_name;not null"`
+	Type    string
+	Example string
+	// Regex extracts the value from the text at the located node, overriding
+	// the one induction would have synthesized.
+	//
+	// Locating a value and having the right value are different problems, and
+	// the second is not always solvable by locating better. og:title is the
+	// most reliable headline on the web and it reads "Sylva denies pride
+	// parade, festival still a go -", separator included, because the site
+	// appends its own name. No choice of node fixes that; only a transform
+	// does.
+	//
+	// Capture group one is the value, or the whole match when the pattern has
+	// no group, and text the pattern rejects is not extracted at all. That is
+	// the same contract induction already uses, so a taught pattern and a
+	// synthesized one are interchangeable.
+	Regex string
 	// Description says what the field means, in words a page might also use.
 	// The matcher scores description overlap, so this is not documentation:
 	// it is training data.

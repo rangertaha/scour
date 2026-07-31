@@ -300,3 +300,95 @@ func TestEntitiesCountsMatches(t *testing.T) {
 		t.Errorf("row 1 = %+v", rows[1])
 	}
 }
+
+// Teaching is an override, not an addition: a site that names a field unusually
+// changes what the field means there and nowhere else.
+func TestPropertiesForResolvesPerDomain(t *testing.T) {
+	s, ctx := open(t), context.Background()
+	e, err := s.CreateEntity(ctx, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The entity's default schema.
+	if err := s.AddPropertyDetail(ctx, e.ID, "", "author", "string", "Jane Doe", "who wrote it", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddPropertyDetail(ctx, e.ID, "", "title", "string", "A headline", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddPropertyAlias(ctx, e.ID, "", "author", "byline"); err != nil {
+		t.Fatal(err)
+	}
+
+	// What one site taught.
+	if err := s.AddPropertyDetail(ctx, e.ID, "example.com", "author", "string",
+		"Hannah McLeod", "", `^By (.*)$`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddPropertyAlias(ctx, e.ID, "example.com", "author", "vcard"); err != nil {
+		t.Fatal(err)
+	}
+
+	taught, err := s.PropertiesFor(ctx, e.ID, "https://www.example.com/some/page")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]Property{}
+	for _, p := range taught {
+		byName[p.Name] = p
+	}
+	if len(taught) != 2 {
+		t.Fatalf("got %d properties, want 2 (the default plus the override)", len(taught))
+	}
+	if got := byName["author"].Example; got != "Hannah McLeod" {
+		t.Errorf("author example = %q, want the taught one", got)
+	}
+	if got := byName["author"].Regex; got != `^By (.*)$` {
+		t.Errorf("author regex = %q, want the taught one", got)
+	}
+	if got := byName["title"].Example; got != "A headline" {
+		t.Errorf("title example = %q, want the entity default", got)
+	}
+
+	// An untaught site keeps the defaults untouched.
+	other, err := s.PropertiesFor(ctx, e.ID, "other.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range other {
+		if p.Name == "author" && p.Example != "Jane Doe" {
+			t.Errorf("teaching one site changed another: author example = %q", p.Example)
+		}
+	}
+}
+
+// The teaching and the crawl target have to agree on what a domain is, or the
+// teaching silently applies to nothing.
+func TestNormaliseDomain(t *testing.T) {
+	for in, want := range map[string]string{
+		"example.com":               "example.com",
+		"www.example.com":           "example.com",
+		"https://example.com/":      "example.com",
+		"https://www.example.com/a": "example.com",
+		"EXAMPLE.com":               "example.com",
+		"example.com:8080":          "example.com",
+		"":                          "",
+	} {
+		if got := NormaliseDomain(in); got != want {
+			t.Errorf("NormaliseDomain(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A pattern that does not compile must be refused when it is taught.
+func TestTaughtRegexIsValidated(t *testing.T) {
+	s, ctx := open(t), context.Background()
+	e, err := s.CreateEntity(ctx, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddPropertyDetail(ctx, e.ID, "", "title", "", "", "", "^(unclosed"); err == nil {
+		t.Error("an invalid regex should be rejected")
+	}
+}

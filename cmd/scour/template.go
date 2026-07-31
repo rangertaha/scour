@@ -45,11 +45,11 @@ func applyTemplate(ctx context.Context, s *store.Store, entityID uint, name stri
 			example = p.Examples[0]
 		}
 
-		if err := s.AddPropertyDetail(ctx, entityID, p.Name, string(p.Type), example, p.Description); err != nil {
+		if err := s.AddPropertyDetail(ctx, entityID, "", p.Name, string(p.Type), example, p.Description, ""); err != nil {
 			return nil, err
 		}
 		for _, alias := range p.Aliases {
-			if err := s.AddPropertyAlias(ctx, entityID, p.Name, alias); err != nil {
+			if err := s.AddPropertyAlias(ctx, entityID, "", p.Name, alias); err != nil {
 				return nil, err
 			}
 		}

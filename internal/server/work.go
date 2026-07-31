@@ -211,11 +211,11 @@ func applyTemplate(ctx context.Context, s *store.Store, entityID uint, name stri
 		if len(p.Examples) > 0 {
 			example = p.Examples[0]
 		}
-		if err := s.AddPropertyDetail(ctx, entityID, p.Name, string(p.Type), example, p.Description); err != nil {
+		if err := s.AddPropertyDetail(ctx, entityID, "", p.Name, string(p.Type), example, p.Description, ""); err != nil {
 			return err
 		}
 		for _, alias := range p.Aliases {
-			if err := s.AddPropertyAlias(ctx, entityID, p.Name, strings.TrimSpace(alias)); err != nil {
+			if err := s.AddPropertyAlias(ctx, entityID, "", p.Name, strings.TrimSpace(alias)); err != nil {
 				return err
 			}
 		}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"gorm.io/gorm"
@@ -150,7 +151,7 @@ func (s *Store) AddAlias(ctx context.Context, entityID uint, word string) error 
 // already exists updates the example, so correcting one is a repeat of the
 // original command.
 func (s *Store) AddProperty(ctx context.Context, entityID uint, name, typ, example string) error {
-	return s.AddPropertyDetail(ctx, entityID, name, typ, example, "")
+	return s.AddPropertyDetail(ctx, entityID, "", name, typ, example, "", "")
 }
 
 // AddPropertyDetail records a property along with what it means.
@@ -158,13 +159,25 @@ func (s *Store) AddProperty(ctx context.Context, entityID uint, name, typ, examp
 // The description is not documentation. The matcher scores how far a page's
 // label context overlaps a property's description, so the words chosen here
 // are read by the model that locates the field.
-func (s *Store) AddPropertyDetail(ctx context.Context, entityID uint, name, typ, example, description string) error {
+func (s *Store) AddPropertyDetail(ctx context.Context, entityID uint, domain, name, typ, example, description, regex string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return errors.New("property name must not be empty")
 	}
+	domain = NormaliseDomain(domain)
+
+	// A pattern that does not compile must fail here rather than at extraction,
+	// where it would look like a site that stopped publishing the field.
+	if regex != "" {
+		if _, err := regexp.Compile(regex); err != nil {
+			return fmt.Errorf("property %q regex: %w", name, err)
+		}
+	}
 
 	update := []string{"type", "example"}
+	if regex != "" {
+		update = append(update, "regex")
+	}
 	if description != "" {
 		// An empty description must not blank one already recorded: adding an
 		// example to a templated property should not cost it its meaning.
@@ -173,12 +186,12 @@ func (s *Store) AddPropertyDetail(ctx context.Context, entityID uint, name, typ,
 
 	err := s.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "entity_id"}, {Name: "name"}},
+			Columns:   []clause.Column{{Name: "entity_id"}, {Name: "domain"}, {Name: "name"}},
 			DoUpdates: clause.AssignmentColumns(update),
 		}).
 		Create(&Property{
-			EntityID: entityID, Name: name, Type: typ,
-			Example: example, Description: description,
+			EntityID: entityID, Domain: domain, Name: name, Type: typ,
+			Example: example, Description: description, Regex: regex,
 		}).Error
 	if err != nil {
 		return fmt.Errorf("add property %q: %w", name, err)
@@ -187,16 +200,29 @@ func (s *Store) AddPropertyDetail(ctx context.Context, entityID uint, name, typ,
 }
 
 // AddPropertyAlias records another word a page might label a property with.
-func (s *Store) AddPropertyAlias(ctx context.Context, entityID uint, propName, word string) error {
+func (s *Store) AddPropertyAlias(ctx context.Context, entityID uint, domain, propName, word string) error {
 	word = strings.TrimSpace(word)
 	if word == "" {
 		return errors.New("property alias must not be empty")
 	}
+	domain = NormaliseDomain(domain)
 
+	// An alias hangs off the property row, so a domain-scoped alias needs the
+	// domain-scoped row to exist first. Teaching a word without having taught
+	// an example is the ordinary case, so the row is created rather than
+	// demanded.
 	var prop Property
 	err := s.db.WithContext(ctx).
-		Where("entity_id = ? AND name = ?", entityID, strings.TrimSpace(propName)).
+		Where("entity_id = ? AND domain = ? AND name = ?", entityID, domain, strings.TrimSpace(propName)).
 		First(&prop).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) && domain != "" {
+		if err = s.AddPropertyDetail(ctx, entityID, domain, propName, "", "", "", ""); err != nil {
+			return err
+		}
+		err = s.db.WithContext(ctx).
+			Where("entity_id = ? AND domain = ? AND name = ?", entityID, domain, strings.TrimSpace(propName)).
+			First(&prop).Error
+	}
 	if err != nil {
 		return fmt.Errorf("find property %q: %w", propName, err)
 	}
@@ -260,7 +286,7 @@ func (s *Store) DeleteTarget(ctx context.Context, entityID uint, value string) e
 	return nil
 }
 
-// DeleteProperty removes one property by name.
+// DeleteProperty removes one property by name, in every domain it was taught.
 func (s *Store) DeleteProperty(ctx context.Context, entityID uint, name string) error {
 	res := s.db.WithContext(ctx).
 		Where("entity_id = ? AND name = ?", entityID, name).
@@ -342,4 +368,67 @@ func (s *Store) AddTargets(
 		return 0, fmt.Errorf("add %d targets: %w", len(rows), err)
 	}
 	return len(rows), nil
+}
+
+// NormaliseDomain reduces a domain to its bare host, so example.com,
+// www.example.com and https://example.com/ all scope to the same site.
+//
+// It mirrors the crawler's own normalisation, because a property taught for a
+// domain and a target added for that domain have to agree on what the domain
+// is, or the teaching silently applies to nothing.
+func NormaliseDomain(raw string) string {
+	host := strings.TrimSpace(strings.ToLower(raw))
+	if host == "" {
+		return ""
+	}
+	if i := strings.Index(host, "://"); i >= 0 {
+		host = host[i+3:]
+	}
+	if i := strings.IndexByte(host, '/'); i >= 0 {
+		host = host[:i]
+	}
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	return strings.TrimPrefix(host, "www.")
+}
+
+// PropertiesFor returns the schema to apply on one domain: the entity's
+// properties, with anything taught for that domain replacing its default.
+//
+// Teaching is an override rather than an addition. A site that calls the byline
+// something unusual should change what `author` means there and nowhere else,
+// and a property taught on a domain the crawl never reaches should change
+// nothing at all.
+func (s *Store) PropertiesFor(ctx context.Context, entityID uint, domain string) ([]Property, error) {
+	domain = NormaliseDomain(domain)
+
+	var rows []Property
+	err := s.db.WithContext(ctx).
+		Preload("Aliases").
+		Where("entity_id = ? AND (domain = ? OR domain = ?)", entityID, "", domain).
+		Order("name").
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("properties for %q: %w", domain, err)
+	}
+
+	byName := make(map[string]Property, len(rows))
+	var order []string
+	for _, r := range rows {
+		if _, seen := byName[r.Name]; !seen {
+			order = append(order, r.Name)
+		}
+		// The domain-scoped row wins, whichever order they arrived in.
+		if cur, seen := byName[r.Name]; !seen || r.Domain != "" || cur.Domain == "" {
+			if !seen || r.Domain != "" {
+				byName[r.Name] = r
+			}
+		}
+	}
+	out := make([]Property, 0, len(order))
+	for _, n := range order {
+		out = append(out, byName[n])
+	}
+	return out, nil
 }

@@ -277,10 +277,11 @@ func importProps(ctx context.Context, s *store.Store, entityID uint, path string
 			continue
 		}
 
-		err = s.AddPropertyDetail(ctx, entityID, prop,
+		err = s.AddPropertyDetail(ctx, entityID, "", prop,
 			field(record, cols, "type"),
 			field(record, cols, "example"),
-			field(record, cols, "description"))
+			field(record, cols, "description"),
+			field(record, cols, "regex"))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s:%d: %v\n", path, line, err)
 			res.skipped++
@@ -292,7 +293,7 @@ func importProps(ctx context.Context, s *store.Store, entityID uint, path string
 		// survive intact.
 		for _, alias := range strings.Split(field(record, cols, "aliases"), ";") {
 			if alias = strings.TrimSpace(alias); alias != "" {
-				if err := s.AddPropertyAlias(ctx, entityID, prop, alias); err != nil {
+				if err := s.AddPropertyAlias(ctx, entityID, "", prop, alias); err != nil {
 					fmt.Fprintf(os.Stderr, "%s:%d: %v\n", path, line, err)
 				}
 			}
@@ -306,7 +307,7 @@ func importProps(ctx context.Context, s *store.Store, entityID uint, path string
 func headerOf(record []string) map[string]int {
 	known := map[string]bool{
 		"name": true, "type": true, "example": true,
-		"description": true, "aliases": true,
+		"description": true, "aliases": true, "regex": true,
 	}
 
 	cols := map[string]int{}

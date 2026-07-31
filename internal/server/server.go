@@ -185,12 +185,12 @@ func (s *Server) createEntity(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, p := range req.Properties {
-		if err := s.store.AddPropertyDetail(ctx, entity.ID, p.Name, p.Type, p.Example, p.Description); err != nil {
+		if err := s.store.AddPropertyDetail(ctx, entity.ID, "", p.Name, p.Type, p.Example, p.Description, ""); err != nil {
 			s.fail(w, r, err)
 			return
 		}
 		for _, alias := range p.Aliases {
-			if err := s.store.AddPropertyAlias(ctx, entity.ID, p.Name, alias); err != nil {
+			if err := s.store.AddPropertyAlias(ctx, entity.ID, "", p.Name, alias); err != nil {
 				s.fail(w, r, err)
 				return
 			}

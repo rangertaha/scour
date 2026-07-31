@@ -22,6 +22,7 @@ type addFlags struct {
 	template   string
 	propType   string
 	example    string
+	regex      string
 	subdomains bool
 	depth      int
 }
@@ -33,11 +34,17 @@ func newAddCmd(a *app) *cobra.Command {
 		Use:   "add <name>",
 		Short: "Define an entity, or add targets, properties and aliases to one",
 		Long: "Creates the entity if it does not exist, then applies whatever else is given.\n" +
-			"Every form is idempotent, so repeating a command is never an error.",
+			"Every form is idempotent, so repeating a command is never an error.\n\n" +
+			"--prop names the subject. With it, --example, --alias and --regex describe\n" +
+			"the property; without it --alias describes the entity. --domain adds a crawl\n" +
+			"target on its own, and scopes the teaching when --prop is given, so what one\n" +
+			"site calls a byline does not overwrite what the next one calls it.",
 		Example: "  scour add vehicle --alias car --alias 'pickup truck'\n" +
 			"  scour add vehicle -d example.com --subdomains\n" +
 			"  scour add vehicle -u http://www.example.com/cars/\n" +
 			"  scour add vehicle -p make -e Ford\n" +
+			"  scour add news -d example.com -p author -e 'Hannah McLeod' -a byline\n" +
+			"  scour add news -d example.com -p title --regex '^(.*?) - Example News$'\n" +
 			"  scour add vehicle --type html --type pdf",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -46,8 +53,10 @@ func newAddCmd(a *app) *cobra.Command {
 	}
 
 	fl := cmd.Flags()
-	fl.StringArrayVar(&f.aliases, "alias", nil, "another word or phrase a page might use for the entity (repeatable)")
-	fl.StringArrayVarP(&f.domains, "domain", "d", nil, "add a whole domain as a crawl target (repeatable)")
+	fl.StringArrayVarP(&f.aliases, "alias", "a", nil,
+		"another word a page might use; for the property when --prop is given, else for the entity (repeatable)")
+	fl.StringArrayVarP(&f.domains, "domain", "d", nil,
+		"add a whole domain as a crawl target, or scope the property when --prop is given (repeatable)")
 	fl.StringArrayVarP(&f.urls, "url", "u", nil, "add a single URL as a crawl target (repeatable)")
 	fl.StringArrayVar(&f.types, "type", nil, "restrict crawls to a content type (repeatable)")
 	fl.StringVar(&f.template, "template", "", "start from a built-in schema: see scour list templates")
@@ -55,6 +64,8 @@ func newAddCmd(a *app) *cobra.Command {
 	fl.StringVar(&f.propType, "prop-type", "",
 		"the property's type: string, number, bool, date, url, email (date covers times)")
 	fl.StringVarP(&f.example, "example", "e", "", "an example value for the property")
+	fl.StringVar(&f.regex, "regex", "",
+		"extract the property's value from the located text; capture group one, or the whole match")
 	fl.BoolVar(&f.subdomains, "subdomains", false, "follow subdomains of the added domains")
 	fl.IntVar(&f.depth, "depth", 0, "depth limit for the added targets (0 for the configured default)")
 
@@ -64,6 +75,14 @@ func newAddCmd(a *app) *cobra.Command {
 func runAdd(cmd *cobra.Command, a *app, name string, f addFlags) error {
 	if f.example != "" && f.prop == "" {
 		return errors.New("--example needs --prop")
+	}
+	if f.regex != "" && f.prop == "" {
+		return errors.New("--regex needs --prop")
+	}
+	// --domain is a crawl target on its own and a scope alongside --prop, so
+	// asking for both at once would mean two different things by one word.
+	if f.prop != "" && len(f.domains) > 1 {
+		return errors.New("--prop takes one --domain to scope it")
 	}
 
 	s, err := a.Store()
@@ -79,26 +98,40 @@ func runAdd(cmd *cobra.Command, a *app, name string, f addFlags) error {
 
 	var changes []string
 
-	for _, alias := range f.aliases {
-		alias = strings.TrimSpace(alias)
-		if alias == "" {
-			continue
-		}
-		if err := s.AddAlias(c, entity.ID, alias); err != nil {
-			return err
-		}
-		changes = append(changes, "alias "+alias)
-	}
-
-	for _, d := range f.domains {
-		host, err := normaliseDomain(d)
+	// With --prop the domain scopes the teaching; without it, it is a target.
+	scope := ""
+	if f.prop != "" && len(f.domains) == 1 {
+		host, err := normaliseDomain(f.domains[0])
 		if err != nil {
 			return err
 		}
-		if err := s.AddTarget(c, entity.ID, store.TargetDomain, host, f.subdomains, f.depth); err != nil {
-			return err
+		scope = host
+	}
+
+	if f.prop == "" {
+		for _, alias := range f.aliases {
+			alias = strings.TrimSpace(alias)
+			if alias == "" {
+				continue
+			}
+			if err := s.AddAlias(c, entity.ID, alias); err != nil {
+				return err
+			}
+			changes = append(changes, "alias "+alias)
 		}
-		changes = append(changes, "domain "+host)
+	}
+
+	if scope == "" {
+		for _, d := range f.domains {
+			host, err := normaliseDomain(d)
+			if err != nil {
+				return err
+			}
+			if err := s.AddTarget(c, entity.ID, store.TargetDomain, host, f.subdomains, f.depth); err != nil {
+				return err
+			}
+			changes = append(changes, "domain "+host)
+		}
 	}
 
 	for _, u := range f.urls {
@@ -121,10 +154,25 @@ func runAdd(cmd *cobra.Command, a *app, name string, f addFlags) error {
 	}
 
 	if f.prop != "" {
-		if err := s.AddProperty(c, entity.ID, f.prop, f.propType, f.example); err != nil {
+		if err := s.AddPropertyDetail(c, entity.ID, scope, f.prop, f.propType, f.example, "", f.regex); err != nil {
 			return err
 		}
-		changes = append(changes, "property "+f.prop)
+		where := ""
+		if scope != "" {
+			where = " on " + scope
+		}
+		changes = append(changes, "property "+f.prop+where)
+
+		for _, alias := range f.aliases {
+			alias = strings.TrimSpace(alias)
+			if alias == "" {
+				continue
+			}
+			if err := s.AddPropertyAlias(c, entity.ID, scope, f.prop, alias); err != nil {
+				return err
+			}
+			changes = append(changes, "alias "+alias+" for "+f.prop+where)
+		}
 	}
 
 	for _, t := range f.types {

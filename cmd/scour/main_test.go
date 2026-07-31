@@ -147,7 +147,10 @@ func TestRemoveWholeEntityNeedsForce(t *testing.T) {
 
 func TestRemoveParts(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "add", "vehicle", "-d", "example.com", "-p", "year", "-e", "2026")
+	// Separate commands: with --prop present, --domain scopes the property
+	// rather than adding a target.
+	runOK(t, dir, "add", "vehicle", "-d", "example.com")
+	runOK(t, dir, "add", "vehicle", "-p", "year", "-e", "2026")
 
 	out := runOK(t, dir, "remove", "vehicle", "-d", "example.com")
 	if !strings.Contains(out, "removed domain example.com") {
@@ -195,5 +198,48 @@ func TestVersion(t *testing.T) {
 	dir := t.TempDir()
 	if out := runOK(t, dir, "version"); strings.TrimSpace(out) == "" {
 		t.Error("version printed nothing")
+	}
+}
+
+// --domain names a site. On its own that is a crawl target; alongside --prop it
+// says which site the teaching applies to, so what one paper calls a byline
+// does not overwrite what the next one calls it.
+func TestPropertyTaughtPerDomain(t *testing.T) {
+	dir := t.TempDir()
+	runOK(t, dir, "add", "news", "--template", "article")
+
+	out := runOK(t, dir, "add", "news", "-d", "example.com",
+		"-p", "author", "-e", "Hannah McLeod", "-a", "byline")
+	if !strings.Contains(out, "property author on example.com") {
+		t.Errorf("output = %s", out)
+	}
+	if !strings.Contains(out, "alias byline for author on example.com") {
+		t.Errorf("alias should attach to the property, not the entity: %s", out)
+	}
+
+	// Scoping must not quietly widen the crawl.
+	if shown := runOK(t, dir, "status", "news"); strings.Contains(shown, "targets     1") {
+		t.Errorf("--domain alongside --prop should not add a target: %s", shown)
+	}
+
+	// A second site teaches its own answer without disturbing the first.
+	runOK(t, dir, "add", "news", "-d", "other.test",
+		"-p", "author", "-e", "Jared Wright")
+
+	first := runOK(t, dir, "status", "news")
+	if !strings.Contains(first, "Hannah McLeod") && !strings.Contains(first, "example.com") {
+		t.Logf("status = %s", first)
+	}
+}
+
+// A pattern that does not compile has to fail when it is taught, not when a
+// crawl runs, where it would look like a site that stopped publishing a field.
+func TestTaughtRegexMustCompile(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := run(t, dir, "add", "news", "-p", "title", "--regex", "^(unclosed"); err == nil {
+		t.Error("an invalid regex should be rejected when taught")
+	}
+	if _, err := run(t, dir, "add", "news", "--regex", "^x$"); err == nil {
+		t.Error("--regex without --prop should be rejected")
 	}
 }
