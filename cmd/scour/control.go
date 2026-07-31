@@ -28,7 +28,10 @@ func newPauseCmd(a *app) *cli.Command {
 			"Nothing is discarded. The frontier keeps its order and its leases, so\n" +
 			"`scour start` carries on rather than starting again, and the item stays\n" +
 			"paused until it does.",
-		UsageText: "  scour pause news",
+		UsageText: "  scour pause news\n" +
+			"  scour start news    # carry on from the frontier\n\n" +
+			"To throw the frontier away instead:\n" +
+			"  scour stop news --force",
 		Action: func(c context.Context, cmd *cli.Command) error {
 			args, err := need(cmd, 1, "one item name")
 			if err != nil {

@@ -44,10 +44,15 @@ func newStreamCmd(a *app) *cli.Command {
 			"--follow keeps the stream open and prints each record as it is extracted,\n" +
 			"so a search running elsewhere can be watched from here. With --json each\n" +
 			"record is one line, which is what a pipe on the other end wants.",
-		UsageText: "  scour stream vehicle --confidence 0.5\n" +
-			"  scour stream vehicle --type pdf\n" +
+		UsageText: "  scour stream vehicle\n" +
+			"  scour stream vehicle --confidence 0.5\n" +
+			"  scour stream vehicle --type pdf\n\n" +
+			"Watch a search that is running now:\n" +
 			"  scour stream vehicle --follow\n" +
-			"  scour --json stream vehicle --follow | jq .",
+			"  scour --json stream vehicle --follow | jq .\n\n" +
+			"Write them out instead of printing them:\n" +
+			"  scour stream vehicle --write csv --to ./out\n" +
+			"  scour stream vehicle --write webhook --to https://example.com/ingest",
 		Flags: []cli.Flag{
 			&cli.FloatFlag{
 				Name:        "confidence",

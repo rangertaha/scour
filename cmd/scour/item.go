@@ -2,11 +2,7 @@
 
 package main
 
-import (
-	"context"
-
-	"github.com/urfave/cli/v3"
-)
+import "github.com/urfave/cli/v3"
 
 // newItemCmd groups everything that acts on the definition of an item.
 //
@@ -21,25 +17,21 @@ func newItemCmd(a *app) *cli.Command {
 		Name:     "item",
 		Usage:    "Define items to find",
 		Description: "An item is the thing you are hunting for: a name, the other words a page\n" +
-			"might use for it, the properties it should have, and where to look.\n\n" +
-			"With no subcommand it lists what you have defined, which is the same as\n" +
-			"`scour item ls`.",
-		UsageText: "  scour item\n" +
-			"  scour item add vehicle -d example.com -p make -e Ford\n" +
-			"  scour item ls vehicle\n" +
+			"might use for it, the properties it should have, and where to look.",
+		UsageText: "  scour item ls                 # what is defined\n" +
+			"  scour item add vehicle -d example.com\n" +
+			"  scour item add vehicle -p make -e Ford\n" +
 			"  scour item tag vehicle -p make --append manufacturer\n" +
-			"  scour item rm vehicle -p make",
+			"  scour item rm vehicle -p make\n\n" +
+			"Start from a schema instead of naming every property:\n" +
+			"  scour item templates\n" +
+			"  scour item add news --template article",
 		Commands: []*cli.Command{
 			newAddCmd(a),
 			newRemoveCmd(a),
 			newListCmd(a),
 			newTagCmd(a),
 			newTemplatesCmd(a),
-		},
-		// Bare `scour item` lists, because the question it most likely means is
-		// "what have I defined", and answering with a help page does not.
-		Action: func(c context.Context, cmd *cli.Command) error {
-			return runList(c, a, cmd.Args().Slice())
 		},
 	}
 }

@@ -82,9 +82,11 @@ func newJoinCmd(a *app) *cli.Command {
 			"With no --role it starts all of them, which is a single-process scour with\n" +
 			"an embedded broker. Point --bus-url at a NATS cluster and the same roles can\n" +
 			"be spread across machines.",
-		UsageText: "  scour run\n" +
-			"  scour run --role store\n" +
-			"  scour run --role store --bus-url nats://broker:4222",
+		UsageText: "  scour join\n\n" +
+			"One machine holds the frontier and hands out work:\n" +
+			"  scour join --role store --bus-url nats://broker:4222\n\n" +
+			"Any number of others fetch it:\n" +
+			"  scour join --role crawl --bus-url nats://broker:4222",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:        "role",
@@ -111,6 +113,7 @@ func newJoinCmd(a *app) *cli.Command {
 }
 
 func runServices(c context.Context, a *app, spec string) error {
+	logProgress()
 	wanted, err := service.ParseRoles(spec)
 	if err != nil {
 		return err

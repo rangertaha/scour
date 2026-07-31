@@ -448,7 +448,9 @@ output, and `--limit <n>` to cap the rows returned.
 | `scour stream <name> --follow` | Keep printing records as they are extracted |
 | `scour stream <name> --write csv --to <dir>` | Write records out as CSV, JSON, or to a webhook |
 | `scour invalid <name> <id>...` | Label records as wrong |
-| `scour top` | Monitor engine activity |
+| `scour status` | A line per item: what it has, how far it got, whether it is trained |
+| `scour status <name>` | Everything known about one item |
+| `scour top` | Monitor engine activity, live |
 | `scour pause <name>` | Pause a search, keeping its frontier |
 | `scour stop <name> --force` | Stop a search, discarding its frontier |
 | `scour item ls` | A line per item: what it has, how far it got, whether it is trained |

@@ -24,8 +24,9 @@ func newListCmd(a *app) *cli.Command {
 			"one.\n\n" +
 			"Crawls resume from the stored frontier, so this is also where you see what a\n" +
 			"restarted crawl will pick up.",
-		UsageText: "  scour item ls\n" +
-			"  scour item ls vehicle",
+		UsageText: "  scour item ls                 # a line per item\n" +
+			"  scour item ls vehicle         # everything known about one\n" +
+			"  scour --json item ls vehicle",
 		Action: func(c context.Context, cmd *cli.Command) error {
 			args, err := atMost(cmd, 1, "at most one item name")
 			if err != nil {

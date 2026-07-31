@@ -38,7 +38,8 @@ func newTopCmd(a *app) *cli.Command {
 			"Pausing keeps everything. The frontier holds its order and its leases, so a\n" +
 			"resumed crawl carries on rather than starting again, and a crawl paused here\n" +
 			"stays paused after this exits.",
-		UsageText: "  scour top",
+		UsageText: "  scour top\n\n" +
+			"Keys: s start   p pause   t train   q quit",
 		Action: func(c context.Context, cmd *cli.Command) error {
 			s, err := a.Store()
 			if err != nil {

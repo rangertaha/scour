@@ -205,6 +205,7 @@ func newRootCmd() *cli.Command {
 			newRulesCmd(a),
 			newTrainCmd(a),
 			newInvalidCmd(a),
+			newStatusCmd(a),
 			newTopCmd(a),
 			newStartCmd(a),
 			newStopCmd(a),
@@ -218,12 +219,35 @@ func newRootCmd() *cli.Command {
 	return root
 }
 
+// logLevel is raised and lowered after the logger is built, because what
+// counts as worth saying depends on which command was asked for and that is
+// not known when the root's Before runs.
+var logLevel = new(slog.LevelVar)
+
+// setupLogging makes a command quiet by default.
+//
+// A command that prints a table is not a service, and interleaving log lines
+// with the table is how "2 fetched, 0 failed" ends up underneath a paragraph of
+// key=value pairs nobody asked for. Anything that genuinely needs saying to
+// someone running a command is printed, not logged.
+//
+// Warnings and errors still come through: those are not progress, they are the
+// reason the answer might be wrong.
 func setupLogging(verbose bool) {
-	level := slog.LevelInfo
+	logLevel.Set(slog.LevelWarn)
 	if verbose {
-		level = slog.LevelDebug
+		logLevel.Set(slog.LevelDebug)
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
+}
+
+// logProgress turns on the running commentary, for the commands whose whole job
+// is to keep running: the API server, a cluster member, the stdio MCP server.
+// Their log is the only thing they produce.
+func logProgress() {
+	if logLevel.Level() > slog.LevelInfo {
+		logLevel.Set(slog.LevelInfo)
+	}
 }
 
 func newVersionCmd(a *app) *cli.Command {
@@ -242,7 +266,7 @@ func newVersionCmd(a *app) *cli.Command {
 func need(cmd *cli.Command, n int, what string) ([]string, error) {
 	got := cmd.Args().Slice()
 	if len(got) != n {
-		return nil, fmt.Errorf("%s takes %s, got %d", cmd.Name, what, len(got))
+		return nil, wanted(cmd, got, what)
 	}
 	return got, nil
 }
@@ -251,9 +275,30 @@ func need(cmd *cli.Command, n int, what string) ([]string, error) {
 func atLeast(cmd *cli.Command, n int, what string) ([]string, error) {
 	got := cmd.Args().Slice()
 	if len(got) < n {
-		return nil, fmt.Errorf("%s takes %s, got %d", cmd.Name, what, len(got))
+		return nil, wanted(cmd, got, what)
 	}
 	return got, nil
+}
+
+// wanted reports a wrong number of arguments, and shows the command's own help
+// when there were none at all.
+//
+// Those are different mistakes. Somebody who typed the wrong number of names
+// knows what the command is for and wants the count; somebody who typed the
+// command bare is asking what it does, and answering that with one line of
+// error makes them run it again with --help to get the answer they were
+// already owed.
+func wanted(cmd *cli.Command, got []string, what string) error {
+	if len(got) > 0 {
+		return fmt.Errorf("%s takes %s, got %d", cmd.Name, what, len(got))
+	}
+	if err := cli.ShowSubcommandHelp(cmd); err != nil {
+		return err
+	}
+	// The help has just been printed; repeating the complaint under it would
+	// be the third time the same thing is said on one screen.
+	fmt.Fprintf(cmd.Root().ErrWriter, "\n%s takes %s\n", cmd.Name, what)
+	return errSilent
 }
 
 // atMost checks for a maximum number of positional arguments.

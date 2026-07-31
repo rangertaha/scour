@@ -18,7 +18,15 @@ func newRulesCmd(a *app) *cli.Command {
 		Usage:     "List the extraction rules learned for an item",
 		Description: "Rules nest: the parent locates each record on the page, and its children\n" +
 			"pull one property out of that record. HIT is the share of matching pages\n" +
-			"where the rule fires.",
+			"where the rule fires.\n\n" +
+			"A low HIT on a property means the rule found it on few of the pages it was\n" +
+			"tried on, which is the first thing to look at when a field comes back empty.",
+		UsageText: "  scour rules vehicle\n" +
+			"  scour --json rules vehicle\n" +
+			"  scour --limit 20 rules vehicle\n\n" +
+			"Drop one that is wrong, then train again:\n" +
+			"  scour item rm vehicle --rule 5\n" +
+			"  scour train vehicle",
 		Action: func(c context.Context, cmd *cli.Command) error {
 			args, err := need(cmd, 1, "one item name")
 			if err != nil {

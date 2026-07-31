@@ -79,6 +79,30 @@ GLOBAL OPTIONS:{{template "visibleFlagCategoryTemplate" .}}{{else if .VisibleFla
 GLOBAL OPTIONS:{{template "visibleFlagTemplate" .}}{{end}}
 `
 
+	// urfave treats UsageText as a replacement for the usage line, so a command
+	// carrying examples stopped saying what its arguments were. Here the
+	// signature is always shown and the examples get a section of their own,
+	// which is what both are for.
+	cli.CommandHelpTemplate = `NAME:
+   {{template "helpNameTemplate" .}}
+
+USAGE:
+   {{.FullName}}{{if .VisibleFlags}} [options]{{end}}{{if .ArgsUsage}} {{.ArgsUsage}}{{end}}{{if .Description}}
+
+DESCRIPTION:
+   {{template "descriptionTemplate" .}}{{end}}{{if .UsageText}}
+
+EXAMPLES:
+{{.UsageText}}{{end}}{{if .VisibleCommands}}
+
+COMMANDS:{{template "visibleCommandTemplate" .}}{{end}}{{if .VisibleFlagCategories}}
+
+OPTIONS:{{template "visibleFlagCategoryTemplate" .}}{{else if .VisibleFlags}}
+
+OPTIONS:{{template "visibleFlagTemplate" .}}{{end}}
+`
+	cli.SubcommandHelpTemplate = cli.CommandHelpTemplate
+
 	cli.HelpPrinter = func(w io.Writer, templ string, data any) {
 		cli.HelpPrinterCustom(w, templ, data, map[string]any{
 			"ordered": orderedCategories,

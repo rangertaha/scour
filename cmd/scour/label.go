@@ -27,7 +27,9 @@ func labelCmd(a *app, use string, label store.Label, short, long string) *cli.Co
 		ArgsUsage:   "<name> <id>...",
 		Usage:       short,
 		Description: long,
-		UsageText:   "  scour " + use + " vehicle 1042 1043",
+		UsageText: "  scour stream vehicle          # find the id of a wrong record\n" +
+			"  scour " + use + " vehicle 1042 1043\n" +
+			"  scour train vehicle          # fold the correction into the model",
 		Action: func(c context.Context, cmd *cli.Command) error {
 			args, err := atLeast(cmd, 2, "an item name and at least one record id")
 			if err != nil {

@@ -365,3 +365,49 @@ func TestUnknownItemSuggestsAcrossCommands(t *testing.T) {
 		}
 	}
 }
+
+// status and `item ls` are the same listing under two names: one reached while
+// defining things, one asked between commands. They must not drift.
+func TestStatusMatchesItemLs(t *testing.T) {
+	dir := t.TempDir()
+	runOK(t, dir, "item", "add", "vehicle", "-d", "example.com", "-p", "make", "-e", "Ford")
+
+	if fleet, ls := runOK(t, dir, "status"), runOK(t, dir, "item", "ls"); fleet != ls {
+		t.Errorf("status and item ls differ:\n%s\n%s", fleet, ls)
+	}
+	if one, ls := runOK(t, dir, "status", "vehicle"), runOK(t, dir, "item", "ls", "vehicle"); one != ls {
+		t.Errorf("status <name> and item ls <name> differ:\n%s\n%s", one, ls)
+	}
+	if _, err := run(t, dir, "status", "nosuch"); err == nil {
+		t.Error("status on an unknown item must fail")
+	}
+}
+
+// A command given no arguments is asking what it is for, so it shows its own
+// help rather than one line of complaint.
+func TestBareCommandShowsItsHelp(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"import", "export", "rules", "stream", "train"} {
+		out, err := run(t, dir, name)
+		if err == nil {
+			t.Errorf("bare %q should not succeed", name)
+			continue
+		}
+		if !strings.Contains(out, "EXAMPLES:") {
+			t.Errorf("bare %q did not show its examples:\n%s", name, out)
+		}
+		if !strings.Contains(out, "takes one item name") {
+			t.Errorf("bare %q did not say what it wanted:\n%s", name, out)
+		}
+	}
+
+	// A wrong count is a different mistake: that one knows what the command is
+	// for and only needs the number, so the help would be noise.
+	out, err := run(t, dir, "rules", "a", "b")
+	if err == nil {
+		t.Fatal("two names should fail")
+	}
+	if strings.Contains(out, "EXAMPLES:") {
+		t.Errorf("a miscount should not reprint the whole help:\n%s", out)
+	}
+}

@@ -50,6 +50,7 @@ func newServerCmd(a *app) *cli.Command {
 }
 
 func runServer(c context.Context, a *app, listen string) error {
+	logProgress()
 	s, err := a.Store()
 	if err != nil {
 		return err
@@ -165,6 +166,11 @@ func newMCPCmd(a *app) *cli.Command {
 			"at /mcp for agents that attach instead of spawning.\n\n" +
 			"Both views share one database, so an item defined over MCP is the item\n" +
 			"the CLI sees.",
+		UsageText: "  scour mcp\n\n" +
+			"As a local agent's tool, in its config:\n" +
+			`  {"command": "scour", "args": ["mcp"]}` + "\n\n" +
+			"Over HTTP instead, for an agent attaching to a running service:\n" +
+			"  scour server            # then point the agent at http://localhost:8080/mcp",
 		Action: func(c context.Context, cmd *cli.Command) error {
 			s, err := a.Store()
 			if err != nil {

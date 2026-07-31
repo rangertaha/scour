@@ -48,7 +48,7 @@ func newTagCmd(a *app) *cli.Command {
 			},
 			&cli.StringFlag{
 				Name:        "on",
-				Usage:       "scope the edit to one domain, matching `scour item add --domain`",
+				Usage:       "scope the edit to one `domain`, the same one scour item add takes",
 				Destination: &f.domain,
 			},
 			&cli.StringSliceFlag{
