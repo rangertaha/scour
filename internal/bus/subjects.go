@@ -22,6 +22,8 @@ const (
 	SubjectRecord = "record"
 	// SubjectWork carries one URL handed to a crawler to fetch.
 	SubjectWork = "work"
+	// SubjectMetric carries one measurement taken while the pipeline ran.
+	SubjectMetric = "metric"
 )
 
 // Subject builds the subject for one entity and stage.
@@ -49,6 +51,7 @@ func sanitise(entity string) string {
 const (
 	StreamCrawl   = "SCOUR_CRAWL"
 	StreamRecords = "SCOUR_RECORDS"
+	StreamMetrics = "SCOUR_METRICS"
 )
 
 // createStreams declares the streams components consume from.
@@ -84,6 +87,23 @@ func (b *Bus) createStreams(ctx context.Context) error {
 			Duplicates: 5 * time.Minute,
 		},
 	}
+
+	// Measurements are not work. The other two streams are work queues, where a
+	// message is delivered once and removed, which is right for a page that
+	// must be written exactly once and wrong for a number several things may
+	// want to watch: one dashboard consuming a metric would take it from every
+	// other. This one keeps its messages for anyone who asks, drops the oldest
+	// when full, and forgets them quickly, so nothing observing the pipeline
+	// can slow it down or fill a disk.
+	streams = append(streams, jetstream.StreamConfig{
+		Name:      StreamMetrics,
+		Subjects:  []string{AllEntities(SubjectMetric)},
+		Retention: jetstream.LimitsPolicy,
+		Storage:   jetstream.MemoryStorage,
+		Discard:   jetstream.DiscardOld,
+		MaxAge:    15 * time.Minute,
+		MaxMsgs:   100_000,
+	})
 
 	for _, cfg := range streams {
 		if _, err := b.js.CreateOrUpdateStream(ctx, cfg); err != nil {

@@ -86,6 +86,22 @@ func (s *StoreService) dispatchOnce(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+
+		// What the frontier looks like from here, which is the pair of numbers
+		// that says whether crawlers are keeping up: a queue growing while the
+		// in-flight count sits at its ceiling means the crawl is discovering
+		// faster than it can fetch.
+		if depth, err := s.store.QueueSize(ctx, id); err == nil {
+			s.bus.Emit(ctx, name, bus.Metric{
+				EntityID: id, Name: bus.MetricQueueDepth,
+				Value: float64(depth), Unit: "count",
+			})
+		}
+		s.bus.Emit(ctx, name, bus.Metric{
+			EntityID: id, Name: bus.MetricQueueFlight,
+			Value: float64(inFlight), Unit: "count",
+		})
+
 		for range room {
 			data, err := s.store.LeaseQueue(ctx, id, 0)
 			if err != nil {

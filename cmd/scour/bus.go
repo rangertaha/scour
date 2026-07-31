@@ -66,7 +66,9 @@ func (a *app) busCrawler(ctx context.Context, crawler *crawl.Crawler, entity str
 		return nil
 	}
 
-	return crawler.WithSink(service.NewBusSink(b, entity)), settle, nil
+	return crawler.
+		WithSink(service.NewBusSink(b, entity)).
+		WithMeter(service.NewBusMeter(b, entity)), settle, nil
 }
 
 func newRunCmd(a *app) *cobra.Command {

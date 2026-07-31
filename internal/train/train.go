@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rangertaha/scour/internal/bus"
 	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/config"
 	"github.com/rangertaha/scour/internal/content"
@@ -36,6 +37,31 @@ type Trainer struct {
 	// classified is what the page classifier found during this run, kept here
 	// because it is produced while labelling and reported with the result.
 	classified *ClassifyResult
+
+	// meter reports what training produced. Nil measures nothing, which is what
+	// a one-shot `scour train` does.
+	meter Meter
+}
+
+// Meter records measurements taken while training. Declared here because this
+// package is the consumer, and fire and forget for the same reason the crawl's
+// is: a number nobody could publish must not fail a training run.
+type Meter interface {
+	Measure(ctx context.Context, name string, value float64, unit string, labels map[string]string)
+}
+
+// WithMeter returns a trainer that reports what it produced.
+func (t *Trainer) WithMeter(m Meter) *Trainer {
+	clone := *t
+	clone.meter = m
+	return &clone
+}
+
+func (t *Trainer) measure(ctx context.Context, name string, value float64, labels map[string]string) {
+	if t.meter == nil {
+		return
+	}
+	t.meter.Measure(ctx, name, value, "count", labels)
 }
 
 // New returns a trainer.
@@ -155,6 +181,14 @@ func (t *Trainer) Run(ctx context.Context, entity *store.Entity, opts Options) (
 	if err != nil {
 		return nil, err
 	}
+
+	// How much a training run understood: the rules are what it believes about
+	// the site, and the records are what those beliefs actually produced. A
+	// rule count that holds while records fall is the shape of a site changing
+	// under a model that has not noticed.
+	labels := map[string]string{"entity": entity.Name}
+	t.measure(ctx, bus.MetricRules, float64(len(rules)), labels)
+	t.measure(ctx, bus.MetricRecords, float64(records), labels)
 
 	// The scorer is trained last, because it learns from which pages produced
 	// records, which is only known once extraction has run.

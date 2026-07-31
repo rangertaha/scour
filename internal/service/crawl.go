@@ -120,7 +120,9 @@ func (c *CrawlService) feedFor(ctx context.Context, ev bus.Work) (*crawlqueue.Wo
 	// The entity is reconstructed from the message rather than read: a crawler
 	// does not touch the database, and its id and name are all the crawl needs.
 	entity := &store.Entity{ID: ev.EntityID, Name: ev.Entity}
-	crawler := c.crawler.WithSink(NewBusSink(c.bus, ev.Entity))
+	crawler := c.crawler.
+		WithSink(NewBusSink(c.bus, ev.Entity)).
+		WithMeter(NewBusMeter(c.bus, ev.Entity))
 
 	c.wg.Add(1)
 	go func() {

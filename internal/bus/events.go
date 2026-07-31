@@ -56,6 +56,55 @@ type Work struct {
 	Request  []byte `json:"request"`
 }
 
+// Metric is one measurement taken while the pipeline ran.
+//
+// Deliberately generic. A typed event per measurement would need a new type,
+// a new subject and a new consumer every time someone wanted to watch something
+// else; a name and a value need none of that, and the labels carry whatever
+// distinguishes one reading from another.
+type Metric struct {
+	Entity   string            `json:"entity"`
+	EntityID uint              `json:"entity_id,omitempty"`
+	Name     string            `json:"name"`
+	Value    float64           `json:"value"`
+	Unit     string            `json:"unit,omitempty"`
+	At       time.Time         `json:"at"`
+	Labels   map[string]string `json:"labels,omitempty"`
+}
+
+// Metric names, so a publisher and a consumer agree on the spelling.
+const (
+	MetricFetchLatency = "fetch.latency"
+	MetricFetchBytes   = "fetch.bytes"
+	MetricFetchStatus  = "fetch.status"
+	MetricQueueDepth   = "queue.depth"
+	MetricQueueFlight  = "queue.in_flight"
+	MetricRecords      = "extract.records"
+	MetricRules        = "extract.rules"
+)
+
+// Emit publishes a measurement and does not care whether it arrived.
+//
+// Observability must not be able to break the thing it observes. A metric that
+// cannot be published is logged at debug and forgotten: no error is returned,
+// nothing is retried, and no caller has to decide what to do about a number
+// that went missing. This is why it is not Publish, which deduplicates and
+// reports failure because a page really must be written exactly once.
+func (b *Bus) Emit(ctx context.Context, entity string, m Metric) {
+	m.Entity = entity
+	if m.At.IsZero() {
+		m.At = time.Now().UTC()
+	}
+	body, err := json.Marshal(m)
+	if err != nil {
+		slog.Debug("metric not encoded", "name", m.Name, "err", err)
+		return
+	}
+	if _, err := b.js.PublishAsync(Subject(entity, SubjectMetric), body); err != nil {
+		slog.Debug("metric not published", "name", m.Name, "err", err)
+	}
+}
+
 // Publish sends a message, deduplicated on id.
 //
 // The id is what makes at-least-once delivery safe to combine with a broker
