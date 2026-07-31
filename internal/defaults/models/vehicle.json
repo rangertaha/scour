@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "schema": [
+    {
+      "name": "vehicle",
+      "description": "one vehicle offered for sale",
+      "props": [
+        {
+          "name": "make",
+          "type": "string",
+          "aliases": ["manufacturer", "brand", "marque"],
+          "description": "the company that built the vehicle",
+          "examples": ["Toyota", "Ford", "Volkswagen"]
+        },
+        {
+          "name": "model",
+          "type": "string",
+          "aliases": ["model name", "trim", "variant"],
+          "description": "the model line, not the manufacturer",
+          "examples": ["Corolla", "F-150", "Golf"]
+        },
+        {
+          "name": "year",
+          "type": "number",
+          "aliases": ["model year", "yr"],
+          "description": "the model year, a four digit year",
+          "examples": ["2019", "2024"]
+        },
+        {
+          "name": "price",
+          "type": "number",
+          "aliases": ["cost", "msrp", "asking price"],
+          "description": "the sale price of the vehicle, not a monthly payment or a fee",
+          "examples": ["$31,500", "24995"]
+        },
+        {
+          "name": "mileage",
+          "type": "number",
+          "aliases": ["odometer", "miles", "km"],
+          "description": "distance the vehicle has travelled",
+          "examples": ["42,000", "13500"]
+        },
+        {
+          "name": "vin",
+          "type": "string",
+          "aliases": ["vehicle identification number", "chassis number"],
+          "description": "the seventeen character vehicle identification number",
+          "examples": ["1HGBH41JXMN109186"]
+        },
+        {
+          "name": "body",
+          "type": "string",
+          "aliases": ["body type", "body style", "type"],
+          "description": "the shape of the vehicle",
+          "examples": ["Sedan", "SUV", "Pickup"]
+        },
+        {
+          "name": "fuel",
+          "type": "string",
+          "aliases": ["fuel type", "engine type", "powertrain"],
+          "description": "what the vehicle runs on",
+          "examples": ["Petrol", "Diesel", "Electric", "Hybrid"]
+        },
+        {
+          "name": "transmission",
+          "type": "string",
+          "aliases": ["gearbox"],
+          "description": "how the vehicle changes gear",
+          "examples": ["Automatic", "Manual"]
+        }
+      ]
+    }
+  ]
+}

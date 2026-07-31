@@ -1,0 +1,309 @@
+// SPDX-License-Identifier: MIT
+
+package pattern
+
+import (
+	"regexp"
+	"strings"
+
+	"github.com/rangertaha/scour/internal/wom/internal/graph"
+)
+
+// A locator addresses a set of nodes that are equivalent for the caller's
+// purposes: the same field in every row of a list, on every page of a site.
+// Turning concrete node paths into one pattern means deciding what varied by
+// accident and what identifies the value.
+//
+// Two mechanisms do that. Positional indices that differ across the group are
+// dropped and ones that agree are kept, which is what turns
+// /ul[1]/li[1..n]/span[1] into /ul[1]/li/span[1]. Where position is not what
+// distinguishes the elements — a run of <meta> tags, say — a semantic
+// attribute becomes a predicate instead.
+
+// indexRe matches the positional index shared by every path dialect wom emits:
+// XPath /div[2], JSONPath [0], and PDF page[1].
+var indexRe = regexp.MustCompile(`\[\d+\]`)
+
+// nthRe matches the CSS equivalent.
+var nthRe = regexp.MustCompile(`:nth-of-type\(\d+\)`)
+
+// predicateRe matches an attribute predicate in a generalized XPath.
+var predicateRe = regexp.MustCompile(`\[@([A-Za-z_:][-\w:.]*)=(?:"([^"]*)"|'([^']*)')\]`)
+
+// Coarse strips every positional index from a path, producing the key that
+// groups instances of one pattern together.
+func Coarse(path string) string {
+	return indexRe.ReplaceAllString(path, "")
+}
+
+// Generalize merges the paths of a group into one pattern, keeping the indices
+// the instances agreed on and dropping the ones that varied.
+func Generalize(paths []string) string {
+	return generalizeWith(paths, indexRe)
+}
+
+// GeneralizeSelector is Generalize for CSS selectors, where the positional
+// marker is :nth-of-type().
+func GeneralizeSelector(selectors []string) string {
+	return generalizeWith(selectors, nthRe)
+}
+
+func generalizeWith(paths []string, marker *regexp.Regexp) string {
+	paths = dedupe(paths)
+	switch len(paths) {
+	case 0:
+		return ""
+	case 1:
+		return paths[0]
+	}
+
+	lits := make([][]string, len(paths))
+	idxs := make([][]string, len(paths))
+	for i, p := range paths {
+		lits[i] = marker.Split(p, -1)
+		idxs[i] = marker.FindAllString(p, -1)
+	}
+
+	// Instances that do not decompose identically cannot be merged
+	// position-by-position; drop every index instead, which is always a valid
+	// generalization of the group.
+	for i := 1; i < len(paths); i++ {
+		if len(lits[i]) != len(lits[0]) || len(idxs[i]) != len(idxs[0]) {
+			return marker.ReplaceAllString(paths[0], "")
+		}
+		for j := range lits[i] {
+			if lits[i][j] != lits[0][j] {
+				return marker.ReplaceAllString(paths[0], "")
+			}
+		}
+	}
+
+	var b strings.Builder
+	for j, lit := range lits[0] {
+		b.WriteString(lit)
+		if j >= len(idxs[0]) {
+			continue
+		}
+		same := true
+		for i := 1; i < len(paths); i++ {
+			if idxs[i][j] != idxs[0][j] {
+				same = false
+				break
+			}
+		}
+		if same {
+			b.WriteString(idxs[0][j])
+		}
+	}
+	return b.String()
+}
+
+// Discriminator is a semantic attribute that tells sibling elements apart when
+// their position cannot. Meta tags are the clearest case: every one of them is
+// at the same path and only @property or @name says which is which.
+type Discriminator struct {
+	Name  string
+	Value string
+}
+
+// Set reports whether a discriminator was found.
+func (d Discriminator) Set() bool { return d.Name != "" }
+
+// discriminatorAttrs are the attributes that carry meaning rather than
+// styling, in preference order. class and id are excluded on purpose: they
+// vary for presentational reasons and would fragment real repeating records.
+var discriminatorAttrs = []string{"property", "itemprop", "name", "rel"}
+
+// DiscriminatorFor returns the semantic attribute identifying the element that
+// owns a node, if it has one.
+func DiscriminatorFor(n *graph.Node) Discriminator {
+	el := graph.OwnerElement(n)
+	if el == nil {
+		return Discriminator{}
+	}
+	for _, name := range discriminatorAttrs {
+		if v, ok := el.Attr(name); ok && v != "" && len(v) < 120 {
+			return Discriminator{Name: name, Value: v}
+		}
+	}
+	return Discriminator{}
+}
+
+// Predicated splices an attribute predicate into the last element step of an
+// XPath whose positional index had to be dropped. A group of meta tags
+// generalizes to ./meta/@content, which matches every meta on the page;
+// ./meta[@property="article:author"]/@content is what a person would have
+// written and is what actually identifies the value.
+func Predicated(xpath string, disc Discriminator) string {
+	if xpath == "" || !disc.Set() {
+		return xpath
+	}
+	elemPath, leaf := splitLeafStep(xpath)
+	seg := elemPath[strings.LastIndex(elemPath, "/")+1:]
+	// An index already pins the element down; a predicate would add nothing.
+	if seg == "" || strings.ContainsAny(seg, "[@") {
+		return xpath
+	}
+
+	predicated := elemPath + "[@" + disc.Name + "=" + quoteXPath(disc.Value) + "]" + leaf
+
+	// A locator is only worth emitting if it can be read back. Values holding
+	// both quote characters need XPath 1.0's concat(), which SplitPredicates
+	// cannot parse — emitting one would produce a precise-looking locator that
+	// matches nothing. Verifying the round trip here means any future change
+	// to quoting is checked automatically rather than trusted.
+	if bare, preds := SplitPredicates(predicated); len(preds) != 1 ||
+		preds[0].Name != disc.Name || preds[0].Value != disc.Value || bare != xpath {
+		return xpath
+	}
+	return predicated
+}
+
+// PredicatedSelector is Predicated for CSS, where the equivalent is an
+// attribute selector.
+func PredicatedSelector(selector string, disc Discriminator) string {
+	if selector == "" || !disc.Set() {
+		return selector
+	}
+	last := selector[strings.LastIndex(selector, ">")+1:]
+	if strings.ContainsAny(last, "[#:") {
+		return selector
+	}
+	return selector + "[" + disc.Name + "=" + quoteCSS(disc.Value) + "]"
+}
+
+// splitLeafStep separates the element part of an XPath from a trailing
+// attribute or text step.
+func splitLeafStep(xpath string) (elemPath, leaf string) {
+	if i := strings.LastIndex(xpath, "/@"); i >= 0 {
+		return xpath[:i], xpath[i:]
+	}
+	if i := strings.LastIndex(xpath, "/text()"); i >= 0 {
+		return xpath[:i], xpath[i:]
+	}
+	return xpath, ""
+}
+
+// quoteXPath renders a string literal for an XPath predicate. XPath 1.0 has no
+// escape mechanism, so a value containing both quote characters is split with
+// concat().
+func quoteXPath(s string) string {
+	if !strings.Contains(s, `"`) {
+		return `"` + s + `"`
+	}
+	if !strings.Contains(s, `'`) {
+		return `'` + s + `'`
+	}
+	parts := strings.Split(s, `"`)
+	quoted := make([]string, 0, len(parts)*2)
+	for i, p := range parts {
+		if i > 0 {
+			quoted = append(quoted, `'"'`)
+		}
+		if p != "" {
+			quoted = append(quoted, `"`+p+`"`)
+		}
+	}
+	return "concat(" + strings.Join(quoted, ",") + ")"
+}
+
+// quoteCSS renders a string literal for a CSS attribute selector.
+func quoteCSS(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+	return `"` + r.Replace(s) + `"`
+}
+
+// SplitPredicates strips attribute predicates from a pattern, returning the
+// bare structural path and the predicates to check separately. Node paths
+// never carry predicates, so only the pattern needs this.
+func SplitPredicates(pattern string) (string, []Discriminator) {
+	if !strings.Contains(pattern, "[@") {
+		return pattern, nil
+	}
+	matches := predicateRe.FindAllStringSubmatch(pattern, -1)
+	preds := make([]Discriminator, 0, len(matches))
+	for _, m := range matches {
+		value := m[2]
+		if value == "" {
+			value = m[3]
+		}
+		preds = append(preds, Discriminator{Name: m[1], Value: value})
+	}
+	return predicateRe.ReplaceAllString(pattern, ""), preds
+}
+
+// Satisfies reports whether the element owning n carries every predicate.
+func Satisfies(n *graph.Node, preds []Discriminator) bool {
+	if len(preds) == 0 {
+		return true
+	}
+	el := graph.OwnerElement(n)
+	if el == nil {
+		return false
+	}
+	for _, p := range preds {
+		if v, ok := el.Attr(p.Name); !ok || v != p.Value {
+			return false
+		}
+	}
+	return true
+}
+
+// pathIdx records a positional index and the length of the literal text that
+// preceded it, which is what lets a pattern's indices be aligned against a
+// node's even though the pattern omits some of them.
+type pathIdx struct {
+	at  int
+	val string
+}
+
+// decomposePath splits a path into its literal text and its positional
+// indices. "/ul[1]/li[2]" becomes "/ul/li" plus indices [1] at offset 3 and
+// [2] at offset 6.
+func decomposePath(p string) (literal string, idx []pathIdx) {
+	locs := indexRe.FindAllStringIndex(p, -1)
+	if len(locs) == 0 {
+		return p, nil
+	}
+	var b strings.Builder
+	b.Grow(len(p))
+	prev := 0
+	idx = make([]pathIdx, 0, len(locs))
+	for _, loc := range locs {
+		b.WriteString(p[prev:loc[0]])
+		idx = append(idx, pathIdx{at: b.Len(), val: p[loc[0]:loc[1]]})
+		prev = loc[1]
+	}
+	b.WriteString(p[prev:])
+	return b.String(), idx
+}
+
+// Conforms reports whether a concrete node path is an instance of a
+// generalized pattern.
+//
+// Generalization drops the indices that varied across a group, so
+// "/ul[1]/li/span[1]" stands for every li in that list. A path conforms when
+// its literal structure is identical and it agrees on every index the pattern
+// chose to keep — an index the pattern dropped may take any value.
+func Conforms(path, pattern string) bool {
+	if path == pattern {
+		return true
+	}
+	patLit, patIdx := decomposePath(pattern)
+	nodeLit, nodeIdx := decomposePath(path)
+	if patLit != nodeLit {
+		return false
+	}
+
+	j := 0
+	for _, want := range patIdx {
+		for j < len(nodeIdx) && nodeIdx[j].at < want.at {
+			j++
+		}
+		if j >= len(nodeIdx) || nodeIdx[j].at != want.at || nodeIdx[j].val != want.val {
+			return false
+		}
+		j++
+	}
+	return true
+}

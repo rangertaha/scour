@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "schema": [
+    {
+      "name": "job",
+      "description": "one job vacancy",
+      "props": [
+        {
+          "name": "title",
+          "type": "string",
+          "aliases": ["role", "position", "job title"],
+          "description": "the name of the role being advertised",
+          "examples": ["Senior Backend Engineer"]
+        },
+        {
+          "name": "company",
+          "type": "string",
+          "aliases": ["employer", "organisation", "hiring company"],
+          "description": "who is hiring",
+          "examples": ["Acme Corp"]
+        },
+        {
+          "name": "location",
+          "type": "string",
+          "aliases": ["place", "office", "based in"],
+          "description": "where the role is based",
+          "examples": ["Austin, TX", "Remote"]
+        },
+        {
+          "name": "salary",
+          "type": "string",
+          "aliases": ["pay", "compensation", "salary range"],
+          "description": "what the role pays",
+          "examples": ["$140,000 - $180,000"]
+        },
+        {
+          "name": "employment",
+          "type": "string",
+          "aliases": ["employment type", "contract type", "job type"],
+          "description": "the basis of employment",
+          "examples": ["Full-time", "Contract", "Part-time"]
+        },
+        {
+          "name": "posted",
+          "type": "date",
+          "aliases": ["date posted", "published", "listed"],
+          "description": "when the vacancy was advertised",
+          "examples": ["2026-03-14"]
+        }
+      ]
+    }
+  ]
+}
