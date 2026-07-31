@@ -17,7 +17,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -150,6 +149,14 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 		st.deadline = time.Now().Add(opts.MaxTime)
 	}
 
+	// Scope is enforced on the way into the queue rather than by colly's
+	// URLFilters, which is a linear scan of one compiled expression per target.
+	// See scope for what that cost on a real list.
+	sc, err := newScope(opts.Targets)
+	if err != nil {
+		return nil, err
+	}
+
 	collector, err := c.newCollector(opts)
 	if err != nil {
 		return nil, err
@@ -178,7 +185,7 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 		return nil, fmt.Errorf("create queue: %w", err)
 	}
 
-	c.register(ctx, collector, pending, opts, st)
+	c.register(ctx, collector, pending, sc, opts, st)
 
 	start := time.Now()
 	for _, seed := range seedURLs(opts.Targets) {
@@ -196,7 +203,7 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 			Headers: &http.Header{},
 			Ctx:     colly.NewContext(),
 		}
-		if err := enqueue(pending, req); err != nil {
+		if err := enqueue(pending, sc, req); err != nil {
 			slog.Warn("seed not queued", "url", seed, "err", err)
 		}
 	}
@@ -239,14 +246,6 @@ func (c *Crawler) newCollector(opts Options) (*colly.Collector, error) {
 	}
 	if opts.Debug {
 		settings = append(settings, colly.Debugger(&debug.LogDebugger{}))
-	}
-
-	filters, err := urlFilters(opts.Targets)
-	if err != nil {
-		return nil, err
-	}
-	if len(filters) > 0 {
-		settings = append(settings, colly.URLFilters(filters...))
 	}
 
 	collector := colly.NewCollector(settings...)
@@ -392,7 +391,7 @@ const (
 )
 
 // register wires the callbacks. This is the whole integration with colly.
-func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pending *crawlqueue.Storage, opts Options, st *state) {
+func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pending *crawlqueue.Storage, sc *scope, opts Options, st *state) {
 	entityID := opts.Entity.ID
 
 	// Attach the timing and lineage this request will be recorded with, and
@@ -521,7 +520,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		req.Ctx.Put(ctxScore, formatScore(predicted))
 		req.Ctx.Put(ctxParent, e.Request.URL.String())
 
-		if err := enqueue(pending, req); err != nil {
+		if err := enqueue(pending, sc, req); err != nil {
 			slog.Error("queue link failed", "url", link, "err", err)
 		}
 	})
@@ -594,46 +593,6 @@ func seedURLs(targets []store.Target) []string {
 	return out
 }
 
-// urlFilters keeps the crawl inside the entity's targets. Domains become a
-// host pattern, optionally covering subdomains; URL targets become a prefix.
-func urlFilters(targets []store.Target) ([]*regexp.Regexp, error) {
-	var out []*regexp.Regexp
-	for _, t := range targets {
-		var expr string
-		switch t.Kind {
-		case store.TargetDomain:
-			host := regexp.QuoteMeta(t.Value)
-			if t.Subdomains {
-				expr = `^https?://([a-zA-Z0-9_-]+\.)*` + host + `(:\d+)?(/|$)`
-			} else {
-				expr = `^https?://(www\.)?` + host + `(:\d+)?(/|$)`
-			}
-		case store.TargetURL:
-			u, err := url.Parse(t.Value)
-			if err != nil {
-				return nil, fmt.Errorf("target %q: %w", t.Value, err)
-			}
-			// Stay under the seed's directory, which is what makes a URL
-			// target narrower than a domain target.
-			dir := u.Path
-			if i := strings.LastIndex(dir, "/"); i >= 0 {
-				dir = dir[:i+1]
-			}
-			expr = `^https?://([a-zA-Z0-9_-]+\.)*` + regexp.QuoteMeta(strings.TrimPrefix(u.Hostname(), "www.")) +
-				`(:\d+)?` + regexp.QuoteMeta(dir)
-		}
-		if expr == "" {
-			continue
-		}
-		re, err := regexp.Compile(expr)
-		if err != nil {
-			return nil, fmt.Errorf("build url filter for %q: %w", t.Value, err)
-		}
-		out = append(out, re)
-	}
-	return out, nil
-}
-
 // queuedScore recovers the score a request was queued with, from the context
 // the crawler attached to it. Seeds carry no score and sort first, which is
 // right: they are the pages the user asked for by name.
@@ -663,7 +622,15 @@ func queuedScore(data []byte) float64 {
 // entirely, and is safe because every call happens inside an active request:
 // the loop only terminates when the queue is empty and nothing is in flight,
 // and this row lands before that request reports itself complete.
-func enqueue(pending *crawlqueue.Storage, r *colly.Request) error {
+func enqueue(pending *crawlqueue.Storage, sc *scope, r *colly.Request) error {
+	// Out-of-scope links are dropped here rather than filtered on the way out.
+	// colly checks its URLFilters when a request is dequeued, so a link that
+	// was never going to be fetched would still be stored, scored and read
+	// back first. Refusing it at the door keeps the frontier to pages the
+	// crawl might actually visit.
+	if !sc.allows(r.URL.String()) {
+		return nil
+	}
 	data, err := r.Marshal()
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
