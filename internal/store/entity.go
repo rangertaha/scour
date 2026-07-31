@@ -151,7 +151,25 @@ func (s *Store) AddAlias(ctx context.Context, entityID uint, word string) error 
 // already exists updates the example, so correcting one is a repeat of the
 // original command.
 func (s *Store) AddProperty(ctx context.Context, entityID uint, name, typ, example string) error {
-	return s.AddPropertyDetail(ctx, entityID, "", name, typ, example, "", "")
+	return s.AddPropertyDetail(ctx, entityID, PropertyDetail{Name: name, Type: typ, Example: example})
+}
+
+// PropertyDetail is everything a property can be taught. It is a struct rather
+// than a parameter list because most of it is optional strings, and seven of
+// those in a row is an invitation to pass them in the wrong order.
+type PropertyDetail struct {
+	// Domain scopes the teaching to one site. Empty is the entity's default.
+	Domain string
+	Name   string
+	Type   string
+	// Example is a value the site actually publishes, which is the strongest
+	// signal the matcher has.
+	Example string
+	// Description says what the field means, in words a page might also use.
+	Description string
+	// Regex decides which node wins, by rejecting text it does not match, and
+	// what that node yields, through capture group one.
+	Regex string
 }
 
 // AddPropertyDetail records a property along with what it means.
@@ -159,26 +177,26 @@ func (s *Store) AddProperty(ctx context.Context, entityID uint, name, typ, examp
 // The description is not documentation. The matcher scores how far a page's
 // label context overlaps a property's description, so the words chosen here
 // are read by the model that locates the field.
-func (s *Store) AddPropertyDetail(ctx context.Context, entityID uint, domain, name, typ, example, description, regex string) error {
-	name = strings.TrimSpace(name)
+func (s *Store) AddPropertyDetail(ctx context.Context, entityID uint, d PropertyDetail) error {
+	name := strings.TrimSpace(d.Name)
 	if name == "" {
 		return errors.New("property name must not be empty")
 	}
-	domain = NormaliseDomain(domain)
+	domain := NormaliseDomain(d.Domain)
 
-	// A pattern that does not compile must fail here rather than at extraction,
+	// A pattern that does not compile must fail here rather than mid-crawl,
 	// where it would look like a site that stopped publishing the field.
-	if regex != "" {
-		if _, err := regexp.Compile(regex); err != nil {
+	if d.Regex != "" {
+		if _, err := regexp.Compile(d.Regex); err != nil {
 			return fmt.Errorf("property %q regex: %w", name, err)
 		}
 	}
 
 	update := []string{"type", "example"}
-	if regex != "" {
+	if d.Regex != "" {
 		update = append(update, "regex")
 	}
-	if description != "" {
+	if d.Description != "" {
 		// An empty description must not blank one already recorded: adding an
 		// example to a templated property should not cost it its meaning.
 		update = append(update, "description")
@@ -190,8 +208,8 @@ func (s *Store) AddPropertyDetail(ctx context.Context, entityID uint, domain, na
 			DoUpdates: clause.AssignmentColumns(update),
 		}).
 		Create(&Property{
-			EntityID: entityID, Domain: domain, Name: name, Type: typ,
-			Example: example, Description: description, Regex: regex,
+			EntityID: entityID, Domain: domain, Name: name, Type: d.Type,
+			Example: d.Example, Description: d.Description, Regex: d.Regex,
 		}).Error
 	if err != nil {
 		return fmt.Errorf("add property %q: %w", name, err)
@@ -216,7 +234,7 @@ func (s *Store) AddPropertyAlias(ctx context.Context, entityID uint, domain, pro
 		Where("entity_id = ? AND domain = ? AND name = ?", entityID, domain, strings.TrimSpace(propName)).
 		First(&prop).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) && domain != "" {
-		if err = s.AddPropertyDetail(ctx, entityID, domain, propName, "", "", "", ""); err != nil {
+		if err = s.AddPropertyDetail(ctx, entityID, PropertyDetail{Domain: domain, Name: propName}); err != nil {
 			return err
 		}
 		err = s.db.WithContext(ctx).

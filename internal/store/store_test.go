@@ -311,10 +311,12 @@ func TestPropertiesForResolvesPerDomain(t *testing.T) {
 	}
 
 	// The entity's default schema.
-	if err := s.AddPropertyDetail(ctx, e.ID, "", "author", "string", "Jane Doe", "who wrote it", ""); err != nil {
+	if err := s.AddPropertyDetail(ctx, e.ID, PropertyDetail{
+		Name: "author", Type: "string", Example: "Jane Doe", Description: "who wrote it"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddPropertyDetail(ctx, e.ID, "", "title", "string", "A headline", "", ""); err != nil {
+	if err := s.AddPropertyDetail(ctx, e.ID, PropertyDetail{
+		Name: "title", Type: "string", Example: "A headline"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AddPropertyAlias(ctx, e.ID, "", "author", "byline"); err != nil {
@@ -322,8 +324,9 @@ func TestPropertiesForResolvesPerDomain(t *testing.T) {
 	}
 
 	// What one site taught.
-	if err := s.AddPropertyDetail(ctx, e.ID, "example.com", "author", "string",
-		"Hannah McLeod", "", `^By (.*)$`); err != nil {
+	if err := s.AddPropertyDetail(ctx, e.ID, PropertyDetail{
+		Domain: "example.com", Name: "author", Type: "string",
+		Example: "Hannah McLeod", Regex: `^By (.*)$`}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AddPropertyAlias(ctx, e.ID, "example.com", "author", "vcard"); err != nil {
@@ -388,7 +391,8 @@ func TestTaughtRegexIsValidated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddPropertyDetail(ctx, e.ID, "", "title", "", "", "", "^(unclosed"); err == nil {
+	if err := s.AddPropertyDetail(ctx, e.ID, PropertyDetail{
+		Name: "title", Regex: "^(unclosed"}); err == nil {
 		t.Error("an invalid regex should be rejected")
 	}
 }

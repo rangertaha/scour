@@ -65,7 +65,7 @@ func newAddCmd(a *app) *cobra.Command {
 		"the property's type: string, number, bool, date, url, email (date covers times)")
 	fl.StringVarP(&f.example, "example", "e", "", "an example value for the property")
 	fl.StringVar(&f.regex, "regex", "",
-		"what a valid value looks like; text that does not match is not this property")
+		"what a valid value looks like; capture group one is the value if there is one")
 	fl.BoolVar(&f.subdomains, "subdomains", false, "follow subdomains of the added domains")
 	fl.IntVar(&f.depth, "depth", 0, "depth limit for the added targets (0 for the configured default)")
 
@@ -154,7 +154,8 @@ func runAdd(cmd *cobra.Command, a *app, name string, f addFlags) error {
 	}
 
 	if f.prop != "" {
-		if err := s.AddPropertyDetail(c, entity.ID, scope, f.prop, f.propType, f.example, "", f.regex); err != nil {
+		if err := s.AddPropertyDetail(c, entity.ID, store.PropertyDetail{
+			Domain: scope, Name: f.prop, Type: f.propType, Example: f.example, Regex: f.regex}); err != nil {
 			return err
 		}
 		where := ""

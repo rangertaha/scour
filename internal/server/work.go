@@ -211,7 +211,8 @@ func applyTemplate(ctx context.Context, s *store.Store, entityID uint, name stri
 		if len(p.Examples) > 0 {
 			example = p.Examples[0]
 		}
-		if err := s.AddPropertyDetail(ctx, entityID, "", p.Name, string(p.Type), example, p.Description, ""); err != nil {
+		if err := s.AddPropertyDetail(ctx, entityID, store.PropertyDetail{
+			Name: p.Name, Type: string(p.Type), Example: example, Description: p.Description}); err != nil {
 			return err
 		}
 		for _, alias := range p.Aliases {

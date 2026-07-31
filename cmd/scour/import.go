@@ -277,11 +277,13 @@ func importProps(ctx context.Context, s *store.Store, entityID uint, path string
 			continue
 		}
 
-		err = s.AddPropertyDetail(ctx, entityID, "", prop,
-			field(record, cols, "type"),
-			field(record, cols, "example"),
-			field(record, cols, "description"),
-			field(record, cols, "regex"))
+		err = s.AddPropertyDetail(ctx, entityID, store.PropertyDetail{
+			Name:        prop,
+			Type:        field(record, cols, "type"),
+			Example:     field(record, cols, "example"),
+			Description: field(record, cols, "description"),
+			Regex:       field(record, cols, "regex"),
+		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s:%d: %v\n", path, line, err)
 			res.skipped++

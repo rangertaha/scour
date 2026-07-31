@@ -57,18 +57,18 @@ type Prop struct {
 	Examples    []string `json:"examples,omitempty"`
 	Props       []Prop   `json:"props,omitempty"`
 
-	// Pattern is what a valid value looks like. Text that does not match is
-	// not this field, whatever else about it agrees.
+	// Pattern is what an acceptable value looks like, and optionally where in
+	// it the value is.
 	//
-	// It validates, it does not transform. Locating a value and cleaning one
-	// are different jobs, and a pattern that rewrites is only ever repairing a
-	// node that should not have been chosen: it leaves the wrong node winning
-	// and hides that it did. A pattern that rejects removes the wrong node from
-	// contention instead, so the right one can win on its own.
+	// One pattern answers both questions because a regex already does. Text it
+	// rejects is not this field, whatever else about it agrees, so it decides
+	// which node wins; capture group one decides what that node yields. With no
+	// group it only validates, and extracting without validating is incoherent,
+	// since a pattern that does not match has nothing to extract.
 	//
-	// Type already does this for the shapes a type implies, via ShapePrior.
-	// Pattern is the same idea where the knowledge is about a site rather than
-	// a type.
+	// Type already does the validating half for the shapes a type implies, via
+	// ShapePrior. Pattern is the same idea where the knowledge is about a site
+	// rather than a type.
 	Pattern string `json:"pattern,omitempty"`
 }
 

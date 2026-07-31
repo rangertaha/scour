@@ -43,18 +43,21 @@ type Property struct {
 	Name    string `gorm:"uniqueIndex:idx_prop_entity_name;not null"`
 	Type    string
 	Example string
-	// Regex says what a valid value looks like. Text that does not match is not
-	// this property, whatever else about it agrees.
+	// Regex says what an acceptable value looks like, and optionally where in it
+	// the value is.
 	//
-	// It validates, it does not transform. A pattern that rewrites is only ever
-	// repairing a node that should not have been chosen: it leaves the wrong
-	// node winning and hides that it did. A pattern that rejects removes the
-	// wrong node from contention, so the right one can win on its own, which
-	// also means the improvement shows up in the locator rather than only in
-	// the output.
+	// One pattern does both jobs because a regex already answers both
+	// questions. Text it rejects is not this property, whatever else about it
+	// agrees, so it decides which node wins. Capture group one is the value, so
+	// it also decides what that node yields. With no capture group it only
+	// validates, and extracting without validating is incoherent: a pattern
+	// that does not match has nothing to extract.
 	//
-	// Type already does this for the shapes a type implies. This is the same
-	// idea where the knowledge is about a site rather than a type.
+	// Both halves are needed on real pages. Validation moves the choice to a
+	// better node, which is how a Facebook URL stops being a byline. Extraction
+	// reaches values no node holds cleanly: an author URL is the right node with
+	// the name inside it, and an alt text reading "Author:THE NEWSROOM" carries
+	// its own label with no second node holding the name alone.
 	Regex string
 	// Description says what the field means, in words a page might also use.
 	// The matcher scores description overlap, so this is not documentation:

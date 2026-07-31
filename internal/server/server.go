@@ -185,7 +185,8 @@ func (s *Server) createEntity(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, p := range req.Properties {
-		if err := s.store.AddPropertyDetail(ctx, entity.ID, "", p.Name, p.Type, p.Example, p.Description, ""); err != nil {
+		if err := s.store.AddPropertyDetail(ctx, entity.ID, store.PropertyDetail{
+			Name: p.Name, Type: p.Type, Example: p.Example, Description: p.Description}); err != nil {
 			s.fail(w, r, err)
 			return
 		}

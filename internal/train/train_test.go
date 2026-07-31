@@ -11,6 +11,7 @@ import (
 	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/config"
 	"github.com/rangertaha/scour/internal/store"
+	"github.com/rangertaha/scour/internal/wom"
 )
 
 // corpus is a small site whose car pages all share one markup shape, which is
@@ -291,4 +292,37 @@ func keys(m map[string]bool) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// One taught pattern does two jobs. It vetoes candidates during scoring, which
+// moves the choice of node, and its capture group replaces the extraction
+// pattern induction synthesized, which decides what that node yields.
+func TestTaughtPatternOverridesInducedExtraction(t *testing.T) {
+	items := []wom.Item{{
+		Name: "article",
+		Items: []wom.Item{
+			{Name: "author", Locator: wom.Locator{Regex: `^(.*)$`}},
+			{Name: "title", Locator: wom.Locator{Regex: `^(.*)$`}},
+		},
+	}}
+	props := []wom.Prop{{
+		Name: "article",
+		Props: []wom.Prop{
+			{Name: "author", Pattern: `^https://example\.com/author/([a-z-]+)$`},
+			{Name: "title"},
+		},
+	}}
+
+	applyTaughtPatterns(items, props)
+
+	byName := map[string]string{}
+	for _, child := range items[0].Items {
+		byName[child.Name] = child.Regex
+	}
+	if got, want := byName["author"], `^https://example\.com/author/([a-z-]+)$`; got != want {
+		t.Errorf("author regex = %q, want the taught one", got)
+	}
+	if got := byName["title"]; got != `^(.*)$` {
+		t.Errorf("an untaught field kept %q, want the induced pattern", got)
+	}
 }

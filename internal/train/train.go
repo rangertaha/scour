@@ -124,6 +124,11 @@ func (t *Trainer) Run(ctx context.Context, entity *store.Entity, opts Options) (
 		return nil, fmt.Errorf("induce model for %s: %w", entity.Name, err)
 	}
 
+	// A taught pattern is authoritative over the synthesized one. Induction
+	// generalizes from what it saw, which is the right default and the wrong
+	// answer whenever someone has looked at the site and knows better.
+	applyTaughtPatterns(model.Items, props)
+
 	if err := t.saveFieldChain(ctx, model); err != nil {
 		return nil, err
 	}
@@ -337,6 +342,40 @@ func flatten(items []wom.Item) []store.Rule {
 		walk(item, nil)
 	}
 	return out
+}
+
+// applyTaughtPatterns replaces induced extraction patterns with taught ones,
+// matching by prop name through the nested item tree.
+//
+// The pattern has already vetoed candidates during scoring, which is what moved
+// the choice of node. This is the other half of the same string: what the
+// chosen node yields.
+func applyTaughtPatterns(items []wom.Item, props []wom.Prop) {
+	taught := map[string]string{}
+	var collect func([]wom.Prop)
+	collect = func(ps []wom.Prop) {
+		for _, p := range ps {
+			if p.Pattern != "" {
+				taught[p.Name] = p.Pattern
+			}
+			collect(p.Props)
+		}
+	}
+	collect(props)
+	if len(taught) == 0 {
+		return
+	}
+
+	var walk func([]wom.Item)
+	walk = func(is []wom.Item) {
+		for i := range is {
+			if pat, ok := taught[is[i].Name]; ok {
+				is[i].Regex = pat
+			}
+			walk(is[i].Items)
+		}
+	}
+	walk(items)
 }
 
 // valuesOf flattens one extracted record into prop and text pairs.
