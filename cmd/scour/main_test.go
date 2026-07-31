@@ -108,8 +108,10 @@ func TestListJSON(t *testing.T) {
 	runOK(t, dir, "add", "vehicle")
 
 	out := runOK(t, dir, "list", "--json")
-	if !strings.Contains(out, `"Matches": 0`) {
-		t.Errorf("json output missing the match count:\n%s", out)
+	for _, key := range []string{`"name": "vehicle"`, `"records": 0`, `"trained": "never"`} {
+		if !strings.Contains(out, key) {
+			t.Errorf("json output missing %s:\n%s", key, out)
+		}
 	}
 }
 
