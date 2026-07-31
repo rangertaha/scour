@@ -564,6 +564,18 @@ func labelContext(n *graph.Node) []weightedLabel {
 		if v, ok := el.Attr("name"); ok {
 			addQualified(v, 0.95)
 		}
+		if v, ok := el.Attr("rel"); ok {
+			// rel is a declaring attribute: it is how <link> and <a> say what
+			// they point at. It was never read as a label, which is why
+			// <link rel="canonical"> went unused despite appearing on ten of
+			// thirteen news sites with no competition for the meaning.
+			//
+			// Values that name nothing, preconnect and stylesheet and nofollow,
+			// simply match no property. That is the point: rel says which of
+			// these elements is worth reading, and the ones that mislead are
+			// the ones where rel was ignored in favour of a generic slot.
+			addQualified(v, 1.0)
+		}
 		if v, ok := el.Attr("id"); ok {
 			addNamed(add, v, 0.9)
 		}

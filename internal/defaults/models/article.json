@@ -99,7 +99,8 @@
             "url",
             "guid",
             "permalink",
-            "href"
+            "href",
+            "canonical"
           ],
           "description": "the address of the article itself",
           "examples": [

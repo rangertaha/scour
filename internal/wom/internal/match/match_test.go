@@ -192,3 +192,35 @@ func TestLabelPatternVetoesTheWrongName(t *testing.T) {
 		t.Error("without a label pattern subtitle should still score, or the test proves nothing")
 	}
 }
+
+// rel is how <link> and <a> say what they point at, and it was never read as a
+// label. That is why <link rel="canonical"> went unused despite appearing on
+// ten of thirteen news sites with nothing competing for the meaning.
+func TestRelNamesWhatALinkPointsAt(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	h := DefaultHeuristic()
+	link := schema.Prop{Name: "link", Type: schema.TypeURL, Aliases: []string{"url", "canonical"}}
+
+	// <link rel="canonical" href="..."> as the graph holds it: the value is the
+	// href attribute, and the only thing naming it is the sibling rel.
+	doc := graph.NewDocument(graph.FormatHTML)
+	el := doc.Append(graph.New(graph.KindElement, "link", ""))
+	el.Append(graph.New(graph.KindAttribute, "rel", "canonical"))
+	href := el.Append(graph.New(graph.KindAttribute, "href", "https://example.com/news/story"))
+
+	if got := h.Score(ctx, link, href); got < 0.5 {
+		t.Errorf("rel=canonical scored %.3f for link, want it recognised", got)
+	}
+
+	// A rel naming something else must not lend the href any authority.
+	other := graph.NewDocument(graph.FormatHTML)
+	pre := other.Append(graph.New(graph.KindElement, "link", ""))
+	pre.Append(graph.New(graph.KindAttribute, "rel", "preconnect"))
+	cdn := pre.Append(graph.New(graph.KindAttribute, "href", "https://fonts.googleapis.com"))
+
+	if got, want := h.Score(ctx, link, cdn), h.Score(ctx, link, href); got >= want {
+		t.Errorf("preconnect scored %.3f against canonical's %.3f", got, want)
+	}
+}
