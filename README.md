@@ -15,17 +15,24 @@ crawl budget on the pages most likely to pay off.
 
 ## Status
 
-Early development. The interface below is the intended design; it is not all
-implemented yet. Expect commands and flags to change. The module is not
+Early development. Expect commands and flags to change. The module is not
 published, so `go install` will not work until the first release; clone and
 `go build ./cmd/scour` in the meantime.
 
+Crawling, extraction, training, export, the HTTP API and MCP all work, and are
+measured below against live sites rather than fixtures. Running the components
+across several machines works and has been tested end to end against a real
+NATS server and a real S3 endpoint. What is least settled is the extraction
+model itself: it is being changed by measurement, and the open questions are
+kept in `ALGO.md` and `PLAN.md`.
+
 ## Measured
 
-Extraction is judged on two live corpora rather than on fixtures. The HTML one
-is 808 pages crawled from 19 news sites in English, Greek, Russian and French;
-the feed one is ten live RSS and Atom feeds. Both are re-measured after every
-change to inference.
+Extraction is judged on live corpora rather than on fixtures, and re-measured
+after every change to inference. There are three: 808 pages from 19 news sites
+in English, Greek, Russian and French; ten live RSS and Atom feeds; and a
+second, larger HTML corpus of 1,267 pages from 30 different sites, kept
+deliberately separate so it can answer a question the first cannot.
 
 Per field, how many of the extracted records carry a value, and how many
 distinct values those are. Distinctness is the number that matters: a field
@@ -50,6 +57,37 @@ article.
 | --- | --- |
 | Before | 9 |
 | After | **266** |
+
+### 1,267 pages, 30 sites the model has never seen
+
+The first corpus is the one the work was done against, so its numbers say only
+that the faults found in it were fixed. This one is thirty different sites,
+sharing no host with the first, in Arabic, Turkish, Spanish, Malayalam and
+English. Nothing was tuned against it.
+
+| Field | 19 sites, developed against | 30 sites, unseen |
+| --- | --- | --- |
+| title | 90% | **100%** |
+| link | 100% | 100% |
+| summary | 66% | **90%** |
+| published | 35% | **76%** |
+| modified | 34% | **76%** |
+| author | 42% | **69%** |
+| section | 23% | **98%** |
+
+867 records from 1,267 pages. Every field is filled more often on the sites the
+algorithm had never seen than on the ones it was built against, which is the
+opposite of what overfitting looks like.
+
+Three faults it exposed, all open:
+
+- `published` and `modified` resolve to the same node on 59% of records, so two
+  fields are claiming one value.
+- The CSS dialect pins a per-page id, `#asset-59da10e1-...`, while the XPath for
+  the same field is generic and works across 660 records. The two dialects are
+  meant to agree.
+- 118 of 867 titles are `"Politics"`, `"News"`, `"Community"`: section pages
+  being extracted as articles, which inflates every number above.
 
 ### What the corpora exposed
 
@@ -605,7 +643,81 @@ widens how many hosts are in flight at once rather than how hard any one of them
 is hit. The `RATE` column in `scour crawl` output shows the value actually
 applied to each URL, which is where a `[[host]]` override becomes visible.
 
-### Page storage
+## Running across machines
+
+A single `scour crawl` needs nothing installed: the components talk over a
+broker, and with no broker configured one runs embedded in the process. The same
+code spread over several machines is the same components pointed at a real one.
+
+```
+scour run --role store --bus-url nats://broker:4222
+scour run --role crawl --bus-url nats://broker:4222     # as many as you like
+```
+
+The store owns the database and the frontier; crawlers own the network and
+nothing else. A crawler holds no state about an entity: what is in scope, what
+has been visited and what is worth fetching next are all decided by the store,
+so crawlers are interchangeable and losing one costs only the lease on whatever
+it was holding.
+
+The frontier stays in the store rather than becoming a stream, because the order
+is the product. It pops highest score first and a broker delivers in publish
+order, so the component that can sort the queue hands out the next few and keeps
+the rest.
+
+Three things follow from that, and each was a bug before it was a feature:
+
+**Politeness is enforced where work is handed out.** A rate limit inside a
+crawler bounds only what that crawler does; a site sees the sum of all of them.
+Measured against a live site with one crawler, dispatching without pacing asked
+for 5.6 pages a second where the configuration said one. The dispatcher paces
+per host, using the host's own recorded rate when it has one, so the site sees
+the configured rate however many crawlers there are.
+
+**A crawler dying costs a retry, not a page.** Work is leased rather than
+removed from the frontier. Killing a crawler mid-crawl was tested: fetching
+continued on the survivor and nothing was fetched twice.
+
+**Bodies have to be somewhere shared**, which is what the page store below is
+for. Without it the trainer reads an empty cache with a database full of keys.
+
+Tested end to end against a real NATS server and a real S3 endpoint: two
+crawlers and a store, 48 pages fetched, 48 objects in the bucket, nothing on
+local disk, then training in a fourth process reading every one of them.
+
+## Instrumentation
+
+Everything the pipeline measures is published on `scour.<entity>.metric`, so a
+crawl can be watched while it happens rather than summarised when it ends.
+
+| Metric | Unit | Labels |
+| --- | --- | --- |
+| `fetch.latency` | ms | host, status |
+| `fetch.bytes` | bytes | host, status |
+| `fetch.status` | count | host, status |
+| `queue.depth` | count | |
+| `queue.in_flight` | count | |
+| `extract.records` | count | entity |
+| `extract.rules` | count | entity |
+
+Its own stream, and not a work queue like the others: a work queue delivers a
+message once and removes it, so one dashboard consuming a metric would take it
+from every other. Metrics are kept for anyone who asks, the oldest are dropped
+when full, and they are forgotten after fifteen minutes, so nothing watching the
+pipeline can slow it down or fill a disk.
+
+Publishing is fire and forget. It does not deduplicate, returns no error and
+retries nothing, because observability must not be able to break the thing it
+observes.
+
+The pairs are what answer a question. Latency and status per host say whether a
+site is straining or has started blocking. Queue depth beside in-flight says
+whether crawlers are keeping up, since a queue growing while in-flight sits at
+its ceiling means discovery is outrunning fetching. Rules beside records say
+whether a model still understands a site: a rule count holding while records
+fall is a site changing under a model that has not noticed.
+
+## Page storage
 
 Fetched bodies are the only part of scour's state that does not have to be
 local. The database records that a page was fetched and what its key is; the
@@ -636,7 +748,7 @@ configuration, so a crawler needs no secrets in the file that also says what to
 crawl.
 
 The object stores are behind a build tag, because linking the AWS and Google
-SDKs takes the binary from 64MB to 105MB and most crawls keep their pages in a
+SDKs adds 29MB to the stripped binary and most crawls keep their pages in a
 directory:
 
 ```
