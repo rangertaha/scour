@@ -804,6 +804,25 @@ checked and ruled out. Fifty-eight candidates cleared the floor on one real
 page and the true headline lost among them, which points at grouping and
 support rather than at scoring.
 
+HTML article pages come back addressed by position: five Guardian articles gave
+`./meta[13]/@content` for modified, `./meta[19]/@content` for published and
+`./meta[28]/@content` for summary, with the container at `/html/head` and title,
+author and section missing entirely. Summary came back as "The Guardian" at 0.88.
+
+The positional part has a known cause and is deliberately not fixed yet.
+Predicated already knows how to write `meta[@property="article:modified_time"]`,
+and declines to, because the step still carries an index and an index is treated
+as having pinned the element down. It pinned it down on those five pages only:
+every one is from the same site and template, so the index never varied and
+Generalize kept it. On a wider crawl it would vary, the index would be dropped,
+and the predicate would fire unaided.
+
+So this needs a broader corpus before it is worth changing anything. Fixing it
+against five pages of one site risks preferring a predicate where an index was
+genuinely right, and would not have shown the difference either way. The measured
+symptom is recorded here so the next attempt starts from the diagnosis rather
+than repeating it.
+
 ## 9. Engineering standards
 
 Mirrors what `wom` already does, so the two repos feel like one codebase.
