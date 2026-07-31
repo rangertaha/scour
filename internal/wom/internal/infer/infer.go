@@ -245,6 +245,40 @@ func aggregate(matches []scored) float64 {
 	return clamp((0.5*mean + 0.5*best) * supportFactor(len(matches)))
 }
 
+// weakFieldShare is how far below the strongest field a field may fall and
+// still help locate the record. It is a share rather than an absolute score
+// because scores are only comparable within one document: what matters is that
+// this field is much less certain than the ones beside it.
+const weakFieldShare = 0.5
+
+// confidentHits drops the hits of fields far less certain than their siblings.
+func confidentHits(hits [][]*graph.Node, confidence []float64) [][]*graph.Node {
+	var strongest float64
+	for _, c := range confidence {
+		if c > strongest {
+			strongest = c
+		}
+	}
+	if strongest == 0 {
+		return hits
+	}
+
+	out := make([][]*graph.Node, len(hits))
+	var kept int
+	for i, nodes := range hits {
+		if confidence[i] >= strongest*weakFieldShare {
+			out[i] = nodes
+			kept++
+		}
+	}
+	// If that leaves nothing to go on, the fields are uniformly weak rather
+	// than one being an outlier, and the original evidence is all there is.
+	if kept == 0 {
+		return hits
+	}
+	return out
+}
+
 // supportFactor rises from 0.85 at a single observation towards 1.0 as
 // support grows, saturating around five observations.
 func supportFactor(support int) float64 {
@@ -282,6 +316,7 @@ func (e *Engine) inferRecord(ctx context.Context, p schema.Prop, cands []*graph.
 	// First pass: find each simple field independently, purely to discover
 	// where they live.
 	hits := make([][]*graph.Node, len(flat))
+	confidence := make([]float64, len(flat))
 	found := 0
 	// present counts the fields the corpus has any candidate for at all. It is
 	// the denominator of coverage below, and it is deliberately not the number
@@ -298,9 +333,24 @@ func (e *Engine) inferRecord(ctx context.Context, p schema.Prop, cands []*graph.
 			for _, m := range g.matches {
 				hits[i] = append(hits[i], m.node)
 			}
+			confidence[i] = aggregate(g.matches)
 			found++
 		}
 	}
+
+	// A field the document does not have still matches something, faintly, and
+	// that faint match votes on where the record is. It votes badly: the only
+	// ancestor enclosing both the real fields and a stray one is far above the
+	// record. On a news feed, a six-field schema whose author and section are
+	// absent chose the document root, support 1, where the four fields actually
+	// present chose the repeating item, support 36. One unfindable field cost
+	// thirty-five records out of thirty-six.
+	//
+	// So a field that is far less certain than its siblings is treated as
+	// absent for the purpose of locating the record. It keeps its own locator
+	// if one can be found inside the container; it simply does not get to say
+	// where the container is.
+	hits = confidentHits(hits, confidence)
 	if found == 0 && len(nested) == 0 {
 		return nil, false
 	}
