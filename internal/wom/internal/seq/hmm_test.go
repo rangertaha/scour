@@ -218,3 +218,50 @@ func TestLogSumExp(t *testing.T) {
 		t.Errorf("logSumExp with a zero term = %v, want log(0.5)", got)
 	}
 }
+
+// The chain knows about order and nothing about content, so it must adjust a
+// score rather than replace part of it.
+//
+// Averaging the posterior in, which is what Refine did before, subtracted a
+// roughly constant amount from every field instead: a posterior is a
+// distribution over states, so it sits near 1/(fields+1) wherever the chain is
+// unsure, and the blend replaced 40% of each score with that. The wider the
+// schema, the thinner the mass, and the lower every score. On a real feed it
+// put a correctly located byline at 0.240 against a threshold of 0.25.
+func TestRefineDoesNotShrinkAScoreForHavingCompany(t *testing.T) {
+	t.Parallel()
+
+	// One position, one confident field, and nothing for the chain to go on.
+	score := func(fields int) float64 {
+		region := make([]float64, fields)
+		region[0] = 0.8
+		out := HMM{}.Refine([][][]float64{{region}}, fields)
+		return out[0][0][0]
+	}
+
+	narrow, wide := score(3), score(12)
+	if wide < narrow*0.9 {
+		t.Errorf("a field scores %.3f beside two others and %.3f beside eleven; "+
+			"declaring more fields must not cost the ones that match", narrow, wide)
+	}
+	if narrow < 0.5 {
+		t.Errorf("a confident match refined to %.3f, which the chain alone should not do", narrow)
+	}
+}
+
+// The chain still has to be able to say a position is not a field, or it would
+// contribute nothing at all.
+func TestRefineDampsTheFieldsTheChainRejects(t *testing.T) {
+	t.Parallel()
+
+	// Two positions whose order says field 1 then field 2, scored ambiguously.
+	regions := [][][]float64{{
+		{0.6, 0.5},
+		{0.5, 0.6},
+	}}
+	out := HMM{}.Refine(regions, 2)
+	if out[0][0][1] >= regions[0][0][1] {
+		t.Errorf("the rejected reading %.3f was not damped below its raw %.3f",
+			out[0][0][1], regions[0][0][1])
+	}
+}

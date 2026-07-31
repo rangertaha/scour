@@ -78,8 +78,9 @@ const (
 	// the M-step. Raising it makes training more conservative on little data.
 	priorWeight = 4.0
 
-	// chainWeight is how much the sequence posterior counts against the raw
-	// Matcher score when the two are blended.
+	// chainWeight is how far the sequence posterior may pull the raw Matcher
+	// score down at one position. A field the chain considers the best reading
+	// of a position keeps its score; the rest are damped towards it.
 	chainWeight = 0.4
 )
 
@@ -131,11 +132,24 @@ func (h HMM) tolerance() float64 {
 }
 
 // Refine implements Sequence. It fits the transition matrix to every region,
-// decodes each with forward-backward, and blends the resulting posteriors with
+// decodes each with forward-backward, and uses the resulting posteriors to damp
 // the incoming scores.
 //
-// The blend matters: the chain knows about order but nothing about content, so
-// a confident literal match must not be overturned by a sequence prior alone.
+// The chain knows about order but nothing about content, so a confident literal
+// match must not be overturned by a sequence prior alone. It therefore adjusts
+// the score rather than replacing part of it: the field the chain reads a
+// position as keeps its score, and the alternatives are damped in proportion to
+// how far the chain prefers its own reading.
+//
+// Averaging the two directly, which is what this did before, subtracted a
+// roughly constant amount from every field instead. A posterior is a
+// distribution over states, so with seven fields and a background state it sits
+// near an eighth wherever the chain is unsure, and forty per cent of every score
+// was replaced by that eighth. Scores fell by about a third across the board,
+// and by more as the schema grew, since a wider schema spreads the same
+// probability mass thinner. On the Guardian's feed it put author at 0.240
+// against a threshold of 0.25: the byline was located correctly in every one of
+// forty-five items and then discarded for want of a hundredth.
 func (h HMM) Refine(regions [][][]float64, fields int) [][][]float64 {
 	if fields == 0 || len(regions) == 0 {
 		return regions
@@ -158,9 +172,22 @@ func (h HMM) Refine(regions [][][]float64, fields int) [][][]float64 {
 		post := chain.posterior(emit)
 		out[i] = make([][]float64, len(regions[i]))
 		for t := range regions[i] {
+			// The chain's own reading of this position sets the reference, so
+			// what counts is how each field compares with it rather than the
+			// absolute size of a probability spread over every state.
+			var top float64
+			for j := 0; j < fields; j++ {
+				if post[t][j+1] > top {
+					top = post[t][j+1]
+				}
+			}
 			row := make([]float64, fields)
 			for j := 0; j < fields; j++ {
-				row[j] = clamp((1-chainWeight)*regions[i][t][j] + chainWeight*post[t][j+1])
+				agreement := 1.0
+				if top > 0 {
+					agreement = post[t][j+1] / top
+				}
+				row[j] = clamp(regions[i][t][j] * (1 - chainWeight + chainWeight*agreement))
 			}
 			out[i][t] = row
 		}
