@@ -1,0 +1,702 @@
+// SPDX-License-Identifier: MIT
+
+// Package infer locates schema properties in a graph. It owns the structural
+// half of the problem — grouping equivalent nodes and finding record
+// containers — and delegates semantics to a Matcher and field ordering to a
+// Sequence.
+package infer
+
+import (
+	"context"
+	"math"
+	"sort"
+
+	"github.com/rangertaha/scour/internal/wom/internal/graph"
+	"github.com/rangertaha/scour/internal/wom/internal/match"
+	"github.com/rangertaha/scour/internal/wom/internal/pattern"
+	"github.com/rangertaha/scour/internal/wom/internal/schema"
+	"github.com/rangertaha/scour/internal/wom/internal/seq"
+)
+
+// Inference proceeds in three stages.
+//
+//  1. Score. Every value-holding node is scored against the prop by the
+//     Matcher. This is local evidence only: text, labels, and type.
+//
+//  2. Group. Matches are collapsed by their generalized path, so a value that
+//     occurs once per list item across many pages becomes a single location
+//     with high support rather than dozens of coincidences. This is the step
+//     that turns instances into a pattern, and it is where a tree beats a
+//     chain: repeated subtree shape is directly observable.
+//
+//  3. Synthesize. The winning group's nodes are turned into a schema.Locator — a URI
+//     pattern, an XPath, a CSS selector, a native path, and an extraction
+//     regex — each generalized over exactly the parts that varied.
+//
+// A prop with nested props adds a container stage between 2 and 3: the record
+// container is the deepest node covering the most fields, and the fields are
+// then re-scored within it by the sequence model before being addressed
+// relative to it.
+
+// Engine runs inference against a graph. It is configured once and reused;
+// all of its state is read-only during a call, so one Engine serves concurrent
+// callers.
+type Engine struct {
+	// Matcher supplies the semantic judgement and the sequence model's
+	// emissions. Required.
+	Matcher match.Matcher
+
+	// Sequence refines per-node scores using field order. Nil disables it.
+	Sequence seq.Sequence
+
+	// MinProbability is the confidence below which a located item is dropped.
+	MinProbability float64
+}
+
+// Infer locates each prop in the given documents and returns the items that
+// cleared the confidence threshold. Props that could not be located are
+// omitted rather than returned with a zero probability.
+func (e *Engine) Infer(ctx context.Context, props []schema.Prop, docs []*graph.Node) ([]schema.Item, error) {
+	if len(docs) == 0 {
+		return nil, nil
+	}
+	return e.infer(ctx, props, candidatesIn(docs))
+}
+
+// candidatesUnder collects the value-holding nodes beneath a set of
+// containers.
+func candidatesUnder(containers []*graph.Node) []*graph.Node {
+	out := make([]*graph.Node, 0, len(containers))
+	for _, c := range containers {
+		out = append(out, graph.ValueNodes(c)...)
+	}
+	return out
+}
+
+// clamp confines a score to [0,1].
+func clamp(f float64) float64 {
+	switch {
+	case f < 0:
+		return 0
+	case f > 1:
+		return 1
+	}
+	return f
+}
+
+// scoreFloor is the local score below which a node is not considered a match
+// at all. It is deliberately lower than the reported-probability threshold so
+// that weak-but-consistent evidence can still accumulate into a confident
+// group.
+const scoreFloor = 0.15
+
+// maxSampleValues caps how many observed values an schema.Item reports.
+const maxSampleValues = 5
+
+// result is an inferred item together with the nodes that produced it.
+type result struct {
+	item  schema.Item
+	nodes []*graph.Node
+}
+
+// candidatesIn collects every value-holding node in the given documents.
+func candidatesIn(docs []*graph.Node) []*graph.Node {
+	var out []*graph.Node
+	for _, d := range docs {
+		d.Walk(func(n *graph.Node) bool {
+			if n.Kind.HoldsValue() && n.Text() != "" {
+				out = append(out, n)
+			}
+			return true
+		})
+	}
+	return out
+}
+
+// infer locates each prop and returns the items that cleared the confidence
+// threshold. Props that could not be located are omitted rather than returned
+// with a zero probability.
+func (e *Engine) infer(ctx context.Context, props []schema.Prop, cands []*graph.Node) ([]schema.Item, error) {
+	items := make([]schema.Item, 0, len(props))
+	for _, p := range props {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		res, ok := e.inferProp(ctx, p, cands, nil)
+		if ok && res.item.Probability >= e.MinProbability {
+			items = append(items, res.item)
+		}
+	}
+	return items, nil
+}
+
+// inferProp dispatches on whether the prop is a record. bases, when non-nil,
+// is the set of container nodes the resulting locators should be expressed
+// relative to.
+func (e *Engine) inferProp(ctx context.Context, p schema.Prop, cands []*graph.Node, bases map[*graph.Node]bool) (*result, bool) {
+	if p.IsRecord() {
+		return e.inferRecord(ctx, p, cands, bases)
+	}
+	return e.inferField(ctx, p, cands, bases)
+}
+
+// scored pairs a candidate node with its local score.
+type scored struct {
+	node  *graph.Node
+	score float64
+}
+
+// scoreAll scores every candidate against p, keeping those above the floor.
+func (e *Engine) scoreAll(ctx context.Context, p schema.Prop, cands []*graph.Node) []scored {
+	out := make([]scored, 0, 16)
+	for _, n := range cands {
+		if s := e.Matcher.Score(ctx, p, n); s >= scoreFloor {
+			out = append(out, scored{node: n, score: s})
+		}
+	}
+	return out
+}
+
+// inferField locates a single-valued prop.
+func (e *Engine) inferField(ctx context.Context, p schema.Prop, cands []*graph.Node, bases map[*graph.Node]bool) (*result, bool) {
+	matches := e.scoreAll(ctx, p, cands)
+	if len(matches) == 0 {
+		return nil, false
+	}
+	best := bestGroup(groupMatches(matches, bases))
+	if best == nil {
+		return nil, false
+	}
+	return buildResult(p, best, bases), true
+}
+
+// group is a set of matches sharing a generalized location.
+type group struct {
+	key     string
+	disc    pattern.Discriminator
+	matches []scored
+}
+
+// groupMatches buckets matches by the location they generalize to. When bases
+// is set the key is the path relative to the enclosing container, so the same
+// field in different list items lands in one bucket.
+func groupMatches(matches []scored, bases map[*graph.Node]bool) []group {
+	byKey := make(map[string][]scored)
+	discs := make(map[string]pattern.Discriminator)
+	var order []string
+	for _, m := range matches {
+		disc := pattern.DiscriminatorFor(m.node)
+		key := m.node.Format().String() + "|" + pattern.Coarse(pathFor(m.node, bases))
+		if disc.Set() {
+			key += "|@" + disc.Name + "=" + disc.Value
+		}
+		if _, seen := byKey[key]; !seen {
+			order = append(order, key)
+			discs[key] = disc
+		}
+		byKey[key] = append(byKey[key], m)
+	}
+	out := make([]group, 0, len(order))
+	for _, k := range order {
+		out = append(out, group{key: k, disc: discs[k], matches: byKey[k]})
+	}
+	return out
+}
+
+// bestGroup ranks groups by aggregate confidence and returns the strongest.
+func bestGroup(groups []group) *group {
+	if len(groups) == 0 {
+		return nil
+	}
+	sort.SliceStable(groups, func(i, j int) bool {
+		gi, gj := aggregate(groups[i].matches), aggregate(groups[j].matches)
+		if gi != gj {
+			return gi > gj
+		}
+		if len(groups[i].matches) != len(groups[j].matches) {
+			return len(groups[i].matches) > len(groups[j].matches)
+		}
+		return groups[i].key < groups[j].key
+	})
+	return &groups[0]
+}
+
+// aggregate converts a group's local scores into a confidence.
+//
+// The quantity being estimated is whether the *location* is right, not
+// whether every instance matches. A group's nodes are structurally identical
+// by construction, so one instance matching an example dead-on is strong
+// evidence for the whole location — a schema listing "Toyota" as an example
+// should not be penalised because the other rows say "Honda" and "Ford".
+// Confidence is therefore an even blend of the mean and the best score, then
+// damped by how much the location repeated.
+func aggregate(matches []scored) float64 {
+	if len(matches) == 0 {
+		return 0
+	}
+	var sum, best float64
+	for _, m := range matches {
+		sum += m.score
+		if m.score > best {
+			best = m.score
+		}
+	}
+	mean := sum / float64(len(matches))
+	return clamp((0.5*mean + 0.5*best) * supportFactor(len(matches)))
+}
+
+// supportFactor rises from 0.85 at a single observation towards 1.0 as
+// support grows, saturating around five observations.
+func supportFactor(support int) float64 {
+	if support <= 0 {
+		return 0
+	}
+	const saturation = 5.0
+	return 0.85 + 0.15*math.Min(1, math.Log1p(float64(support))/math.Log1p(saturation))
+}
+
+// buildResult turns a winning group into an schema.Item.
+func buildResult(p schema.Prop, g *group, bases map[*graph.Node]bool) *result {
+	nodes := make([]*graph.Node, 0, len(g.matches))
+	for _, m := range g.matches {
+		nodes = append(nodes, m.node)
+	}
+	return &result{
+		item: schema.Item{
+			Name:        p.Name,
+			Probability: aggregate(g.matches),
+			Locator:     locatorFor(nodes, bases, p.Type, g.disc),
+			Support:     len(nodes),
+			Values:      sampleValues(nodes),
+		},
+		nodes: nodes,
+	}
+}
+
+// inferRecord locates a prop that describes a repeating record. It first finds
+// where the fields co-occur, then re-scores them inside that container with
+// the sequence model, and finally addresses each field relative to it.
+func (e *Engine) inferRecord(ctx context.Context, p schema.Prop, cands []*graph.Node, bases map[*graph.Node]bool) (*result, bool) {
+	flat, nested := splitProps(p.Props)
+
+	// First pass: find each simple field independently, purely to discover
+	// where they live.
+	hits := make([][]*graph.Node, len(flat))
+	found := 0
+	// present counts the fields the corpus has any candidate for at all. It is
+	// the denominator of coverage below, and it is deliberately not the number
+	// of fields declared: a schema may describe a field this corpus never
+	// publishes, and absent data is not evidence against the record.
+	present := len(nested)
+	for i, cp := range flat {
+		matches := e.scoreAll(ctx, cp, cands)
+		if len(matches) == 0 {
+			continue
+		}
+		present++
+		if g := bestGroup(groupMatches(matches, bases)); g != nil {
+			for _, m := range g.matches {
+				hits[i] = append(hits[i], m.node)
+			}
+			found++
+		}
+	}
+	if found == 0 && len(nested) == 0 {
+		return nil, false
+	}
+
+	containers := containerGroup(hits)
+	if len(containers) == 0 {
+		// The fields never co-occur under a shared ancestor, so there is no
+		// record to speak of. Fall back to reporting them as independent
+		// locations under the documents that hold them.
+		containers = documentsOf(hits)
+	}
+	if len(containers) == 0 {
+		return nil, false
+	}
+	containerSet := make(map[*graph.Node]bool, len(containers))
+	for _, c := range containers {
+		containerSet[c] = true
+	}
+
+	items := make([]schema.Item, 0, len(p.Props))
+	var covered int
+
+	// Second pass: score the simple fields within each container, letting the
+	// sequence model use field order to settle ambiguous positions.
+	if len(flat) > 0 {
+		perField := e.scoreContainers(ctx, flat, containers)
+		for i, cp := range flat {
+			if len(perField[i]) == 0 {
+				continue
+			}
+			if g := bestGroup(groupMatches(perField[i], containerSet)); g != nil {
+				res := buildResult(cp, g, containerSet)
+				if res.item.Probability >= e.MinProbability {
+					items = append(items, res.item)
+					covered++
+				}
+			}
+		}
+	}
+
+	// Nested records recurse, restricted to the containers just found and
+	// addressed relative to them.
+	if len(nested) > 0 {
+		sub := candidatesUnder(containers)
+		for _, cp := range nested {
+			if res, ok := e.inferProp(ctx, cp, sub, containerSet); ok && res.item.Probability >= e.MinProbability {
+				items = append(items, res.item)
+				covered++
+			}
+		}
+	}
+
+	if covered == 0 {
+		return nil, false
+	}
+
+	// The record is only as good as the share of its fields that were found
+	// and how confidently each was located.
+	var sum float64
+	for _, it := range items {
+		sum += it.Probability
+	}
+	// Coverage is the share of the findable fields that were located, not the
+	// share of the declared ones. A schema wider than the site it is applied
+	// to should locate fewer fields, not report the ones it did find with less
+	// confidence: otherwise adding a property the site never publishes would
+	// quietly weaken every record, and a thorough schema would be punished for
+	// its thoroughness.
+	findable := present
+	if findable < covered {
+		findable = covered
+	}
+	if findable == 0 {
+		return nil, false
+	}
+
+	// The penalty is softened because it is multiplied into an already
+	// fractional confidence. Applied linearly, a record that recovered a
+	// quarter of its fields lost three quarters of its probability and fell
+	// under any useful threshold, which made a nine-field schema locate
+	// nothing on a site where a three-field one located everything. Taking the
+	// root keeps the ordering, so more coverage still means more confidence,
+	// without turning a partial record into no record at all.
+	coverage := math.Sqrt(float64(covered) / float64(findable))
+	prob := clamp(sum / float64(covered) * coverage * supportFactor(len(containers)))
+
+	item := schema.Item{
+		Name:        p.Name,
+		Probability: prob,
+		Locator:     locatorFor(containers, bases, schema.TypeString, pattern.Discriminator{}),
+		Support:     len(containers),
+		Items:       items,
+	}
+	// A container spans a whole record, so there is no single value to
+	// extract from it.
+	item.Regex = pattern.AnyRegex
+	return &result{item: item, nodes: containers}, true
+}
+
+// splitProps separates simple fields from nested records, preserving order.
+func splitProps(props []schema.Prop) (flat, nested []schema.Prop) {
+	for _, p := range props {
+		if p.IsRecord() {
+			nested = append(nested, p)
+		} else {
+			flat = append(flat, p)
+		}
+	}
+	return flat, nested
+}
+
+// scoreContainers scores every field against the leaves of each container and
+// runs the sequence model over each container independently. It returns, per
+// field, the nodes that the refined scores assign to it.
+func (e *Engine) scoreContainers(ctx context.Context, fields []schema.Prop, containers []*graph.Node) [][]scored {
+	out := make([][]scored, len(fields))
+	perRegion := make([][]*graph.Node, 0, len(containers))
+	regions := make([][][]float64, 0, len(containers))
+	for _, c := range containers {
+		leaves := graph.ValueNodes(c)
+		if len(leaves) == 0 {
+			continue
+		}
+
+		raw := make([][]float64, len(leaves))
+		for i, leaf := range leaves {
+			row := make([]float64, len(fields))
+			for j, f := range fields {
+				row[j] = e.Matcher.Score(ctx, f, leaf)
+			}
+			raw[i] = row
+		}
+		perRegion = append(perRegion, leaves)
+		regions = append(regions, raw)
+	}
+	if len(regions) == 0 {
+		return out
+	}
+
+	// Every region is handed over at once: a sequence model that trains needs
+	// to see the whole set before it decodes any of it.
+	if e.Sequence != nil {
+		if refined := e.Sequence.Refine(regions, len(fields)); sameShape(refined, regions) {
+			regions = refined
+		}
+	}
+
+	// Each leaf is claimed by at most one field: its best scoring one.
+	for r, leaves := range perRegion {
+		for i, leaf := range leaves {
+			bestJ, bestV := -1, scoreFloor
+			for j := range fields {
+				if regions[r][i][j] > bestV {
+					bestJ, bestV = j, regions[r][i][j]
+				}
+			}
+			if bestJ >= 0 {
+				out[bestJ] = append(out[bestJ], scored{node: leaf, score: bestV})
+			}
+		}
+	}
+	return out
+}
+
+// sameShape reports whether a refined score set still lines up with the one it
+// came from. A Sequence is third-party code, so its output is checked rather
+// than trusted.
+func sameShape(got, want [][][]float64) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if len(got[i]) != len(want[i]) {
+			return false
+		}
+		for j := range got[i] {
+			if len(got[i][j]) != len(want[i][j]) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// containerGroup finds the repeating node that holds a record. It picks the
+// ancestors covering the most distinct fields, keeps only the deepest of
+// them — a shallower ancestor covers the same fields but is less specific —
+// and returns the largest set of those that share a generalized path.
+func containerGroup(hits [][]*graph.Node) []*graph.Node {
+	cov := make(map[*graph.Node]map[int]bool)
+	var order []*graph.Node
+
+	for field, nodes := range hits {
+		for _, n := range nodes {
+			for a := n.Parent; a != nil; a = a.Parent {
+				if a.Kind == graph.KindURI || a.Kind == graph.KindDomain || a.Kind == graph.KindRoot {
+					break
+				}
+				m, ok := cov[a]
+				if !ok {
+					m = make(map[int]bool)
+					cov[a] = m
+					order = append(order, a)
+				}
+				m[field] = true
+				// Keep climbing out of an embedded document: a JSON-LD block
+				// holds some of the record's fields and the surrounding page
+				// holds the rest, so the container spans both.
+				if a.IsTopDocument() {
+					break
+				}
+			}
+		}
+	}
+	if len(order) == 0 {
+		return nil
+	}
+
+	maxCov := 0
+	for _, a := range order {
+		if c := len(cov[a]); c > maxCov {
+			maxCov = c
+		}
+	}
+	if maxCov < 2 {
+		// A single field does not make a record; let the caller fall back.
+		return nil
+	}
+
+	inSet := make(map[*graph.Node]bool)
+	var best []*graph.Node
+	for _, a := range order {
+		if len(cov[a]) == maxCov {
+			inSet[a] = true
+			best = append(best, a)
+		}
+	}
+
+	// Discard any container that encloses another container: the inner one is
+	// the actual repeating unit.
+	encloses := make(map[*graph.Node]bool)
+	for _, n := range best {
+		for a := n.Parent; a != nil; a = a.Parent {
+			if inSet[a] {
+				encloses[a] = true
+			}
+			if a.IsTopDocument() {
+				break
+			}
+		}
+	}
+	deepest := best[:0:0]
+	for _, n := range best {
+		if !encloses[n] {
+			deepest = append(deepest, n)
+		}
+	}
+	if len(deepest) == 0 {
+		return nil
+	}
+
+	// Containers that generalize to the same path are instances of one
+	// pattern; the largest such set is the record.
+	byKey := make(map[string][]*graph.Node)
+	var keys []string
+	for _, n := range deepest {
+		key := n.Format().String() + "|" + pattern.Coarse(n.Path())
+		if _, seen := byKey[key]; !seen {
+			keys = append(keys, key)
+		}
+		byKey[key] = append(byKey[key], n)
+	}
+	sort.SliceStable(keys, func(i, j int) bool {
+		if len(byKey[keys[i]]) != len(byKey[keys[j]]) {
+			return len(byKey[keys[i]]) > len(byKey[keys[j]])
+		}
+		// Prefer the more specific pattern when counts tie.
+		di, dj := byKey[keys[i]][0].Depth(), byKey[keys[j]][0].Depth()
+		if di != dj {
+			return di > dj
+		}
+		return keys[i] < keys[j]
+	})
+	return byKey[keys[0]]
+}
+
+// documentsOf returns the distinct documents holding the given nodes, used as
+// containers of last resort when no tighter one exists.
+func documentsOf(hits [][]*graph.Node) []*graph.Node {
+	seen := make(map[*graph.Node]bool)
+	var out []*graph.Node
+	for _, nodes := range hits {
+		for _, n := range nodes {
+			if d := n.Document(); d != nil && !seen[d] {
+				seen[d] = true
+				out = append(out, d)
+			}
+		}
+	}
+	return out
+}
+
+// locatorFor synthesizes the address of a set of equivalent nodes, in every
+// dialect that applies to them.
+func locatorFor(nodes []*graph.Node, bases map[*graph.Node]bool, t schema.Type, disc pattern.Discriminator) schema.Locator {
+	if len(nodes) == 0 {
+		return schema.Locator{}
+	}
+
+	loc := schema.Locator{Format: nodes[0].Format()}
+	paths := make([]string, 0, len(nodes))
+	selectors := make([]string, 0, len(nodes))
+	xpaths := make([]string, 0, len(nodes))
+	uris := make([]string, 0, len(nodes))
+	values := make([]string, 0, len(nodes))
+
+	for _, n := range nodes {
+		base := baseOf(n, bases)
+		paths = append(paths, graph.RelPath(n, base))
+		switch {
+		case n.Format().Markup():
+			xpaths = append(xpaths, graph.RelXPath(n, base))
+			selectors = append(selectors, graph.RelSelector(n, base))
+		default:
+			// A non-markup value may still sit inside a page, as JSON-LD
+			// does. Record the element hosting it so the locator says which
+			// block it came from.
+			if host := graph.HostElement(n); host != nil {
+				xpaths = append(xpaths, host.XPath())
+				selectors = append(selectors, host.Selector())
+			}
+		}
+		if u := n.URI(); u != nil {
+			uris = append(uris, u.String())
+		}
+		values = append(values, n.Text())
+	}
+
+	loc.Path = pattern.Generalize(paths)
+	loc.XPath = pattern.Predicated(pattern.Generalize(xpaths), disc)
+	loc.Selector = pattern.PredicatedSelector(pattern.GeneralizeSelector(selectors), disc)
+	if loc.Format.Markup() && loc.XPath != "" {
+		// For markup the native dialect is XPath, so the two must agree —
+		// including the predicate, which is what makes the locator precise.
+		loc.Path = loc.XPath
+	}
+	loc.URI = pattern.SynthesizeURI(uris)
+	loc.Regex = pattern.SynthesizeRegex(values)
+	if loc.Regex == pattern.AnyRegex {
+		// The observed values had no shared shape, but the declared type still
+		// says something about what a valid one looks like.
+		loc.Regex = pattern.ShapePrior(t)
+	}
+	return loc
+}
+
+// baseOf returns the container a node should be addressed relative to, or nil
+// for absolute addressing.
+func baseOf(n *graph.Node, bases map[*graph.Node]bool) *graph.Node {
+	if len(bases) == 0 {
+		return nil
+	}
+	for a := n; a != nil; a = a.Parent {
+		if bases[a] {
+			return a
+		}
+		if a.IsTopDocument() {
+			break
+		}
+	}
+	return nil
+}
+
+// pathFor returns the path used to group a node: relative to its container
+// when one applies, absolute otherwise.
+func pathFor(n *graph.Node, bases map[*graph.Node]bool) string {
+	return graph.RelPath(n, baseOf(n, bases))
+}
+
+// sampleValues returns a few distinct observed values, for eyeballing whether
+// a match is real.
+func sampleValues(nodes []*graph.Node) []string {
+	seen := make(map[string]bool)
+	out := make([]string, 0, maxSampleValues)
+	for _, n := range nodes {
+		v := n.Text()
+		if v == "" || seen[v] {
+			continue
+		}
+		if len(v) > 120 {
+			v = v[:120] + "…"
+		}
+		seen[v] = true
+		if out = append(out, v); len(out) == maxSampleValues {
+			break
+		}
+	}
+	return out
+}

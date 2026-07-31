@@ -1,0 +1,250 @@
+{
+  "site": "apnews",
+  "urls": [
+    "https://apnews.com/article/alien-terrorist-removal-court-deportation-dormant-trump-4573fe653ae466e7c9540dc02ee970e5",
+    "https://apnews.com/article/alien-terrorist-removal-court-first-deportation-plot-112d39fcfd89f52ddc6b85cb04e0c934",
+    "https://apnews.com/article/america-250-time-capsule-8d869f8aa39ef61a5721c039c397464e"
+  ],
+  "model": {
+    "version": 1,
+    "schema": [
+      {
+        "name": "article",
+        "aliases": [
+          "story",
+          "news"
+        ],
+        "description": "A published news article",
+        "props": [
+          {
+            "name": "title",
+            "type": "string",
+            "aliases": [
+              "headline"
+            ]
+          },
+          {
+            "name": "authors",
+            "type": "string",
+            "aliases": [
+              "author",
+              "byline"
+            ]
+          },
+          {
+            "name": "published",
+            "type": "date",
+            "aliases": [
+              "datePublished",
+              "published_time"
+            ]
+          },
+          {
+            "name": "modified",
+            "type": "date",
+            "aliases": [
+              "dateModified",
+              "modified_time"
+            ]
+          }
+        ]
+      }
+    ],
+    "items": [
+      {
+        "name": "article",
+        "probability": 0.7983471203813419,
+        "locator": {
+          "format": "html",
+          "uri": "^https://apnews\\.com/article/[^/]+$",
+          "xpath": "/html[1]/head[1]",
+          "selector": "html \u003e head",
+          "path": "/html[1]/head[1]",
+          "regex": "^(.*)$"
+        },
+        "support": 3,
+        "items": [
+          {
+            "name": "title",
+            "probability": 0.9659580173703016,
+            "locator": {
+              "format": "json",
+              "uri": "^https://apnews\\.com/article/[^/]+$",
+              "xpath": "/html[1]/head[1]/script[1]",
+              "selector": "#link-ld-json",
+              "path": "$[0].headline",
+              "regex": "^(.*)$"
+            },
+            "support": 3,
+            "values": [
+              "First hearing for long-dormant court as US seeks to deport an Afghan woman",
+              "US uses dormant court against Afghan woman charged in terror plot",
+              "America 250 Commission Seals 900-Pound Time Capsule for 2276"
+            ]
+          },
+          {
+            "name": "authors",
+            "probability": 0.4202226781526386,
+            "locator": {
+              "format": "html",
+              "uri": "^https://apnews\\.com/article/[^/]+$",
+              "xpath": "./meta[@property=\"article:author\"]/@content",
+              "selector": "meta[property=\"article:author\"]",
+              "path": "./meta[@property=\"article:author\"]/@content",
+              "regex": "^https://apnews\\.com/author/([A-Za-z]+-[A-Za-z]+)$"
+            },
+            "support": 5,
+            "values": [
+              "https://apnews.com/author/michael-kunzelman",
+              "https://apnews.com/author/eric-tucker",
+              "https://apnews.com/author/holly-ramer"
+            ]
+          },
+          {
+            "name": "published",
+            "probability": 0.957932997719187,
+            "locator": {
+              "format": "json",
+              "uri": "^https://apnews\\.com/article/[^/]+$",
+              "xpath": "/html[1]/head[1]/script[1]",
+              "selector": "#link-ld-json",
+              "path": "$[0].datePublished",
+              "regex": "^(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2})Z$"
+            },
+            "support": 3,
+            "values": [
+              "2026-07-30T17:04:39Z",
+              "2026-07-30T01:42:23Z",
+              "2026-06-15T12:34:32Z"
+            ]
+          },
+          {
+            "name": "modified",
+            "probability": 0.9614803957610825,
+            "locator": {
+              "format": "json",
+              "uri": "^https://apnews\\.com/article/[^/]+$",
+              "xpath": "/html[1]/head[1]/script[1]",
+              "selector": "#link-ld-json",
+              "path": "$[0].dateModified",
+              "regex": "^(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2})Z$"
+            },
+            "support": 3,
+            "values": [
+              "2026-07-30T18:22:03Z",
+              "2026-07-30T01:42:23Z",
+              "2026-06-15T12:34:32Z"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "records": [
+    {
+      "name": "article",
+      "path": "/html[1]/head[1]",
+      "uri": "https://apnews.com/article/alien-terrorist-removal-court-deportation-dormant-trump-4573fe653ae466e7c9540dc02ee970e5",
+      "items": [
+        {
+          "name": "title",
+          "value": "First hearing for long-dormant court as US seeks to deport an Afghan woman",
+          "path": "$[0].headline",
+          "uri": "https://apnews.com/article/alien-terrorist-removal-court-deportation-dormant-trump-4573fe653ae466e7c9540dc02ee970e5"
+        },
+        {
+          "name": "authors",
+          "value": "michael-kunzelman",
+          "path": "/html[1]/head[1]/meta[13]/@content",
+          "uri": "https://apnews.com/article/alien-terrorist-removal-court-deportation-dormant-trump-4573fe653ae466e7c9540dc02ee970e5"
+        },
+        {
+          "name": "authors",
+          "value": "eric-tucker",
+          "path": "/html[1]/head[1]/meta[14]/@content",
+          "uri": "https://apnews.com/article/alien-terrorist-removal-court-deportation-dormant-trump-4573fe653ae466e7c9540dc02ee970e5"
+        },
+        {
+          "name": "published",
+          "value": "2026-07-30T17:04:39",
+          "path": "$[0].datePublished",
+          "uri": "https://apnews.com/article/alien-terrorist-removal-court-deportation-dormant-trump-4573fe653ae466e7c9540dc02ee970e5"
+        },
+        {
+          "name": "modified",
+          "value": "2026-07-30T18:22:03",
+          "path": "$[0].dateModified",
+          "uri": "https://apnews.com/article/alien-terrorist-removal-court-deportation-dormant-trump-4573fe653ae466e7c9540dc02ee970e5"
+        }
+      ]
+    },
+    {
+      "name": "article",
+      "path": "/html[1]/head[1]",
+      "uri": "https://apnews.com/article/alien-terrorist-removal-court-first-deportation-plot-112d39fcfd89f52ddc6b85cb04e0c934",
+      "items": [
+        {
+          "name": "title",
+          "value": "US uses dormant court against Afghan woman charged in terror plot",
+          "path": "$[0].headline",
+          "uri": "https://apnews.com/article/alien-terrorist-removal-court-first-deportation-plot-112d39fcfd89f52ddc6b85cb04e0c934"
+        },
+        {
+          "name": "authors",
+          "value": "eric-tucker",
+          "path": "/html[1]/head[1]/meta[13]/@content",
+          "uri": "https://apnews.com/article/alien-terrorist-removal-court-first-deportation-plot-112d39fcfd89f52ddc6b85cb04e0c934"
+        },
+        {
+          "name": "authors",
+          "value": "michael-kunzelman",
+          "path": "/html[1]/head[1]/meta[14]/@content",
+          "uri": "https://apnews.com/article/alien-terrorist-removal-court-first-deportation-plot-112d39fcfd89f52ddc6b85cb04e0c934"
+        },
+        {
+          "name": "published",
+          "value": "2026-07-30T01:42:23",
+          "path": "$[0].datePublished",
+          "uri": "https://apnews.com/article/alien-terrorist-removal-court-first-deportation-plot-112d39fcfd89f52ddc6b85cb04e0c934"
+        },
+        {
+          "name": "modified",
+          "value": "2026-07-30T01:42:23",
+          "path": "$[0].dateModified",
+          "uri": "https://apnews.com/article/alien-terrorist-removal-court-first-deportation-plot-112d39fcfd89f52ddc6b85cb04e0c934"
+        }
+      ]
+    },
+    {
+      "name": "article",
+      "path": "/html[1]/head[1]",
+      "uri": "https://apnews.com/article/america-250-time-capsule-8d869f8aa39ef61a5721c039c397464e",
+      "items": [
+        {
+          "name": "title",
+          "value": "America 250 Commission Seals 900-Pound Time Capsule for 2276",
+          "path": "$[0].headline",
+          "uri": "https://apnews.com/article/america-250-time-capsule-8d869f8aa39ef61a5721c039c397464e"
+        },
+        {
+          "name": "authors",
+          "value": "holly-ramer",
+          "path": "/html[1]/head[1]/meta[13]/@content",
+          "uri": "https://apnews.com/article/america-250-time-capsule-8d869f8aa39ef61a5721c039c397464e"
+        },
+        {
+          "name": "published",
+          "value": "2026-06-15T12:34:32",
+          "path": "$[0].datePublished",
+          "uri": "https://apnews.com/article/america-250-time-capsule-8d869f8aa39ef61a5721c039c397464e"
+        },
+        {
+          "name": "modified",
+          "value": "2026-06-15T12:34:32",
+          "path": "$[0].dateModified",
+          "uri": "https://apnews.com/article/america-250-time-capsule-8d869f8aa39ef61a5721c039c397464e"
+        }
+      ]
+    }
+  ]
+}
