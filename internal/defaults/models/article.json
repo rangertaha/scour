@@ -6,13 +6,12 @@
       "description": "one published piece of writing",
       "props": [
         {
-          "name": "headline",
+          "name": "title",
           "type": "string",
           "aliases": [
-            "title",
             "heading"
           ],
-          "description": "the article's title",
+          "description": "the article's title, which a feed publishes as <title>",
           "examples": [
             "Council approves new transit line"
           ]
