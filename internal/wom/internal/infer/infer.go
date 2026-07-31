@@ -327,6 +327,108 @@ func confidentHits(hits [][]*graph.Node, confidence []float64) [][]*graph.Node {
 	return out
 }
 
+// rivalShare is how close to the best group an alternative location must score
+// to stay in contention while the record's container is being chosen.
+const rivalShare = 0.6
+
+// rivalGroups returns the locations a field might plausibly occupy: its best
+// group and any scoring within rivalShare of it.
+//
+// Committing each field to one location before the container is known makes a
+// local mistake fatal. The Guardian's feed shows why. Its channel carries an
+// <image> describing the feed's own logo, with a <title> and a <link> inside
+// it, and those outscored the real summary and link sitting in every <item>.
+// Two fields then lived under <image> and four under <item>, so the only
+// ancestor holding all six was the channel: one record where there were
+// forty-five.
+//
+// Neither field was uncertain enough for confidentHits to drop, and neither
+// could be dropped on its own, because removing one still leaves the other
+// outside the item. They are only wrong together, and only in the light of a
+// container neither of them had seen yet.
+//
+// So the choice is deferred. A field keeps its rivals through the container
+// stage, and an ancestor counts the field as covered if any rival lies beneath
+// it. The container that explains the most fields therefore wins on the reading
+// that suits it, and the second pass re-scores every field inside that
+// container anyway, which is where the field's location is actually settled.
+func rivalGroups(groups []group) []group {
+	best := bestGroup(groups)
+	if best == nil {
+		return nil
+	}
+	// bestGroup ranks in place, so the strongest group is first and the rivals
+	// that survive follow it in descending order.
+	floor := aggregate(best.matches) * rivalShare
+	out := make([]group, 0, len(groups))
+	for _, g := range groups {
+		if aggregate(g.matches) >= floor {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// expansionGain is how much more a record must repeat once a field is set
+// aside before that field is judged to have been matching outside it.
+//
+// It is a multiple rather than a difference because the question is one of
+// kind, not degree: a container occurring once where another occurs thirty-seven
+// times is not a slightly worse container, it is a different thing: the page
+// that holds the records rather than a record.
+const expansionGain = 2
+
+// dropExpanders sets aside fields that match only outside the repeating unit.
+//
+// Rivals settle the case where a field had a reading inside the record and lost
+// it locally. They cannot settle the case where the record has no such reading
+// at all, and a feed shows that plainly. The BBC publishes lastBuildDate on the
+// channel and nothing resembling it on an <item>, so a `modified` property
+// matches once, correctly, above every record. The only ancestor holding it
+// together with the item's own fields is the channel: one record where there
+// were thirty-seven.
+//
+// Confidence cannot catch this either. The channel's date is a real date under
+// a real label and scores as well as anything inside an item, so confidentHits,
+// which drops strays that are uncertain, leaves it alone.
+//
+// What marks it is what happens when it is set aside: the record starts
+// repeating. So each field is tried as absent in turn, and one whose absence
+// lets the container repeat far more is treated as absent for the purpose of
+// locating it. The field keeps its own locator if it can still be found inside
+// the container; it just does not get to say where the container is.
+func dropExpanders(hits [][]*graph.Node) [][]*graph.Node {
+	out := hits
+	// Each pass removes at most one field, and a field is never restored, so
+	// the loop cannot run longer than there are fields.
+	for range hits {
+		base := len(containerGroup(out))
+		bestI, bestN := -1, base
+		for i, nodes := range out {
+			if len(nodes) == 0 {
+				continue
+			}
+			trial := make([][]*graph.Node, len(out))
+			copy(trial, out)
+			trial[i] = nil
+
+			// A container set of zero means the remaining fields no longer make
+			// a record at all, which is a reason to keep the field, not drop it.
+			if n := len(containerGroup(trial)); n > bestN && n >= base*expansionGain {
+				bestI, bestN = i, n
+			}
+		}
+		if bestI < 0 {
+			return out
+		}
+		next := make([][]*graph.Node, len(out))
+		copy(next, out)
+		next[bestI] = nil
+		out = next
+	}
+	return out
+}
+
 // supportFactor rises from 0.85 at a single observation towards 1.0 as
 // support grows, saturating around five observations.
 func supportFactor(support int) float64 {
@@ -377,13 +479,19 @@ func (e *Engine) inferRecord(ctx context.Context, p schema.Prop, cands []*graph.
 			continue
 		}
 		present++
-		if g := bestGroup(groupMatches(matches, bases)); g != nil {
+		rivals := rivalGroups(groupMatches(matches, bases))
+		if len(rivals) == 0 {
+			continue
+		}
+		for _, g := range rivals {
 			for _, m := range g.matches {
 				hits[i] = append(hits[i], m.node)
 			}
-			confidence[i] = aggregate(g.matches)
-			found++
 		}
+		// The field's confidence is its best reading, not the average of the
+		// readings it is still considering.
+		confidence[i] = aggregate(rivals[0].matches)
+		found++
 	}
 
 	// A field the document does not have still matches something, faintly, and
@@ -402,6 +510,11 @@ func (e *Engine) inferRecord(ctx context.Context, p schema.Prop, cands []*graph.
 	if found == 0 && len(nested) == 0 {
 		return nil, false
 	}
+
+	// Rivals only help a field that has a reading inside the record. A field
+	// with no reading there at all is still free to drag the container out, so
+	// it is tested by its absence instead.
+	hits = dropExpanders(hits)
 
 	containers := containerGroup(hits)
 	if len(containers) == 0 {

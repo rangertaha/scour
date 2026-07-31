@@ -723,13 +723,14 @@ should stay off.
 
 ## 8.5 What crawling real sites exposed
 
-Five bugs found by running against live feeds and news sites, each one
-measured. They are recorded together because they are not five accidents: four
+Six bugs found by running against live feeds and news sites, each one
+measured. They are recorded together because they are not six accidents: most
 of them are the same missing idea wearing different clothes.
 
 | Bug | Effect | Measured |
 | --- | --- | --- |
 | Absent fields voted on where the record is | Container chosen at the document root | 1 to 36 records per feed |
+| A field's location fixed before the container was known | Feed logo beat the article, container rose to the channel | 9 to 260 records over ten feeds |
 | Date shape missed RFC-822 and ISO with a time | Locator found the node, pattern rejected every value | 0 to 3,245 values |
 | A whole inline script accepted as a field value | Publisher of 28,610 characters | 28,610 to 34 characters |
 | One observation quoted as a literal pattern | Rule matched one page and no other | Rules generalise |
@@ -738,7 +739,7 @@ of them are the same missing idea wearing different clothes.
 ### The systemic part
 
 **Structure is checked and plausibility is not.** wom decides where a value is
-with real care and then accepts whatever is there. Three of the five bugs are
+with real care and then accepts whatever is there. Three of the six bugs are
 that gap: a date that is not a date, a value that is an entire program, a
 pattern transcribed from a single sample. Each was invisible, because a field
 that fails silently is simply absent from the record and nothing reports it.
@@ -759,6 +760,21 @@ document does not have used to move the record, weaken its probability, and
 change what was extracted. Two of these are fixed; the general rule, that
 absence of a declared field is absence of data rather than evidence against the
 record, is worth applying wherever a schema is consulted.
+
+**A decision made early is a decision made blind.** Each field was committed to
+one location before the record's container existed, so a field that guessed
+wrong took the container with it. Two real feeds show the two shapes of this.
+The Guardian's channel carries an `<image>` for the site's own logo, whose
+`<title>` and `<link>` outscored the ones in every `<item>`; the BBC publishes
+`lastBuildDate` on the channel and nothing resembling it on an item at all. In
+both the container climbed to the channel and forty-five articles became one.
+
+The fix is to defer: a field keeps its rival locations until the container is
+chosen, and a field with no reading inside the record is tested by its absence,
+since a record that starts repeating once a field is set aside was never that
+field's record. Ten live feeds went from 9 extracted records to 260. The wider
+lesson is that container and field locations are one decision, not two, and any
+stage that resolves half of it first will sometimes resolve it wrongly.
 
 ### Still open
 
