@@ -94,7 +94,7 @@
         },
         {
           "name": "link",
-          "type": "string",
+          "type": "url",
           "aliases": [
             "url",
             "guid",
