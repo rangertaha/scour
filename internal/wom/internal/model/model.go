@@ -185,6 +185,11 @@ type Record struct {
 	Items []Record `json:"items,omitempty"`
 }
 
+// MaxValueLength is the longest text a single extracted field may hold. It is
+// set far above any real field rather than close to one, so it rules out
+// documents-as-values without deciding how long a summary may be.
+const MaxValueLength = 4096
+
 // Extract applies the model's locators to a graph and returns the data found.
 // This is the cheap half of the split: no scoring, no inference, just the
 // stored paths and regexes evaluated against whatever documents are present.
@@ -254,6 +259,15 @@ func extractItem(it schema.Item, roots []*graph.Node, base *graph.Node) []Record
 			// record rather than quietly wrong.
 			matched, ok := applyRegex(value, n.Text())
 			if !ok {
+				continue
+			}
+			// A field holds a value, not a document. A locator can address a
+			// node that grew, or that was never a value in the first place: a
+			// news page produced a publisher of 28,610 characters, the whole of
+			// an inline script that happened to mention the publisher's name.
+			// Induction now refuses such nodes, but a model stored before that,
+			// or one whose page has since changed, would still emit them.
+			if len(matched) > MaxValueLength {
 				continue
 			}
 			rec.Value = matched

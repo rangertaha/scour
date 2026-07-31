@@ -68,7 +68,11 @@ func (e *Engine) Infer(ctx context.Context, props []schema.Prop, docs []*graph.N
 func candidatesUnder(containers []*graph.Node) []*graph.Node {
 	out := make([]*graph.Node, 0, len(containers))
 	for _, c := range containers {
-		out = append(out, graph.ValueNodes(c)...)
+		for _, n := range graph.ValueNodes(c) {
+			if isCandidateValue(n) {
+				out = append(out, n)
+			}
+		}
 	}
 	return out
 }
@@ -104,13 +108,57 @@ func candidatesIn(docs []*graph.Node) []*graph.Node {
 	var out []*graph.Node
 	for _, d := range docs {
 		d.Walk(func(n *graph.Node) bool {
-			if n.Kind.HoldsValue() && n.Text() != "" {
+			if n.Kind.HoldsValue() && isCandidateValue(n) {
 				out = append(out, n)
 			}
 			return true
 		})
 	}
 	return out
+}
+
+// maxValueLength is the longest text a single field value may be.
+//
+// A field holds a value, not a document. The bound exists because whole
+// programs reach the graph as one node: a news page yielded a publisher of
+// 28,610 characters, the entire contents of an inline `window.config = {...}`
+// blob, which happened to mention the publisher's name and so outscored the
+// real one. Every genuine value on that page was under 160 characters.
+//
+// It is set far above any real field rather than close to one, so it rules out
+// documents-as-values without deciding how long a summary is allowed to be.
+const maxValueLength = 4096
+
+// isCandidateValue reports whether a node could hold a field's value.
+func isCandidateValue(n *graph.Node) bool {
+	text := n.Text()
+	return text != "" && len(text) <= maxValueLength && !isProgram(n)
+}
+
+// isProgram reports whether a node is the source text of a script or a
+// stylesheet.
+//
+// A page's JavaScript is not data about the page. Left in, it competes for
+// every field and sometimes wins: on a real news site the publisher came back
+// as "window.guardian = {"config":{"isDotcomRendering":true,...", which is one
+// enormous text node that happens to mention the publisher's name.
+//
+// The structured data inside a script is not lost by this. A JSON-LD block is
+// parsed into its own nested document when the page is read, so its fields
+// remain candidates as parsed JSON, addressed by key rather than by scraping
+// the source it arrived in.
+func isProgram(n *graph.Node) bool {
+	for c := n; c != nil; c = c.Parent {
+		if c.Kind == graph.KindDocument {
+			// Stop at the document boundary, so an embedded JSON-LD document
+			// is judged on its own and not on the script element holding it.
+			return false
+		}
+		if c.Kind == graph.KindElement && (c.Name == "script" || c.Name == "style") {
+			return true
+		}
+	}
+	return false
 }
 
 // infer locates each prop and returns the items that cleared the confidence
