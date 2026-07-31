@@ -16,7 +16,11 @@ func TestSynthesizeRegex(t *testing.T) {
 		want   string
 	}{
 		{"none", nil, AnyRegex},
-		{"single literal", []string{"Toyota"}, `^(Toyota)$`},
+		// One sample is not evidence of a pattern, so the caller is left to
+		// fall back on the declared type's shape.
+		{"seen once", []string{"Toyota"}, AnyRegex},
+		// The same value on every page is a constant, and a literal is right.
+		{"agreed across pages", []string{"Toyota", "Toyota", "Toyota"}, `^(Toyota)$`},
 		{"same length digits", []string{"2019", "2021", "2018"}, `^(\d{4})$`},
 		{"varying length letters", []string{"Ford", "Toyota"}, `^([A-Za-z]+)$`},
 		{"shared punctuation", []string{"2019-01-02", "2021-12-31", "2020-06-07"}, `^(\d{4}-\d{2}-\d{2})$`},

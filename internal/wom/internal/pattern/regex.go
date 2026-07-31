@@ -27,7 +27,22 @@ func SynthesizeRegex(values []string) string {
 		return AnyRegex
 	}
 	if len(vals) == 1 {
-		return `^(` + regexp.QuoteMeta(vals[0]) + `)$`
+		// One value seen many times is a constant, and a literal is exactly
+		// right for it: a publisher that reads "The Guardian" on every page has
+		// told you what it is. One value seen once is not a constant, it is a
+		// sample, and quoting it produces a rule that matches the page it came
+		// from and nothing else. Real examples of the second: a section learned
+		// as ^(UK politics)$ and a summary learned as the literal text of one
+		// article, each of which then extracted exactly one value ever.
+		//
+		// Deduplication hides the difference, so the count before it is what
+		// decides. Falling back to AnyRegex lets the caller substitute the
+		// declared type's shape, which is knowledge about the field rather than
+		// a transcription of one of its values.
+		if len(values) > 1 {
+			return `^(` + regexp.QuoteMeta(vals[0]) + `)$`
+		}
+		return AnyRegex
 	}
 
 	shapes := make([]([]runRec), 0, len(vals))
