@@ -91,8 +91,15 @@ func renderStatus(cmd *cobra.Command, a *app, name string, st *store.Status) err
 		st.Matches, st.Valid, st.Invalid, st.Unlabelled))
 
 	if st.Model != nil {
-		line("model", fmt.Sprintf("%s, trained %s, accuracy %.2f",
-			st.Model.Algorithm, st.Model.TrainedAt.Format("2006-01-02"), st.Model.Accuracy))
+		// Accuracy is only measured when there were enough examples to hold
+		// some back. Printing 0.00 for a model that was never scored says it
+		// gets everything wrong, which is a different claim entirely.
+		accuracy := "not measured"
+		if st.Model.Accuracy > 0 {
+			accuracy = fmt.Sprintf("%.2f", st.Model.Accuracy)
+		}
+		line("model", fmt.Sprintf("%s, trained %s, accuracy %s",
+			st.Model.Algorithm, st.Model.TrainedAt.Format("2006-01-02"), accuracy))
 	} else {
 		line("model", "not trained yet: scour train "+name)
 	}

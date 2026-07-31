@@ -79,6 +79,18 @@ func runCrawl(cmd *cobra.Command, a *app, name string, f crawlFlags) error {
 		return err
 	}
 
+	// A paused entity used to be crawled anyway: the check happens once a
+	// second, so it fetched a handful of pages and then stopped saying
+	// "paused", which explains neither why nor what to do.
+	if entity.Paused {
+		return fmt.Errorf("%s is stopped; start it first: scour start %s", entity.Name, entity.Name)
+	}
+	// Announcing a crawl that cannot run puts the reason it failed after the
+	// claim that it started.
+	if len(entity.Targets) == 0 {
+		return fmt.Errorf("entity %q has no targets: scour add %s -d <domain>", entity.Name, entity.Name)
+	}
+
 	// The narrowest wins: a --type on the crawl beats the entity's own
 	// setting, which beats content_types in the configuration.
 	allow := f.types
@@ -208,6 +220,12 @@ func runCrawl(cmd *cobra.Command, a *app, name string, f crawlFlags) error {
 	cmd.Printf("\n%d fetched, %d skipped, %d failed, %s in %s%s\n",
 		result.Fetched, result.Skipped, result.Failed,
 		formatBytes(result.Bytes), result.Elapsed.Round(time.Millisecond), stopped)
+
+	// Pages on their own are not the point, and the next step is not guessable
+	// from the ones already run.
+	if result.Fetched > 0 && !a.jsonOut {
+		cmd.Printf("\nnext: scour train %s\n", entity.Name)
+	}
 	return nil
 }
 

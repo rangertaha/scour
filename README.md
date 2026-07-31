@@ -412,6 +412,9 @@ output, and `--limit <n>` to cap the rows returned.
 | `scour search <name> --exclude-type <type>` | Search everything except a content type |
 | `scour valid <name> <id>...` | Label records as correct |
 | `scour invalid <name> <id>...` | Label records as wrong |
+| `scour top` | Watch every entity live, and start, stop or train one |
+| `scour start <name>` | Let an entity be crawled again |
+| `scour stop <name>` | Stop crawling an entity, keeping its frontier |
 | `scour list` | A line per entity: what it has, how far its crawl got, whether it is trained |
 | `scour list <name>` | Everything known about one entity |
 | `scour export <name>` | Write records out as CSV, JSON, or to a webhook |

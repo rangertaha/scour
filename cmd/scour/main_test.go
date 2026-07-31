@@ -276,3 +276,43 @@ func TestAddingNothingSaysWhatToAdd(t *testing.T) {
 		t.Errorf("output = %s", added)
 	}
 }
+
+// A stopped entity used to be crawled anyway: the pause is checked once a
+// second, so it fetched a handful of pages and then stopped saying "paused",
+// which explains neither why nor what to do about it.
+func TestCrawlingAStoppedEntityExplainsItself(t *testing.T) {
+	dir := t.TempDir()
+	runOK(t, dir, "add", "news", "-d", "example.com")
+
+	out := runOK(t, dir, "stop", "news")
+	if !strings.Contains(out, "frontier kept") || !strings.Contains(out, "scour start news") {
+		t.Errorf("stop did not say what it kept or how to undo it:\n%s", out)
+	}
+
+	_, err := run(t, dir, "crawl", "news")
+	if err == nil {
+		t.Fatal("crawling a stopped entity should refuse")
+	}
+	if !strings.Contains(err.Error(), "scour start news") {
+		t.Errorf("the refusal does not say how to fix it: %v", err)
+	}
+
+	if out := runOK(t, dir, "start", "news"); !strings.Contains(out, "scour crawl news") {
+		t.Errorf("start did not say what to do next:\n%s", out)
+	}
+}
+
+// Announcing a crawl that cannot run puts the reason it failed after the claim
+// that it started.
+func TestACrawlThatCannotRunSaysNothingFirst(t *testing.T) {
+	dir := t.TempDir()
+	runOK(t, dir, "add", "solo")
+
+	out, err := run(t, dir, "crawl", "solo")
+	if err == nil {
+		t.Fatal("crawling an entity with no targets should refuse")
+	}
+	if strings.Contains(out, "crawling solo") {
+		t.Errorf("it announced a crawl it could not run:\n%s", out)
+	}
+}

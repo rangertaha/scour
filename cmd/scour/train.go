@@ -135,6 +135,9 @@ func runTrain(cmd *cobra.Command, a *app, name string, f trainFlags) error {
 
 	if result.Records == 0 {
 		fmt.Fprintf(out, "\nno records extracted: check `scour rules %s`, and that the crawl reached pages holding the data\n", name)
+	} else {
+		// What was learned is only worth having if it gets looked at.
+		fmt.Fprintf(out, "\nnext: scour search %s\n", name)
 	}
 	return nil
 }
