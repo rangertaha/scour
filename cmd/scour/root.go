@@ -121,6 +121,7 @@ func (a *app) Pages() (cache.Store, error) {
 }
 
 func newRootCmd() *cli.Command {
+	installHelpOrder()
 	a := &app{}
 
 	root := &cli.Command{
@@ -197,24 +198,20 @@ func newRootCmd() *cli.Command {
 			return cli.ShowAppHelp(cmd)
 		},
 		Commands: []*cli.Command{
-			newAddCmd(a),
-			newCrawlCmd(a),
-			newExportCmd(a),
 			newImportCmd(a),
+			newExportCmd(a),
+			newItemCmd(a),
+			newStreamCmd(a),
+			newRulesCmd(a),
+			newTrainCmd(a),
 			newInvalidCmd(a),
-			newListCmd(a),
 			newTopCmd(a),
 			newStartCmd(a),
 			newStopCmd(a),
+			newPauseCmd(a),
 			newMCPCmd(a),
-			newRemoveCmd(a),
-			newRunCmd(a),
-			newRulesCmd(a),
-			newSearchCmd(a),
 			newServerCmd(a),
-			newTagCmd(a),
-			newTemplatesCmd(a),
-			newTrainCmd(a),
+			newJoinCmd(a),
 			newVersionCmd(a),
 		},
 	}

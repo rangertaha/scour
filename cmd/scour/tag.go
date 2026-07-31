@@ -23,11 +23,10 @@ func newTagCmd(a *app) *cli.Command {
 	var f tagFlags
 
 	return &cli.Command{
-		Category:  "Defining what to look for",
 		Name:      "tag",
 		ArgsUsage: "<name>",
 		Usage:     "Edit the words a property might be labelled with on a page",
-		Description: "`scour add -p author -a byline` only ever adds a word. This edits the set:\n" +
+		Description: "`scour item add -p author -a byline` only ever adds a word. This edits the set:\n" +
 			"--append adds, --delete removes, --update replaces it outright. With none of\n" +
 			"them the current words are printed and nothing changes.\n\n" +
 			"Each flag carries one word, and repeats for more, because a tag is often a\n" +
@@ -35,11 +34,11 @@ func newTagCmd(a *app) *cli.Command {
 			"argument on spaces would eventually cut one of those in half.\n\n" +
 			"--on scopes the edit to a domain, so changing what one site calls a byline\n" +
 			"leaves every other site alone.",
-		UsageText: "  scour tag news -p author\n" +
-			"  scour tag news -p author --append byline --append 'written by'\n" +
-			"  scour tag news -p author --delete by\n" +
-			"  scour tag news -p author --update byline --update author\n" +
-			"  scour tag news -p author --on example.com --append 'staff writer'",
+		UsageText: "  scour item tag news -p author\n" +
+			"  scour item tag news -p author --append byline --append 'written by'\n" +
+			"  scour item tag news -p author --delete by\n" +
+			"  scour item tag news -p author --update byline --update author\n" +
+			"  scour item tag news -p author --on example.com --append 'staff writer'",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:        "prop",
@@ -49,7 +48,7 @@ func newTagCmd(a *app) *cli.Command {
 			},
 			&cli.StringFlag{
 				Name:        "on",
-				Usage:       "scope the edit to one domain, matching `scour add --domain`",
+				Usage:       "scope the edit to one domain, matching `scour item add --domain`",
 				Destination: &f.domain,
 			},
 			&cli.StringSliceFlag{
@@ -148,7 +147,7 @@ func runTag(c context.Context, a *app, name string, f tagFlags) error {
 	if len(f.append) == 0 && len(f.delete) == 0 && len(f.update) == 0 {
 		if len(words) == 0 {
 			a.Printf("%s: %s%s has no tags yet\n\n", item.Name, f.prop, where)
-			a.Printf("Teach it what a page might call it:\n  scour tag %s -p %s --append '<word>'\n",
+			a.Printf("Teach it what a page might call it:\n  scour item tag %s -p %s --append '<word>'\n",
 				item.Name, f.prop)
 			return nil
 		}

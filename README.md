@@ -126,7 +126,7 @@ Describe the item you are hunting for, with the other words a page might use
 for it. The name is the handle for everything that follows:
 
 ```
-scour add vehicle --alias 'car' --alias 'automobile' --alias 'pickup truck'
+scour item add vehicle --alias 'car' --alias 'automobile' --alias 'pickup truck'
 ```
 
 Add seed targets to crawl. A domain makes the whole site a target; a URL starts
@@ -136,9 +136,9 @@ from one page. Domains are normalised, so `example.com`, `www.example.com` and
 across as many sites as you like:
 
 ```
-scour add vehicle -d 'example.com' --subdomains
-scour add vehicle -u 'http://www.example.com/cars/'
-scour add vehicle -u 'http://www.example.co.uk/others/'
+scour item add vehicle -d 'example.com' --subdomains
+scour item add vehicle -u 'http://www.example.com/cars/'
+scour item add vehicle -u 'http://www.example.co.uk/others/'
 
 scour import vehicle --urls urls.txt
 scour import vehicle --domains domains.txt
@@ -148,17 +148,17 @@ scour import vehicle --props props.csv
 Describe the properties that item should have, with an example value for each:
 
 ```
-scour add vehicle -p make  -e Ford
-scour add vehicle -p model -e 'F-Series'
-scour add vehicle -p year  -e 2026
-scour add vehicle -p type  -e 'Full-Size Pickup'
+scour item add vehicle -p make  -e Ford
+scour item add vehicle -p model -e 'F-Series'
+scour item add vehicle -p year  -e 2026
+scour item add vehicle -p type  -e 'Full-Size Pickup'
 ```
 
 Or start from a schema scour ships with, which fills in the properties, the
 other words a page might label them with, and an example of each:
 
 ```
-scour templates
+scour item templates
 
 TEMPLATE  PROPS  FIELDS
 --------  -----  ------------------------------------------------------------
@@ -167,7 +167,7 @@ job           6  title, company, location, salary, employment, posted
 product       7  title, brand, price, currency, sku, availability, rating
 vehicle       9  make, model, year, price, mileage, vin, body, fuel, trans...
 
-scour add vehicle --template vehicle
+scour item add vehicle --template vehicle
 ```
 
 A template is a starting point, not an answer. Its example values are generic,
@@ -175,20 +175,20 @@ and the examples are what bootstrap the first round of labels, so add one real
 value from the site you are actually crawling:
 
 ```
-scour add vehicle -p price -e '$42,000'
+scour item add vehicle -p price -e '$42,000'
 ```
 
 Declaring properties a site does not publish is fine. They simply go unfilled,
 and the fields that are present are still found.
 
-Teach a property the other words a page might label it with. `scour add -a` only
+Teach a property the other words a page might label it with. `scour item add -a` only
 ever adds one; `scour tag` shows the set and edits it:
 
 ```
-scour tag vehicle -p make
-scour tag vehicle -p make --append manufacturer --append 'built by'
-scour tag vehicle -p make --delete brand
-scour tag vehicle -p make --update make --update marque
+scour item tag vehicle -p make
+scour item tag vehicle -p make --append manufacturer --append 'built by'
+scour item tag vehicle -p make --delete brand
+scour item tag vehicle -p make --update make --update marque
 ```
 
 Each flag carries one word and repeats, because a word is often a phrase:
@@ -199,7 +199,7 @@ Scope it to a site with `--on`, so what one publisher calls a byline does not
 overwrite what the next one calls it:
 
 ```
-scour tag news -p author --on example.com --append 'staff writer'
+scour item tag news -p author --on example.com --append 'staff writer'
 ```
 
 Then crawl, following links up to a given depth. Discovered URLs come back
@@ -208,7 +208,7 @@ scores links from the aliases and property examples alone; every later crawl
 uses the model you trained from the run before:
 
 ```
-scour crawl vehicle --depth 10
+scour start vehicle --depth 10
 
 PROBABILITY  MATCHES  SPEED   LATENCY  RATE  200  300  400  500  URL
 -----------  -------  ------  -------  ----  ---  ---  ---  ---  ---------------------------------------
@@ -227,8 +227,8 @@ scour follows HTML only by default. Widen or narrow that with `--type`, which
 takes a MIME type, a wildcard, or one of the shorthands below:
 
 ```
-scour crawl vehicle --depth 10 --type html --type pdf
-scour crawl vehicle --depth 10 --type 'text/*' --exclude-type 'text/css'
+scour start vehicle --depth 10 --type html --type pdf
+scour start vehicle --depth 10 --type 'text/*' --exclude-type 'text/css'
 ```
 
 | Shorthand | Expands to |
@@ -254,7 +254,7 @@ To make the choice permanent for an item rather than passing it every crawl,
 set it on the item itself:
 
 ```
-scour add vehicle --type html --type pdf
+scour item add vehicle --type html --type pdf
 ```
 
 Three places can set this, and the narrowest wins: a `--type` on `crawl` beats
@@ -268,7 +268,7 @@ by fetching the page again in a real browser and carrying on with the rendered
 DOM:
 
 ```
-scour crawl vehicle --browser auto
+scour start vehicle --browser auto
 ```
 
 | `--browser` | What happens |
@@ -339,7 +339,7 @@ the same 0 to 1 scale as everything else, and IDs are stable record IDs, so they
 stay valid across queries and reruns:
 
 ```
-scour search vehicle --confidence 0.5 --limit 20
+scour stream vehicle --confidence 0.5 --limit 20
 
   ID  CONF  FORMAT  MAKE       MODEL      YEAR  TYPE
 ----  ----  ------  ---------  ---------  ----  ----------------
@@ -355,9 +355,9 @@ Narrow a search to the formats a record was extracted from with the same
 is dragging your results down, without re-crawling:
 
 ```
-scour search vehicle --type pdf
-scour search vehicle --type html --confidence 0.9
-scour search vehicle --exclude-type pdf --limit 50
+scour stream vehicle --type pdf
+scour stream vehicle --type html --confidence 0.9
+scour stream vehicle --exclude-type pdf --limit 50
 ```
 
 `--format` is accepted as an alias for `--type` here, since a `TYPE` column may
@@ -388,7 +388,7 @@ Check on a crawl in progress, or on where one left off. Crawls resume from the
 stored frontier:
 
 ```
-scour list vehicle
+scour item ls vehicle
 
 targets     3
 frontier    1204 queued / 8871 visited
@@ -400,7 +400,7 @@ model       trained 2026-07-30, accuracy 0.91
 List the items you have defined, and how many matches each has found:
 
 ```
-scour list
+scour item ls
 
 NAME     MATCHES
 -------  -------
@@ -410,10 +410,10 @@ vehicle      100
 Remove what you no longer want. Every `add` has a matching `remove`:
 
 ```
-scour remove vehicle -d 'example.com'
-scour remove vehicle -p year
-scour remove vehicle --rule 5
-scour remove vehicle
+scour item rm vehicle -d 'example.com'
+scour item rm vehicle -p year
+scour item rm vehicle --rule 5
+scour item rm vehicle
 ```
 
 ## Commands
@@ -423,42 +423,56 @@ output, and `--limit <n>` to cap the rows returned.
 
 | Command | Description |
 | --- | --- |
-| `scour add <name> --alias <word>` | Define an item, or add another alias to it |
-| `scour add <name> -d <domain>` | Add a whole domain as a crawl target |
-| `scour add <name> -u <url>` | Add a single URL as a crawl target |
-| `scour add <name> -p <prop> -e <example>` | Add a property with an example value |
-| `scour add <name> --type <type>` | Restrict this item's crawls to a content type |
-| `scour tag <name> -p <prop>` | List the words a property might be labelled with |
-| `scour tag <name> -p <prop> -a <word>` | Add a word (repeatable) |
-| `scour tag <name> -p <prop> -d <word>` | Remove a word (repeatable) |
-| `scour tag <name> -p <prop> -u <word>` | Replace the whole set (repeatable) |
+| `scour item add <name> --alias <word>` | Define an item, or add another alias to it |
+| `scour item add <name> -d <domain>` | Add a whole domain as a crawl target |
+| `scour item add <name> -u <url>` | Add a single URL as a crawl target |
+| `scour item add <name> -p <prop> -e <example>` | Add a property with an example value |
+| `scour item add <name> --type <type>` | Restrict this item's crawls to a content type |
+| `scour item tag <name> -p <prop>` | List the words a property might be labelled with |
+| `scour item tag <name> -p <prop> -a <word>` | Add a word (repeatable) |
+| `scour item tag <name> -p <prop> -d <word>` | Remove a word (repeatable) |
+| `scour item tag <name> -p <prop> -u <word>` | Replace the whole set (repeatable) |
 | `scour import <name> --urls <file>` | Load URLs from a file, one per line |
 | `scour import <name> --domains <file>` | Load domains from a file, one per line |
 | `scour import <name> --props <file>` | Load properties and examples from a CSV |
-| `scour crawl <name> --depth <n>` | Crawl, and rank discovered URLs by probability |
-| `scour crawl <name> --type <type>` | Limit this crawl to a content type |
-| `scour crawl <name> --exclude-type <type>` | Skip a content type in this crawl |
-| `scour crawl <name> --max-pages <n>` | Stop after this many pages, keeping the frontier |
-| `scour crawl <name> --max-time <d>` | Stop after this long, keeping the frontier |
+| `scour start <name> --depth <n>` | Crawl, and rank discovered URLs by probability |
+| `scour start <name> --type <type>` | Limit this crawl to a content type |
+| `scour start <name> --exclude-type <type>` | Skip a content type in this crawl |
+| `scour start <name> --max-pages <n>` | Stop after this many pages, keeping the frontier |
+| `scour start <name> --max-time <d>` | Stop after this long, keeping the frontier |
 | `scour train <name>` | Train the model and extraction rules on the cached pages |
 | `scour rules <name>` | List the extraction rules learned for an item |
-| `scour search <name> --confidence <p>` | Search extracted records at or above a confidence |
-| `scour search <name> --type <type>` | Search only records extracted from a content type |
-| `scour search <name> --exclude-type <type>` | Search everything except a content type |
+| `scour stream <name> --confidence <p>` | Search extracted records at or above a confidence |
+| `scour stream <name> --type <type>` | Search only records extracted from a content type |
+| `scour stream <name> --exclude-type <type>` | Search everything except a content type |
+| `scour stream <name> --follow` | Keep printing records as they are extracted |
+| `scour stream <name> --write csv --to <dir>` | Write records out as CSV, JSON, or to a webhook |
 | `scour invalid <name> <id>...` | Label records as wrong |
-| `scour top` | Watch every item live, and start, stop or train one |
-| `scour start <name>` | Let an item be crawled again |
-| `scour stop <name>` | Stop crawling an item, keeping its frontier |
-| `scour list` | A line per item: what it has, how far its crawl got, whether it is trained |
-| `scour list <name>` | Everything known about one item |
-| `scour export <name>` | Write records out as CSV, JSON, or to a webhook |
-| `scour remove <name> [-d/-u/-p/--rule]` | Remove an item, or one of its targets, properties or rules |
-| `scour templates` | List the built-in schemas `--template` accepts |
+| `scour top` | Monitor engine activity |
+| `scour pause <name>` | Pause a search, keeping its frontier |
+| `scour stop <name> --force` | Stop a search, discarding its frontier |
+| `scour item ls` | A line per item: what it has, how far it got, whether it is trained |
+| `scour item ls <name>` | Everything known about one item |
+| `scour export <name>` | Write an item's domains and urls back out to files |
+| `scour item rm <name> [-d/-u/-p/--rule]` | Remove an item, or one of its targets, properties or rules |
+| `scour item templates` | List the built-in schemas `--template` accepts |
 | `scour mcp` | Run as an MCP server over stdio |
 | `scour server --listen <addr>` | Run as a service, serving the HTTP API and MCP |
+| `scour join --role <role>` | Join a cluster for distributed workload |
 
-`--depth` has no short form, because `-d` already means domain. On `scour tag`,
-`-d` means `--delete` and a domain is given with `--on`.
+`--depth` has no short form, because `-d` already means domain. On `scour item
+tag`, `-d` means `--delete` and a domain is given with `--on`.
+
+### start, pause and stop
+
+`start` runs a search, resuming a paused one. `pause` freezes it and keeps the
+frontier, so starting again carries on from where it got to. `stop` throws the
+frontier away, so starting again begins from the seeds, which is why it asks for
+`--force` when there is anything to lose.
+
+The definition and the cached page bodies survive all three. What `stop`
+discards is the work of deciding what to fetch next, which on a large site is
+hours of it.
 
 ### Exporting
 
@@ -495,8 +509,8 @@ Both budgets end a crawl the way an exhausted frontier does: everything fetched
 is kept, everything still queued stays queued, and the next run resumes.
 
 ```
-scour crawl vehicle --max-pages 500
-scour crawl vehicle --max-time 30m
+scour start vehicle --max-pages 500
+scour start vehicle --max-time 30m
 ```
 
 A crawl that stopped on a budget says so, because that means there is more to
@@ -677,18 +691,18 @@ transport = "webdriver"
 
 `rate` and `concurrency` are per host, not global, so raising `crawl.concurrency`
 widens how many hosts are in flight at once rather than how hard any one of them
-is hit. The `RATE` column in `scour crawl` output shows the value actually
+is hit. The `RATE` column in `scour start` output shows the value actually
 applied to each URL, which is where a `[[host]]` override becomes visible.
 
 ## Running across machines
 
-A single `scour crawl` needs nothing installed: the components talk over a
+A single `scour start` needs nothing installed: the components talk over a
 broker, and with no broker configured one runs embedded in the process. The same
 code spread over several machines is the same components pointed at a real one.
 
 ```
-scour run --role store --bus-url nats://broker:4222
-scour run --role crawl --bus-url nats://broker:4222     # as many as you like
+scour join --role store --bus-url nats://broker:4222
+scour join --role crawl --bus-url nats://broker:4222     # as many as you like
 ```
 
 The store owns the database and the frontier; crawlers own the network and

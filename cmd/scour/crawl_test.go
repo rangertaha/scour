@@ -54,8 +54,8 @@ func TestCrawlEndToEnd(t *testing.T) {
 	srv := testSite(t)
 	dir := crawlDir(t)
 
-	runOK(t, dir, "add", "vehicle", "-u", srv.URL+"/")
-	out := runOK(t, dir, "crawl", "vehicle", "--depth", "5")
+	runOK(t, dir, "item", "add", "vehicle", "-u", srv.URL+"/")
+	out := runOK(t, dir, "start", "vehicle", "--depth", "5")
 
 	for _, want := range []string{"PROBABILITY", "MATCHES", "SPEED", "LATENCY", "RATE", "URL"} {
 		if !strings.Contains(out, want) {
@@ -74,10 +74,10 @@ func TestCrawlThenStatus(t *testing.T) {
 	srv := testSite(t)
 	dir := crawlDir(t)
 
-	runOK(t, dir, "add", "vehicle", "-u", srv.URL+"/")
-	runOK(t, dir, "crawl", "vehicle", "--depth", "5")
+	runOK(t, dir, "item", "add", "vehicle", "-u", srv.URL+"/")
+	runOK(t, dir, "start", "vehicle", "--depth", "5")
 
-	out := runOK(t, dir, "list", "vehicle")
+	out := runOK(t, dir, "item", "ls", "vehicle")
 	for _, want := range []string{"item", "targets", "frontier", "visited", "cache", "matches", "model"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status missing %q:\n%s", want, out)
@@ -95,8 +95,8 @@ func TestCrawlSkipsImagesByDefault(t *testing.T) {
 	srv := testSite(t)
 	dir := crawlDir(t)
 
-	runOK(t, dir, "add", "vehicle", "-u", srv.URL+"/")
-	out := runOK(t, dir, "crawl", "vehicle", "--depth", "5")
+	runOK(t, dir, "item", "add", "vehicle", "-u", srv.URL+"/")
+	out := runOK(t, dir, "start", "vehicle", "--depth", "5")
 
 	if !strings.Contains(out, "skipped") {
 		t.Errorf("the image should have been reported as skipped:\n%s", out)
@@ -110,8 +110,8 @@ func TestCrawlMaxPages(t *testing.T) {
 	srv := testSite(t)
 	dir := crawlDir(t)
 
-	runOK(t, dir, "add", "vehicle", "-u", srv.URL+"/")
-	out := runOK(t, dir, "crawl", "vehicle", "--depth", "5", "--max-pages", "1")
+	runOK(t, dir, "item", "add", "vehicle", "-u", srv.URL+"/")
+	out := runOK(t, dir, "start", "vehicle", "--depth", "5", "--max-pages", "1")
 
 	if strings.Contains(out, "/cars/one/") {
 		t.Errorf("a one-page budget should not have reached the third level:\n%s", out)
@@ -122,8 +122,8 @@ func TestCrawlJSON(t *testing.T) {
 	srv := testSite(t)
 	dir := crawlDir(t)
 
-	runOK(t, dir, "add", "vehicle", "-u", srv.URL+"/")
-	out := runOK(t, dir, "crawl", "vehicle", "--depth", "5", "--json")
+	runOK(t, dir, "item", "add", "vehicle", "-u", srv.URL+"/")
+	out := runOK(t, dir, "start", "vehicle", "--depth", "5", "--json")
 
 	if !strings.Contains(out, `"URL"`) || !strings.Contains(out, `"Score"`) {
 		t.Errorf("json output missing the frontier fields:\n%s", out)
@@ -132,13 +132,13 @@ func TestCrawlJSON(t *testing.T) {
 
 func TestCrawlWithoutTargetsExplainsItself(t *testing.T) {
 	dir := crawlDir(t)
-	runOK(t, dir, "add", "vehicle")
+	runOK(t, dir, "item", "add", "vehicle")
 
-	out, err := run(t, dir, "crawl", "vehicle")
+	out, err := run(t, dir, "start", "vehicle")
 	if err == nil {
 		t.Fatal("crawling an item with no targets must fail")
 	}
-	if !strings.Contains(err.Error()+out, "scour add") {
+	if !strings.Contains(err.Error()+out, "scour item add") {
 		t.Errorf("the error should say how to add a target: %v\n%s", err, out)
 	}
 }
@@ -147,13 +147,13 @@ func TestCrawlResumesAndResets(t *testing.T) {
 	srv := testSite(t)
 	dir := crawlDir(t)
 
-	runOK(t, dir, "add", "vehicle", "-u", srv.URL+"/")
-	runOK(t, dir, "crawl", "vehicle", "--depth", "5")
+	runOK(t, dir, "item", "add", "vehicle", "-u", srv.URL+"/")
+	runOK(t, dir, "start", "vehicle", "--depth", "5")
 
 	// A second crawl sees the same pages again; the frontier persists.
-	before := runOK(t, dir, "list", "vehicle")
-	runOK(t, dir, "crawl", "vehicle", "--depth", "5", "--reset")
-	after := runOK(t, dir, "list", "vehicle")
+	before := runOK(t, dir, "item", "ls", "vehicle")
+	runOK(t, dir, "start", "vehicle", "--depth", "5", "--reset")
+	after := runOK(t, dir, "item", "ls", "vehicle")
 
 	if !strings.Contains(before, "visited") || !strings.Contains(after, "visited") {
 		t.Errorf("status should report visits before and after:\nbefore:\n%s\nafter:\n%s", before, after)
@@ -162,7 +162,63 @@ func TestCrawlResumesAndResets(t *testing.T) {
 
 func TestStatusOnUnknownItem(t *testing.T) {
 	dir := crawlDir(t)
-	if _, err := run(t, dir, "list", "absent"); err == nil {
+	if _, err := run(t, dir, "item", "ls", "absent"); err == nil {
 		t.Error("status on an unknown item must fail")
+	}
+}
+
+// start on a paused item resumes it. Refusing would be answering "start this"
+// with "it is paused", which is the thing being asked to change.
+func TestStartResumesAPausedItem(t *testing.T) {
+	srv := carSite(t)
+	dir := crawlDir(t)
+	runOK(t, dir, "item", "add", "vehicle", "-u", srv.URL+"/")
+
+	runOK(t, dir, "pause", "vehicle")
+	if shown := runOK(t, dir, "item", "ls", "vehicle"); !strings.Contains(shown, "paused") {
+		t.Fatalf("the item did not record the pause:\n%s", shown)
+	}
+
+	out := runOK(t, dir, "start", "vehicle", "--depth", "5")
+	if !strings.Contains(out, "resuming a paused search") {
+		t.Errorf("start did not say it was resuming:\n%s", out)
+	}
+	if shown := runOK(t, dir, "item", "ls", "vehicle"); strings.Contains(shown, "paused") {
+		t.Errorf("start left the item paused:\n%s", shown)
+	}
+}
+
+// stop discards, which is the whole difference from pause, and it says so
+// rather than doing it quietly.
+func TestStopNeedsForceAndThenDiscards(t *testing.T) {
+	srv := carSite(t)
+	dir := crawlDir(t)
+	runOK(t, dir, "item", "add", "vehicle", "-u", srv.URL+"/")
+	runOK(t, dir, "start", "vehicle", "--depth", "5")
+
+	before := runOK(t, dir, "item", "ls", "vehicle")
+	if strings.Contains(before, "0 queued / 0 visited") {
+		t.Fatalf("nothing was crawled, so there is nothing to discard:\n%s", before)
+	}
+
+	// Naming a destructive default "stop" is how someone loses a frontier they
+	// meant to keep, so it has to be asked for.
+	_, err := run(t, dir, "stop", "vehicle")
+	if err == nil {
+		t.Fatal("stop must not discard a frontier without --force")
+	}
+	if !strings.Contains(err.Error(), "scour pause vehicle") {
+		t.Errorf("the refusal should name the non-destructive verb: %v", err)
+	}
+	if after := runOK(t, dir, "item", "ls", "vehicle"); after != before {
+		t.Errorf("a refused stop changed something:\n%s\n%s", before, after)
+	}
+
+	out := runOK(t, dir, "stop", "vehicle", "--force")
+	if !strings.Contains(out, "discarded") {
+		t.Errorf("stop did not say what it threw away:\n%s", out)
+	}
+	if after := runOK(t, dir, "item", "ls", "vehicle"); !strings.Contains(after, "0 queued / 0 visited") {
+		t.Errorf("the frontier survived a forced stop:\n%s", after)
 	}
 }

@@ -82,7 +82,7 @@ func (s *Scorer) Name() string { return "embed" }
 // Trained implements [score.Trained].
 //
 // It is always false: this scorer never learns from a crawl. Saying so keeps
-// `scour crawl` honest about which of its rankings came from evidence and
+// `scour start` honest about which of its rankings came from evidence and
 // which came from a dictionary.
 func (s *Scorer) Trained() bool { return false }
 

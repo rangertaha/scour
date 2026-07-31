@@ -4,27 +4,31 @@ package main
 
 import (
 	"context"
+	"fmt"
+
 	"github.com/urfave/cli/v3"
 )
 
-// newStopCmd and newStartCmd are the scriptable form of what `scour top` does
-// with a keypress.
+// pause and stop are the two ways a search ends, and they are not the same.
 //
-// The view is not the only place this is needed: stopping a crawl over a
-// connection with no terminal, or from whatever is orchestrating a fleet, is
-// the ordinary case rather than the exception.
-func newStopCmd(a *app) *cli.Command {
+// pause freezes: the frontier keeps its order and its leases, and starting
+// again carries on from where it got to. stop discards: the frontier goes, and
+// starting again begins from the seeds.
+//
+// Both are durable state rather than a signal, so they reach a crawl wherever
+// it is running, including crawlers on other machines being fed by a store.
+func newPauseCmd(a *app) *cli.Command {
 	return &cli.Command{
-		Category:  "Finding pages",
-		Name:      "stop",
+		Category:  "SEARCH",
+		Name:      "pause",
 		ArgsUsage: "<name>",
-		Usage:     "Stop crawling an item, keeping its frontier",
-		Description: "Stops a crawl wherever it is running: in a foreground `scour crawl` on this\n" +
-			"machine, or on crawlers being fed by a store elsewhere.\n\n" +
-			"Nothing is discarded. The frontier keeps its order and its leases, so a\n" +
-			"resumed crawl carries on rather than starting again, and the item stays\n" +
-			"stopped until it is started.",
-		UsageText: "  scour stop news",
+		Usage:     "Pause a search for items, keeping its frontier",
+		Description: "Freezes a search wherever it is running: in the foreground on this machine,\n" +
+			"or on crawlers being fed by a store elsewhere.\n\n" +
+			"Nothing is discarded. The frontier keeps its order and its leases, so\n" +
+			"`scour start` carries on rather than starting again, and the item stays\n" +
+			"paused until it does.",
+		UsageText: "  scour pause news",
 		Action: func(c context.Context, cmd *cli.Command) error {
 			args, err := need(cmd, 1, "one item name")
 			if err != nil {
@@ -35,23 +39,77 @@ func newStopCmd(a *app) *cli.Command {
 	}
 }
 
-func newStartCmd(a *app) *cli.Command {
+func newStopCmd(a *app) *cli.Command {
+	var force bool
 	return &cli.Command{
-		Category:  "Finding pages",
-		Name:      "start",
+		Category:  "SEARCH",
+		Name:      "stop",
 		ArgsUsage: "<name>",
-		Usage:     "Let an item be crawled again",
-		Description: "Clears what `scour stop` set. Crawlers fed by a store pick the item up on\n" +
-			"their own; a foreground crawl is still started with `scour crawl`.",
-		UsageText: "  scour start news",
+		Usage:     "Stop a search for items, discarding its frontier",
+		Description: "Ends the search and throws away what it had queued, so the next `scour start`\n" +
+			"begins from the seeds rather than carrying on.\n\n" +
+			"The item's definition is untouched, and so are the cached page bodies, so a\n" +
+			"fresh search costs the crawl again but not the parsing. What goes is the\n" +
+			"work of deciding what to fetch next, which on a large site is hours of it.\n\n" +
+			"Use `scour pause` to stop a search and keep that work.",
+		UsageText: "  scour pause news    # the one you probably want\n" +
+			"  scour stop news --force",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:        "force",
+				Usage:       "confirm discarding a frontier that has something in it",
+				Destination: &force,
+			},
+		},
 		Action: func(c context.Context, cmd *cli.Command) error {
 			args, err := need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
-			return setPaused(c, a, args[0], false)
+			return runStop(c, a, args[0], force)
 		},
 	}
+}
+
+func runStop(c context.Context, a *app, name string, force bool) error {
+	s, err := a.Store()
+	if err != nil {
+		return err
+	}
+	item, err := s.Item(c, name)
+	if err != nil {
+		return err
+	}
+	st, err := s.Status(c, item.ID)
+	if err != nil {
+		return err
+	}
+
+	// Naming a destructive default "stop" is how someone loses a frontier they
+	// meant to keep, so the cost is stated and confirmed rather than assumed.
+	// Nothing to lose costs nothing to ask about.
+	held := st.Queued + st.Visited
+	if held > 0 && !force {
+		return fmt.Errorf("%s has %d queued and %d visited urls to discard\n"+
+			"  keep them:    scour pause %s\n"+
+			"  discard them: scour stop %s --force",
+			item.Name, st.Queued, st.Visited, item.Name, item.Name)
+	}
+
+	// Paused is cleared as well: the frontier is gone, so leaving the item
+	// paused would mean a later start silently did nothing.
+	if err := s.SetPaused(c, item.ID, false); err != nil {
+		return err
+	}
+	if err := s.ResetFrontier(c, item.ID); err != nil {
+		return err
+	}
+
+	a.Printf("%s: stopped, discarded %d queued and %d visited urls\n",
+		item.Name, st.Queued, st.Visited)
+	a.Printf("the definition and the cached pages are untouched\n")
+	a.Printf("search again from the seeds: scour start %s\n", item.Name)
+	return nil
 }
 
 func setPaused(c context.Context, a *app, name string, paused bool) error {
@@ -69,10 +127,10 @@ func setPaused(c context.Context, a *app, name string, paused bool) error {
 	}
 
 	if paused {
-		a.Printf("%s: stopped, frontier kept\nstart it again: scour start %s\n",
+		a.Printf("%s: paused, frontier kept\ncarry on: scour start %s\n",
 			item.Name, item.Name)
 		return nil
 	}
-	a.Printf("%s: started\ncrawl it here: scour crawl %s\n", item.Name, item.Name)
+	a.Printf("%s: unpaused\n", item.Name)
 	return nil
 }

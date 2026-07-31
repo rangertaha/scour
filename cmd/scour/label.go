@@ -22,7 +22,7 @@ func newInvalidCmd(a *app) *cli.Command {
 // labelCmd builds a labelling command from the verdict it applies.
 func labelCmd(a *app, use string, label store.Label, short, long string) *cli.Command {
 	return &cli.Command{
-		Category:    "Learning where the data is",
+		Category:    "TRAIN",
 		Name:        use,
 		ArgsUsage:   "<name> <id>...",
 		Usage:       short,

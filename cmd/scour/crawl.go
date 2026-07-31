@@ -35,20 +35,24 @@ type crawlFlags struct {
 	browser     string
 }
 
-func newCrawlCmd(a *app) *cli.Command {
+func newStartCmd(a *app) *cli.Command {
 	var f crawlFlags
 
 	cmd := &cli.Command{
-		Category:  "Finding pages",
-		Name:      "crawl",
+		Category:  "SEARCH",
+		Name:      "start",
+		Aliases:   []string{"crawl"},
 		ArgsUsage: "<name>",
-		Usage:     "Crawl an item's targets, ranking discovered URLs by probability",
+		Usage:     "Start a search for items",
 		Description: "Follows links out from the item's targets up to a depth, caching every page\n" +
-			"it keeps. Until a model has been trained, every URL scores the same, so the\n" +
-			"first crawl is broad by design.",
-		UsageText: "  scour crawl vehicle --depth 3\n" +
-			"  scour crawl vehicle --depth 3 --type html --type pdf\n" +
-			"  scour crawl vehicle --max-pages 200",
+			"it keeps and ranking what it finds by how likely it is to hold a match.\n" +
+			"Until a model has been trained every URL scores the same, so the first\n" +
+			"search is broad by design.\n\n" +
+			"A paused item is resumed: the search carries on from the frontier rather\n" +
+			"than starting over. `scour stop` is what makes it start over.",
+		UsageText: "  scour start vehicle --depth 3\n" +
+			"  scour start vehicle --depth 3 --type html --type pdf\n" +
+			"  scour start vehicle --max-pages 200",
 		Flags: []cli.Flag{
 			&cli.IntFlag{
 				Name:        "depth",
@@ -121,16 +125,18 @@ func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 		return err
 	}
 
-	// A paused item used to be crawled anyway: the check happens once a
-	// second, so it fetched a handful of pages and then stopped saying
-	// "paused", which explains neither why nor what to do.
+	// Starting a paused item resumes it. Refusing would be answering "start
+	// this" with "it is paused", which is the thing being asked to change.
 	if item.Paused {
-		return fmt.Errorf("%s is stopped; start it first: scour start %s", item.Name, item.Name)
+		if err := s.SetPaused(c, item.ID, false); err != nil {
+			return err
+		}
+		a.Printf("%s: resuming a paused search\n", item.Name)
 	}
 	// Announcing a crawl that cannot run puts the reason it failed after the
 	// claim that it started.
 	if len(item.Targets) == 0 {
-		return fmt.Errorf("item %q has no targets: scour add %s -d <domain>", item.Name, item.Name)
+		return fmt.Errorf("item %q has no targets: scour item add %s -d <domain>", item.Name, item.Name)
 	}
 
 	// The narrowest wins: a --type on the crawl beats the item's own

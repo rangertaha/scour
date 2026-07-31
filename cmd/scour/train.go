@@ -23,7 +23,7 @@ func newTrainCmd(a *app) *cli.Command {
 	var f trainFlags
 
 	cmd := &cli.Command{
-		Category:  "Learning where the data is",
+		Category:  "TRAIN",
 		Name:      "train",
 		ArgsUsage: "<name>",
 		Usage:     "Learn where an item's properties live, from the pages already crawled",
@@ -154,7 +154,7 @@ func runTrain(c context.Context, a *app, name string, f trainFlags) error {
 		fmt.Fprintf(out, "\nno records extracted: check `scour rules %s`, and that the crawl reached pages holding the data\n", name)
 	} else {
 		// What was learned is only worth having if it gets looked at.
-		fmt.Fprintf(out, "\nnext: scour search %s\n", name)
+		fmt.Fprintf(out, "\nnext: scour stream %s\n", name)
 	}
 	return nil
 }

@@ -17,7 +17,7 @@ import (
 	"github.com/rangertaha/scour/internal/train"
 )
 
-// crawlRequest mirrors the flags of `scour crawl`.
+// crawlRequest mirrors the flags of `scour start`.
 type crawlRequest struct {
 	Depth       int      `json:"depth,omitempty"`
 	MaxPages    int      `json:"max_pages,omitempty"`

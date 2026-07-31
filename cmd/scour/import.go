@@ -30,10 +30,10 @@ func newImportCmd(a *app) *cli.Command {
 	var f importFlags
 
 	cmd := &cli.Command{
-		Category:  "Defining what to look for",
+		Category:  "URLS",
 		Name:      "import",
 		ArgsUsage: "<name>",
-		Usage:     "Load targets, properties and aliases into an item from files",
+		Usage:     "Import domains and urls from file",
 		Description: "The same additions `scour add` makes one at a time, from a file. Every form\n" +
 			"is idempotent, so re-importing a file that has grown only adds what is new.\n\n" +
 			"Blank lines and lines starting with # are ignored, so a list can carry notes.",
@@ -183,28 +183,44 @@ func importTargets(
 ) (importResult, error) {
 	var res importResult
 	batch := make([]string, 0, store.TargetBatch)
+	// A domain written *.example.com covers its subdomains, so a file can mix
+	// the two rather than needing one file per setting. They are written in
+	// separate batches because the flag belongs to the row.
+	wide := make([]string, 0, store.TargetBatch)
 
-	flush := func() error {
-		if len(batch) == 0 {
+	flushInto := func(rows *[]string, subdomains bool) error {
+		if len(*rows) == 0 {
 			return nil
 		}
-		n, err := s.AddTargets(ctx, itemID, kind, batch, f.subdomains, f.depth)
+		n, err := s.AddTargets(ctx, itemID, kind, *rows, subdomains, f.depth)
 		if err != nil {
 			return err
 		}
 		res.added += n
-		batch = batch[:0]
+		*rows = (*rows)[:0]
 		return nil
+	}
+	flush := func() error {
+		if err := flushInto(&batch, f.subdomains); err != nil {
+			return err
+		}
+		return flushInto(&wide, true)
 	}
 
 	lines, err := eachLine(path, func(line string) error {
+		rows, subdomains := &batch, false
+		if kind == store.TargetDomain {
+			if trimmed, found := strings.CutPrefix(strings.TrimSpace(line), "*."); found {
+				line, rows, subdomains = trimmed, &wide, true
+			}
+		}
 		value, err := normalise(line)
 		if err != nil {
 			return err
 		}
-		batch = append(batch, value)
-		if len(batch) >= store.TargetBatch {
-			return flush()
+		*rows = append(*rows, value)
+		if len(*rows) >= store.TargetBatch {
+			return flushInto(rows, subdomains || f.subdomains)
 		}
 		return nil
 	})

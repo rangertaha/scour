@@ -30,7 +30,7 @@ const (
 	RoleCrawl Role = "crawl"
 )
 
-// AllRoles is every role, which is what a bare `scour run` starts.
+// AllRoles is every role, which is what a bare `scour join` starts.
 var AllRoles = []Role{RoleStore, RoleCrawl}
 
 // ParseRoles turns a comma-separated list into roles, rejecting unknown names

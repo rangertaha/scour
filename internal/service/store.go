@@ -30,7 +30,7 @@ type StoreService struct {
 	// dispatches says whether this store hands frontier work to crawlers.
 	// Off by default, because a store that dispatches with nothing consuming
 	// empties the frontier onto the broker where it sits until the messages
-	// age out. `scour crawl --bus` runs a store beside a crawler that has its
+	// age out. `scour start --bus` runs a store beside a crawler that has its
 	// own frontier, and turning this on there stalled the crawl.
 	dispatches bool
 	// hostRate is how often one host may be asked for something, unless it has

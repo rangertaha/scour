@@ -1,0 +1,117 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/rangertaha/scour/internal/export"
+	"github.com/rangertaha/scour/internal/store"
+)
+
+// exportFlags are the destination flags stream carries, so records can be
+// written somewhere as well as printed.
+type exportFlags struct {
+	format     string
+	to         string
+	tokenEnv   string
+	confidence float64
+	label      string
+	limit      int
+	stamp      string
+}
+
+func runExport(c context.Context, a *app, name string, f exportFlags) error {
+	s, err := a.Store()
+	if err != nil {
+		return err
+	}
+
+	item, err := s.Item(c, name)
+	if err != nil {
+		return err
+	}
+
+	if f.label != "" {
+		switch store.Label(f.label) {
+		case store.Valid, store.Invalid, store.Unlabelled:
+		default:
+			return fmt.Errorf("label must be valid, invalid or unlabelled, got %q", f.label)
+		}
+	}
+
+	rows, total, err := s.SearchRecords(c, item.ID, store.RecordQuery{
+		MinConfidence: f.confidence,
+		Label:         store.Label(f.label),
+		Limit:         f.limit,
+	})
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		// Not an error: a filter that matches nothing is a legitimate answer,
+		// and writing an empty file would be worse than saying so.
+		a.Printf("no records to export for %s\n", item.Name)
+		return nil
+	}
+
+	stamp := f.stamp
+	if stamp == "" {
+		stamp = time.Now().UTC().Format("2006-01-02")
+	}
+
+	// --to means a directory for file formats and a URL for the webhook, so
+	// only one of them may take it.
+	dir := a.cfg.ExportsDir()
+	if f.format != "webhook" && f.to != "" {
+		dir = f.to
+	}
+	if f.format == "webhook" && f.to == "" {
+		return fmt.Errorf("--format webhook needs --to <url>")
+	}
+
+	exporter, err := export.New(f.format, export.Config{
+		Dir:       dir,
+		URL:       f.to,
+		TokenEnv:  f.tokenEnv,
+		Timestamp: stamp,
+	})
+	if err != nil {
+		return err
+	}
+
+	result, err := exporter.Export(c, item.Name, rows)
+	if result != nil && len(result.Destinations) > 0 {
+		// Print what did go out even when the export failed part way, so a
+		// retry does not silently duplicate what was already delivered.
+		for _, dest := range result.Destinations {
+			a.Printf("%s\n", dest)
+		}
+	}
+	if err != nil {
+		return err
+	}
+
+	if a.jsonOut {
+		return writeJSON(a.Out(), result)
+	}
+
+	a.Printf("\n%d of %d records exported as %s to %d %s\n",
+		result.Records, total, exporter.Name(),
+		len(result.Destinations), plural(len(result.Destinations), "destination"))
+	return nil
+}
+
+// plural renders a count's noun, so a summary line reads as a sentence.
+func plural(n int, noun string) string {
+	if n == 1 {
+		return noun
+	}
+	return noun + "s"
+}
+
+// exportFormats is the help text listing what is registered.
+func exportFormats() string { return strings.Join(export.Names(), ", ") }

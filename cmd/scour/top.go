@@ -30,9 +30,9 @@ const interval = time.Second
 
 func newTopCmd(a *app) *cli.Command {
 	return &cli.Command{
-		Category: "Finding pages",
+		Category: "SEARCH",
 		Name:     "top",
-		Usage:    "Watch every item live, and pause or resume a crawl",
+		Usage:    "Monitor engine activity",
 		Description: "One screen per fleet: what each item has, how far its crawl has got, how\n" +
 			"fast it is going now, and whether it is running.\n\n" +
 			"Pausing keeps everything. The frontier holds its order and its leases, so a\n" +
@@ -56,7 +56,7 @@ func runTop(ctx context.Context, a *app, s *store.Store) error {
 	// written over each other and the numbers were right underneath.
 	//
 	// Logs are silenced rather than redirected, because a file nobody was told
-	// about is not better than no file. `scour crawl` remains the way to watch
+	// about is not better than no file. `scour start` remains the way to watch
 	// a crawl's own output.
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))

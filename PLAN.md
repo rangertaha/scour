@@ -69,7 +69,7 @@ components spread across machines with no code change.
 ### 2.1 Components
 
 Each is a `Service` with `Start(ctx, *nats.Conn) error`. Each can be disabled by
-config, and `scour run --role crawl` starts a subset.
+config, and `scour join --role crawl` starts a subset.
 
 - **queue** implements colly's `queue.Storage` over JetStream and gorm. Dedupes
   by normalised URL hash, enforces budget, and pops in score order rather than
@@ -320,7 +320,7 @@ of how sites are built, while the fitted transitions for one site are worth
 nothing on another. Same reasoning as wom shipping `DefaultChainPrior` and no
 locators.
 
-`scour list` gains a role breakdown, which is also the debugging view for the
+`scour item ls` gains a role breakdown, which is also the debugging view for the
 chain:
 
 ```
@@ -369,7 +369,7 @@ Chain       item_id null, kind(extract|crawl), states, transitions json,
 
 `URL.parent_id` and `URL.role` are what the crawl chain needs: the parent edge
 reconstructs the path for Viterbi, and the role is the decoded state, which is
-also what `scour list` counts. `Chain` holds both chains, with a null
+also what `scour item ls` counts. `Chain` holds both chains, with a null
 `item_id` for the shared extraction prior that transfers between items.
 
 `Rule` is a flattened `schema.Item` tree, which is what makes `scour rules`
@@ -384,12 +384,12 @@ Each is independently useful and independently demoable.
 M1 and M2 are done. Everything from M2.5 on is still ahead.
 
 **M1. Skeleton.** *(done)* go.mod, CLI, config precedence, gorm store on sqlite,
-`scour add`, `scour list`, `scour remove`. No crawling. Proves the config and
+`scour item add`, `scour item ls`, `scour remove`. No crawling. Proves the config and
 storage layers.
 
 **M2. Crawl, single process, no bus.** *(done)* colly `Collector` with the full
 callback set, colly's own in-memory queue and storage, page cache,
-`scour crawl --depth`, `scour list`. Scoring is `FixedScorer(1)`, named so an
+`scour start --depth`, `scour item ls`. Scoring is `FixedScorer(1)`, named so an
 untrained crawl cannot be mistaken for a trained one. Delivers the frontier
 table from the README, and proved the callback wiring before anything is
 swapped out: two bugs surfaced there that a mocked fetcher would have hidden,
@@ -408,7 +408,7 @@ than aborting requests: colly marks a request visited *before* the callback that
 would abort it, so aborting burns the URL and makes the stop unresumable.
 
 **M3. wom integration.** *(done)* Parse with wom, `scour train` via
-`w.Model(schema...)`, `scour rules`, `scour search`, `scour invalid`,
+`w.Model(schema...)`, `scour rules`, `scour stream`, `scour invalid`,
 `model.Train` on labelled items. The README's core loop now works end
 to end.
 
@@ -437,7 +437,7 @@ outweighs the hint as it accumulates.
 induction and stored once with no item attached, since it transfers, then
 seeded into every later induction. The crawl chain has page-role states, Viterbi
 decoding over the parent path, MAP fitting from crawl outcomes, and a role
-breakdown in `scour list` and `scour train`.
+breakdown in `scour item ls` and `scour train`.
 
 The gate passed: on a site whose records sit behind a hub sharing no words with
 the item, the chain fetched 12 pages of which 10 held records; without it the
@@ -452,7 +452,7 @@ the last crawl decoded one: that is observation rather than inference, so it
 takes precedence over the base score instead of being averaged with it.
 
 **M5. Bus decomposition.** *(done)* Embedded NATS with JetStream, the store
-component moved behind subjects, `scour run --role`, and `scour crawl --bus` to
+component moved behind subjects, `scour join --role`, and `scour start --bus` to
 route a crawl through it. Nothing needs installing: with no `bus.url` configured
 the broker runs in-process.
 
@@ -502,7 +502,7 @@ Measured on a site whose only content is injected by script: `--browser never`
 fetched the seed and stopped, one page, no links. `--browser auto` escalated
 once, discovered three links that exist only in the rendered DOM, and fetched
 all four pages. `scour train` then induced rules anchored on `#root`, a node
-plain HTTP never sees, and `scour search` returned the record. The rendered
+plain HTTP never sees, and `scour stream` returned the record. The rendered
 page is indistinguishable downstream from any other, which was the point of
 putting the browser at the transport layer rather than beside the crawler.
 
@@ -585,7 +585,7 @@ fitted or is still working from seed words moved to an optional `score.Trained`
 interface, so a crawl never claims a ranking it cannot back up.
 
 **M7.5. Shipped defaults.** `internal/defaults` embeds starter schemas in the
-binary with `go:embed`, reached by `scour templates` and `scour add --template`.
+binary with `go:embed`, reached by `scour item templates` and `scour item add --template`.
 Only what transfers between sites ships: a schema says what a vehicle is, which
 is true everywhere, while an XPath says where one site put it, which is true
 nowhere else. The loader rejects a shipped model carrying located items, so
@@ -676,7 +676,7 @@ keeps what it fetched, says it stopped on the budget rather than on an exhausted
 frontier, and resumes on the next run. Verified: a two second budget fetched one
 page, and the next run picked up the remaining three.
 
-`scour list` with no name gives a line per item, which is what a service
+`scour item ls` with no name gives a line per item, which is what a service
 crawling several at once needs. The most useful column is when each was last
 trained, because an item that has never been trained is crawling blind.
 

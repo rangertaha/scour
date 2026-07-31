@@ -42,7 +42,7 @@ func TestImportingTargetsAndProperties(t *testing.T) {
 		t.Errorf("comments or blanks were imported: %s", out)
 	}
 
-	shown := runOK(t, dir, "list", "vehicle")
+	shown := runOK(t, dir, "item", "ls", "vehicle")
 	if !strings.Contains(shown, "2 properties") {
 		t.Errorf("status = %s", shown)
 	}
@@ -69,7 +69,7 @@ func TestImportingTwiceAddsNothing(t *testing.T) {
 	runOK(t, dir, "import", "vehicle", "--urls", urls)
 	runOK(t, dir, "import", "vehicle", "--urls", urls)
 
-	shown := runOK(t, dir, "list", "vehicle")
+	shown := runOK(t, dir, "item", "ls", "vehicle")
 	if !strings.Contains(shown, "targets     2") {
 		t.Errorf("re-importing duplicated targets: %s", shown)
 	}
@@ -94,7 +94,7 @@ func TestImportingMoreThanOneBatch(t *testing.T) {
 	urls := writeFile(t, dir, "many.txt", b.String())
 	runOK(t, dir, "import", "vehicle", "--urls", urls)
 
-	shown := runOK(t, dir, "list", "vehicle")
+	shown := runOK(t, dir, "item", "ls", "vehicle")
 	if !strings.Contains(shown, fmt.Sprintf("targets     %d", lines)) {
 		t.Errorf("status = %s", shown)
 	}
@@ -151,5 +151,64 @@ func TestHeaderDetection(t *testing.T) {
 				t.Errorf("headerOf(%v) detected = %v, want %v", tt.record, got, tt.want)
 			}
 		})
+	}
+}
+
+// export and import are a pair, so what one writes the other has to read back
+// to the same rows. Comparing the printed output is not enough: a marker the
+// importer does not understand comes back as part of the hostname and the two
+// listings match while the data is wrong.
+func TestExportImportRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	runOK(t, dir, "item", "add", "news", "-d", "example.com", "-u", "http://example.com/a/")
+	runOK(t, dir, "item", "add", "news", "-d", "other.test", "--subdomains")
+	runOK(t, dir, "item", "add", "news", "-p", "author", "-e", "Hannah McLeod")
+
+	urls := filepath.Join(dir, "u.txt")
+	domains := filepath.Join(dir, "d.txt")
+	props := filepath.Join(dir, "p.csv")
+	runOK(t, dir, "export", "news", "--urls", urls, "--domains", domains, "--props", props)
+
+	// The subdomain flag belongs to the row, so it has to survive the file.
+	written, err := os.ReadFile(domains)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), "*.other.test") {
+		t.Errorf("a subdomain target was not marked in the file:\n%s", written)
+	}
+
+	runOK(t, dir, "item", "add", "copy")
+	runOK(t, dir, "import", "copy", "--urls", urls, "--domains", domains, "--props", props)
+
+	before := runOK(t, dir, "--json", "item", "ls", "news")
+	after := runOK(t, dir, "--json", "item", "ls", "copy")
+	for _, field := range []string{`"Targets"`, `"Properties"`} {
+		if pick(before, field) != pick(after, field) {
+			t.Errorf("%s differs after a round trip: %q vs %q",
+				field, pick(before, field), pick(after, field))
+		}
+	}
+}
+
+// pick pulls one "Field": value line out of the json listing.
+func pick(out, field string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, field) {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
+}
+
+// A hostname has no spaces and no #. Accepting one wrote a target that could
+// never match anything, and it printed back unchanged so it looked fine.
+func TestDomainWithACommentIsRejected(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := run(t, dir, "item", "add", "news", "-d", "bad.test  # note"); err == nil {
+		t.Error("a domain with a trailing comment must be rejected")
+	}
+	if _, err := run(t, dir, "item", "add", "news", "-d", "two words.test"); err == nil {
+		t.Error("a domain with a space must be rejected")
 	}
 }

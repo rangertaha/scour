@@ -19,18 +19,17 @@ func newRemoveCmd(a *app) *cli.Command {
 	var f removeFlags
 
 	cmd := &cli.Command{
-		Category:  "Defining what to look for",
-		Name:      "remove",
+		Name:      "rm",
 		ArgsUsage: "<name>",
-		Aliases:   []string{"rm"},
+		Aliases:   []string{"remove"},
 		Usage:     "Remove an item, or one of its targets, properties or rules",
 		Description: "With no flags this deletes the item and everything belonging to it, which\n" +
 			"cannot be undone, so it asks for --force. With flags it removes only what\n" +
 			"the flags name.",
-		UsageText: "  scour remove vehicle -d example.com\n" +
-			"  scour remove vehicle -p year\n" +
-			"  scour remove vehicle --rule 5\n" +
-			"  scour remove vehicle --force",
+		UsageText: "  scour item rm vehicle -d example.com\n" +
+			"  scour item rm vehicle -p year\n" +
+			"  scour item rm vehicle --rule 5\n" +
+			"  scour item rm vehicle --force",
 		Flags: []cli.Flag{
 			&cli.StringSliceFlag{
 				Name:        "domain",

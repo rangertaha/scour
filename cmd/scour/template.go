@@ -28,7 +28,7 @@ func fields(schema wom.Schema) []wom.Prop {
 
 // applyTemplate copies a shipped schema onto an item.
 //
-// It is the same work `scour add -p ... -e ...` does by hand, once per
+// It is the same work `scour item add -p ... -e ...` does by hand, once per
 // property. The point is not the keystrokes but the aliases, descriptions and
 // examples: those are what the matcher scores a page's labels against, and
 // they are exactly what a user typing from memory leaves out.
@@ -70,13 +70,12 @@ func applyTemplate(ctx context.Context, s *store.Store, itemID uint, name string
 // newTemplatesCmd lists what ships in the binary.
 func newTemplatesCmd(a *app) *cli.Command {
 	return &cli.Command{
-		Category: "Defining what to look for",
-		Name:     "templates",
-		Usage:    "List the built-in schemas scour ships with",
+		Name:  "templates",
+		Usage: "List the built-in schemas scour ships with",
 		Description: "Templates are starting points, not answers. Each carries the properties,\n" +
 			"aliases, descriptions and example values a kind of record usually has,\n" +
 			"which is what bootstraps labelling before anything has been crawled.",
-		UsageText: "  scour templates\n  scour add cars --template vehicle",
+		UsageText: "  scour item templates\n  scour item add cars --template vehicle",
 		Action: func(c context.Context, cmd *cli.Command) error {
 			names, err := defaults.Names()
 			if err != nil {

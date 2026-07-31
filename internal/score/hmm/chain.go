@@ -51,7 +51,7 @@ const (
 // NumRoles is how many roles the chain has.
 const NumRoles = 6
 
-// RoleNames are the roles as they appear in the database and in `scour list`.
+// RoleNames are the roles as they appear in the database and in `scour item ls`.
 var RoleNames = [NumRoles]string{"seed", "hub", "pagination", "detail", "boilerplate", "dead"}
 
 // String implements fmt.Stringer.

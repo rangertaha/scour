@@ -183,6 +183,12 @@ type RecordQuery struct {
 	ExcludeFormat []string
 	Label         Label
 	Limit         int
+
+	// SinceID returns only records written after this one, in id order rather
+	// than by confidence, which is what a follower wants: it has already seen
+	// everything below the mark and cares when the next one lands, not how
+	// good it is relative to the rest.
+	SinceID uint
 }
 
 // RecordRow is one record with its values attached.
@@ -207,6 +213,9 @@ func (s *Store) SearchRecords(ctx context.Context, itemID uint, q RecordQuery) (
 	if q.Label != "" {
 		base = base.Where("label = ?", q.Label)
 	}
+	if q.SinceID > 0 {
+		base = base.Where("id > ?", q.SinceID)
+	}
 
 	var total int64
 	if err := base.Count(&total).Error; err != nil {
@@ -214,6 +223,9 @@ func (s *Store) SearchRecords(ctx context.Context, itemID uint, q RecordQuery) (
 	}
 
 	query := base.Session(&gorm.Session{}).Order("confidence DESC, id ASC")
+	if q.SinceID > 0 {
+		query = base.Session(&gorm.Session{}).Order("id ASC")
+	}
 	if q.Limit > 0 {
 		query = query.Limit(q.Limit)
 	}

@@ -52,13 +52,13 @@ func runOK(t *testing.T, dir string, args ...string) string {
 func TestAddThenList(t *testing.T) {
 	dir := t.TempDir()
 
-	runOK(t, dir, "add", "vehicle", "--alias", "car", "--alias", "pickup truck")
-	runOK(t, dir, "add", "vehicle", "-d", "example.com", "--subdomains")
-	runOK(t, dir, "add", "vehicle", "-u", "http://www.example.com/cars/")
-	runOK(t, dir, "add", "vehicle", "-p", "make", "-e", "Ford")
-	runOK(t, dir, "add", "vehicle", "--type", "html", "--type", "pdf")
+	runOK(t, dir, "item", "add", "vehicle", "--alias", "car", "--alias", "pickup truck")
+	runOK(t, dir, "item", "add", "vehicle", "-d", "example.com", "--subdomains")
+	runOK(t, dir, "item", "add", "vehicle", "-u", "http://www.example.com/cars/")
+	runOK(t, dir, "item", "add", "vehicle", "-p", "make", "-e", "Ford")
+	runOK(t, dir, "item", "add", "vehicle", "--type", "html", "--type", "pdf")
 
-	out := runOK(t, dir, "list")
+	out := runOK(t, dir, "item", "ls")
 	if !strings.Contains(out, "vehicle") {
 		t.Errorf("list did not mention the item:\n%s", out)
 	}
@@ -74,7 +74,7 @@ func TestAddThenList(t *testing.T) {
 func TestMultiWordAliasIsKeptWhole(t *testing.T) {
 	dir := t.TempDir()
 
-	out := runOK(t, dir, "add", "vehicle", "--alias", "pickup truck")
+	out := runOK(t, dir, "item", "add", "vehicle", "--alias", "pickup truck")
 	if !strings.Contains(out, "alias pickup truck") {
 		t.Errorf("a multi-word alias must not be split into words:\n%s", out)
 	}
@@ -86,10 +86,10 @@ func TestMultiWordAliasIsKeptWhole(t *testing.T) {
 func TestAddIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 
-	runOK(t, dir, "add", "vehicle", "--alias", "car")
-	runOK(t, dir, "add", "vehicle", "--alias", "car")
+	runOK(t, dir, "item", "add", "vehicle", "--alias", "car")
+	runOK(t, dir, "item", "add", "vehicle", "--alias", "car")
 
-	out := runOK(t, dir, "list", "--json")
+	out := runOK(t, dir, "item", "ls", "--json")
 	if strings.Count(out, `"name": "vehicle"`) != 1 {
 		t.Errorf("the item was created more than once:\n%s", out)
 	}
@@ -98,7 +98,7 @@ func TestAddIsIdempotent(t *testing.T) {
 func TestListIsEmptyToStart(t *testing.T) {
 	dir := t.TempDir()
 
-	out := runOK(t, dir, "list")
+	out := runOK(t, dir, "item", "ls")
 	if !strings.Contains(out, "no items yet") {
 		t.Errorf("an empty database should say so:\n%s", out)
 	}
@@ -106,9 +106,9 @@ func TestListIsEmptyToStart(t *testing.T) {
 
 func TestListJSON(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "add", "vehicle")
+	runOK(t, dir, "item", "add", "vehicle")
 
-	out := runOK(t, dir, "list", "--json")
+	out := runOK(t, dir, "item", "ls", "--json")
 	for _, key := range []string{`"name": "vehicle"`, `"records": 0`, `"trained": "never"`} {
 		if !strings.Contains(out, key) {
 			t.Errorf("json output missing %s:\n%s", key, out)
@@ -120,9 +120,9 @@ func TestDomainsAreNormalised(t *testing.T) {
 	dir := t.TempDir()
 
 	// All three name one target, so the last write wins and there is one row.
-	runOK(t, dir, "add", "vehicle", "-d", "example.com")
-	runOK(t, dir, "add", "vehicle", "-d", "www.example.com")
-	out := runOK(t, dir, "add", "vehicle", "-d", "https://example.com/")
+	runOK(t, dir, "item", "add", "vehicle", "-d", "example.com")
+	runOK(t, dir, "item", "add", "vehicle", "-d", "www.example.com")
+	out := runOK(t, dir, "item", "add", "vehicle", "-d", "https://example.com/")
 
 	if !strings.Contains(out, "domain example.com") {
 		t.Errorf("domain was not normalised:\n%s", out)
@@ -131,9 +131,9 @@ func TestDomainsAreNormalised(t *testing.T) {
 
 func TestRemoveWholeItemNeedsForce(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "add", "vehicle")
+	runOK(t, dir, "item", "add", "vehicle")
 
-	out, err := run(t, dir, "remove", "vehicle")
+	out, err := run(t, dir, "item", "rm", "vehicle")
 	if err == nil {
 		t.Fatal("removing an item without --force must fail")
 	}
@@ -142,12 +142,12 @@ func TestRemoveWholeItemNeedsForce(t *testing.T) {
 	}
 
 	// The item is still there.
-	if out := runOK(t, dir, "list"); !strings.Contains(out, "vehicle") {
+	if out := runOK(t, dir, "item", "ls"); !strings.Contains(out, "vehicle") {
 		t.Errorf("item was removed despite the refusal:\n%s", out)
 	}
 
-	runOK(t, dir, "remove", "vehicle", "--force")
-	if out := runOK(t, dir, "list"); strings.Contains(out, "vehicle") {
+	runOK(t, dir, "item", "rm", "vehicle", "--force")
+	if out := runOK(t, dir, "item", "ls"); strings.Contains(out, "vehicle") {
 		t.Errorf("item survived --force:\n%s", out)
 	}
 }
@@ -156,47 +156,47 @@ func TestRemoveParts(t *testing.T) {
 	dir := t.TempDir()
 	// Separate commands: with --prop present, --domain scopes the property
 	// rather than adding a target.
-	runOK(t, dir, "add", "vehicle", "-d", "example.com")
-	runOK(t, dir, "add", "vehicle", "-p", "year", "-e", "2026")
+	runOK(t, dir, "item", "add", "vehicle", "-d", "example.com")
+	runOK(t, dir, "item", "add", "vehicle", "-p", "year", "-e", "2026")
 
-	out := runOK(t, dir, "remove", "vehicle", "-d", "example.com")
+	out := runOK(t, dir, "item", "rm", "vehicle", "-d", "example.com")
 	if !strings.Contains(out, "removed domain example.com") {
 		t.Errorf("unexpected output:\n%s", out)
 	}
 
-	out = runOK(t, dir, "remove", "vehicle", "-p", "year")
+	out = runOK(t, dir, "item", "rm", "vehicle", "-p", "year")
 	if !strings.Contains(out, "removed property year") {
 		t.Errorf("unexpected output:\n%s", out)
 	}
 
 	// The item itself survives having its parts removed.
-	if out := runOK(t, dir, "list"); !strings.Contains(out, "vehicle") {
+	if out := runOK(t, dir, "item", "ls"); !strings.Contains(out, "vehicle") {
 		t.Errorf("removing a target should not remove the item:\n%s", out)
 	}
 }
 
 func TestRemoveReportsMissingThings(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "add", "vehicle")
+	runOK(t, dir, "item", "add", "vehicle")
 
-	if _, err := run(t, dir, "remove", "vehicle", "-d", "absent.example"); err == nil {
+	if _, err := run(t, dir, "item", "rm", "vehicle", "-d", "absent.example"); err == nil {
 		t.Error("removing an absent target must fail")
 	}
-	if _, err := run(t, dir, "remove", "absent", "--force"); err == nil {
+	if _, err := run(t, dir, "item", "rm", "absent", "--force"); err == nil {
 		t.Error("removing an absent item must fail")
 	}
 }
 
 func TestExampleWithoutPropIsRejected(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := run(t, dir, "add", "vehicle", "-e", "Ford"); err == nil {
+	if _, err := run(t, dir, "item", "add", "vehicle", "-e", "Ford"); err == nil {
 		t.Error("--example without --prop must fail")
 	}
 }
 
 func TestBadURLIsRejected(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := run(t, dir, "add", "vehicle", "-u", "://nonsense"); err == nil {
+	if _, err := run(t, dir, "item", "add", "vehicle", "-u", "://nonsense"); err == nil {
 		t.Error("an unparseable url must fail")
 	}
 }
@@ -213,9 +213,9 @@ func TestVersion(t *testing.T) {
 // does not overwrite what the next one calls it.
 func TestPropertyTaughtPerDomain(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "add", "news", "--template", "article")
+	runOK(t, dir, "item", "add", "news", "--template", "article")
 
-	out := runOK(t, dir, "add", "news", "-d", "example.com",
+	out := runOK(t, dir, "item", "add", "news", "-d", "example.com",
 		"-p", "author", "-e", "Hannah McLeod", "-a", "byline")
 	if !strings.Contains(out, "property author on example.com") {
 		t.Errorf("output = %s", out)
@@ -225,15 +225,15 @@ func TestPropertyTaughtPerDomain(t *testing.T) {
 	}
 
 	// Scoping must not quietly widen the crawl.
-	if shown := runOK(t, dir, "list", "news"); strings.Contains(shown, "targets     1") {
+	if shown := runOK(t, dir, "item", "ls", "news"); strings.Contains(shown, "targets     1") {
 		t.Errorf("--domain alongside --prop should not add a target: %s", shown)
 	}
 
 	// A second site teaches its own answer without disturbing the first.
-	runOK(t, dir, "add", "news", "-d", "other.test",
+	runOK(t, dir, "item", "add", "news", "-d", "other.test",
 		"-p", "author", "-e", "Jared Wright")
 
-	first := runOK(t, dir, "list", "news")
+	first := runOK(t, dir, "item", "ls", "news")
 	if !strings.Contains(first, "Hannah McLeod") && !strings.Contains(first, "example.com") {
 		t.Logf("status = %s", first)
 	}
@@ -243,10 +243,10 @@ func TestPropertyTaughtPerDomain(t *testing.T) {
 // crawl runs, where it would look like a site that stopped publishing a field.
 func TestTaughtRegexMustCompile(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := run(t, dir, "add", "news", "-p", "title", "--regex", "^(unclosed"); err == nil {
+	if _, err := run(t, dir, "item", "add", "news", "-p", "title", "--regex", "^(unclosed"); err == nil {
 		t.Error("an invalid regex should be rejected when taught")
 	}
-	if _, err := run(t, dir, "add", "news", "--regex", "^x$"); err == nil {
+	if _, err := run(t, dir, "item", "add", "news", "--regex", "^x$"); err == nil {
 		t.Error("--regex without --prop should be rejected")
 	}
 }
@@ -256,9 +256,9 @@ func TestTaughtRegexMustCompile(t *testing.T) {
 // worked when what it did was leave them where they were.
 func TestAddingNothingSaysWhatToAdd(t *testing.T) {
 	dir := t.TempDir()
-	out := runOK(t, dir, "add", "thing")
+	out := runOK(t, dir, "item", "add", "thing")
 
-	for _, want := range []string{"nothing added yet", "scour crawl thing", "--help"} {
+	for _, want := range []string{"nothing added yet", "scour start thing", "--help"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output does not mention %q:\n%s", want, out)
 		}
@@ -269,7 +269,7 @@ func TestAddingNothingSaysWhatToAdd(t *testing.T) {
 	}
 
 	// Once it has something, the report is the change and nothing else.
-	added := runOK(t, dir, "add", "thing", "-p", "make", "-e", "Ford")
+	added := runOK(t, dir, "item", "add", "thing", "-p", "make", "-e", "Ford")
 	if strings.Contains(added, "nothing added yet") {
 		t.Errorf("still nagging after a property was added:\n%s", added)
 	}
@@ -278,28 +278,21 @@ func TestAddingNothingSaysWhatToAdd(t *testing.T) {
 	}
 }
 
-// A stopped item used to be crawled anyway: the pause is checked once a
-// second, so it fetched a handful of pages and then stopped saying "paused",
-// which explains neither why nor what to do about it.
-func TestCrawlingAStoppedItemExplainsItself(t *testing.T) {
+// pause keeps the frontier and start carries on from it. Refusing to start a
+// paused item would be answering "start this" with "it is paused", which is the
+// thing being asked to change.
+func TestPauseKeepsTheFrontierAndStartResumes(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "add", "news", "-d", "example.com")
+	runOK(t, dir, "item", "add", "news", "-d", "example.com")
 
-	out := runOK(t, dir, "stop", "news")
+	out := runOK(t, dir, "pause", "news")
 	if !strings.Contains(out, "frontier kept") || !strings.Contains(out, "scour start news") {
-		t.Errorf("stop did not say what it kept or how to undo it:\n%s", out)
+		t.Errorf("pause did not say what it kept or how to carry on:\n%s", out)
 	}
 
-	_, err := run(t, dir, "crawl", "news")
-	if err == nil {
-		t.Fatal("crawling a stopped item should refuse")
-	}
-	if !strings.Contains(err.Error(), "scour start news") {
-		t.Errorf("the refusal does not say how to fix it: %v", err)
-	}
-
-	if out := runOK(t, dir, "start", "news"); !strings.Contains(out, "scour crawl news") {
-		t.Errorf("start did not say what to do next:\n%s", out)
+	shown := runOK(t, dir, "item", "ls", "news")
+	if !strings.Contains(shown, "paused") {
+		t.Errorf("a paused item should say so:\n%s", shown)
 	}
 }
 
@@ -307,9 +300,9 @@ func TestCrawlingAStoppedItemExplainsItself(t *testing.T) {
 // that it started.
 func TestACrawlThatCannotRunSaysNothingFirst(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "add", "solo")
+	runOK(t, dir, "item", "add", "solo")
 
-	out, err := run(t, dir, "crawl", "solo")
+	out, err := run(t, dir, "start", "solo")
 	if err == nil {
 		t.Fatal("crawling an item with no targets should refuse")
 	}
@@ -322,14 +315,14 @@ func TestACrawlThatCannotRunSaysNothingFirst(t *testing.T) {
 // closest one rather than leaving someone to re-read the listing.
 func TestUnknownItemSuggestsTheNearestName(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "add", "vehicle")
-	runOK(t, dir, "add", "news-html")
+	runOK(t, dir, "item", "add", "vehicle")
+	runOK(t, dir, "item", "add", "news-html")
 
 	for _, tc := range []struct{ typed, want string }{
 		{"vehicel", "vehicle"},
 		{"newshtml", "news-html"},
 	} {
-		out, err := run(t, dir, "list", tc.typed)
+		out, err := run(t, dir, "item", "ls", tc.typed)
 		if err == nil {
 			t.Fatalf("%q should not have been found", tc.typed)
 		}
@@ -341,7 +334,7 @@ func TestUnknownItemSuggestsTheNearestName(t *testing.T) {
 
 	// Nothing close enough is offered nothing, because a suggestion pointing
 	// somewhere unrelated is read as "this is what you meant".
-	_, err := run(t, dir, "list", "zzzzzzzz")
+	_, err := run(t, dir, "item", "ls", "zzzzzzzz")
 	if err == nil {
 		t.Fatal("an absent item must fail")
 	}
@@ -353,14 +346,14 @@ func TestUnknownItemSuggestsTheNearestName(t *testing.T) {
 // The suggestion has to reach every command, not only the one it was added to.
 func TestUnknownItemSuggestsAcrossCommands(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "add", "vehicle", "-p", "make", "-e", "Ford")
+	runOK(t, dir, "item", "add", "vehicle", "-p", "make", "-e", "Ford")
 
 	for _, args := range [][]string{
-		{"list", "vehicel"},
+		{"item", "ls", "vehicel"},
 		{"rules", "vehicel"},
-		{"search", "vehicel"},
-		{"stop", "vehicel"},
-		{"tag", "vehicel", "-p", "make"},
+		{"stream", "vehicel"},
+		{"pause", "vehicel"},
+		{"item", "tag", "vehicel", "-p", "make"},
 	} {
 		_, err := run(t, dir, args...)
 		if err == nil {

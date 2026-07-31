@@ -79,10 +79,10 @@ func TestChainImprovesRecordsPerPage(t *testing.T) {
 	srv := tunnelSite(t)
 
 	setup := func(dir string) {
-		runOK(t, dir, "add", "vehicle", "--alias", "car", "-u", srv.URL+"/")
-		runOK(t, dir, "add", "vehicle", "-p", "make", "-e", "Ford")
-		runOK(t, dir, "add", "vehicle", "-p", "model", "-e", "M1")
-		runOK(t, dir, "add", "vehicle", "-p", "year", "-e", "2011")
+		runOK(t, dir, "item", "add", "vehicle", "--alias", "car", "-u", srv.URL+"/")
+		runOK(t, dir, "item", "add", "vehicle", "-p", "make", "-e", "Ford")
+		runOK(t, dir, "item", "add", "vehicle", "-p", "model", "-e", "M1")
+		runOK(t, dir, "item", "add", "vehicle", "-p", "year", "-e", "2011")
 	}
 
 	// Both arms crawl the whole site once, train, then crawl again under a

@@ -16,14 +16,14 @@ import (
 
 // addExamples is shown both in --help and by runAdd when a bare "scour add
 // <name>" leaves the item with nothing to crawl, so the two never drift.
-const addExamples = "  scour add vehicle --alias car --alias 'pickup truck'\n" +
-	"  scour add vehicle -d example.com --subdomains\n" +
-	"  scour add vehicle -u http://www.example.com/cars/\n" +
-	"  scour add vehicle -p make -e Ford\n" +
-	"  scour add news -d example.com -p author -e 'Hannah McLeod' -a byline\n" +
-	"  scour add news -d example.com -p author --regex '^[^@]+$'\n" +
-	"  scour add news -p title --label '^(og:|twitter:)?title$'\n" +
-	"  scour add vehicle --type html --type pdf"
+const addExamples = "  scour item add vehicle --alias car --alias 'pickup truck'\n" +
+	"  scour item add vehicle -d example.com --subdomains\n" +
+	"  scour item add vehicle -u http://www.example.com/cars/\n" +
+	"  scour item add vehicle -p make -e Ford\n" +
+	"  scour item add news -d example.com -p author -e 'Hannah McLeod' -a byline\n" +
+	"  scour item add news -d example.com -p author --regex '^[^@]+$'\n" +
+	"  scour item add news -p title --label '^(og:|twitter:)?title$'\n" +
+	"  scour item add vehicle --type html --type pdf"
 
 type addFlags struct {
 	aliases    []string
@@ -44,7 +44,6 @@ func newAddCmd(a *app) *cli.Command {
 	var f addFlags
 
 	cmd := &cli.Command{
-		Category:  "Defining what to look for",
 		Name:      "add",
 		ArgsUsage: "<name>",
 		Usage:     "Define an item, or add targets, properties and aliases to one",
@@ -255,7 +254,7 @@ func runAdd(c context.Context, a *app, name string, f addFlags) error {
 		// it did was leave them exactly where they were.
 		a.Printf("item %s: nothing added yet, so there is nothing to crawl\n\n", item.Name)
 		a.Printf("Add what to look for, and where to look:\n%s\n\n", addExamples)
-		a.Printf("Then: scour crawl %s\nSee also: scour add --help\n", item.Name)
+		a.Printf("Then: scour start %s\nSee also: scour item add --help\n", item.Name)
 		return nil
 	}
 	for _, change := range changes {
@@ -285,6 +284,9 @@ func normaliseDomain(raw string) (string, error) {
 	host = strings.TrimPrefix(host, "www.")
 	if host == "" {
 		return "", fmt.Errorf("domain %q has no host", raw)
+	}
+	if strings.ContainsAny(host, " \t#") {
+		return "", fmt.Errorf("domain %q is not a hostname", raw)
 	}
 	return host, nil
 }

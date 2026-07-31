@@ -15,8 +15,8 @@ import (
 
 func newListCmd(a *app) *cli.Command {
 	return &cli.Command{
-		Category:  "Reading the results",
-		Name:      "list",
+		Name:      "ls",
+		Aliases:   []string{"list"},
 		ArgsUsage: "[name]",
 		Usage:     "List items, or show everything known about one",
 		Description: "With no name, a line per item: what it has, how far its crawl has got\n" +
@@ -24,37 +24,39 @@ func newListCmd(a *app) *cli.Command {
 			"one.\n\n" +
 			"Crawls resume from the stored frontier, so this is also where you see what a\n" +
 			"restarted crawl will pick up.",
-		UsageText: "  scour list\n" +
-			"  scour list vehicle",
+		UsageText: "  scour item ls\n" +
+			"  scour item ls vehicle",
 		Action: func(c context.Context, cmd *cli.Command) error {
 			args, err := atMost(cmd, 1, "at most one item name")
 			if err != nil {
 				return err
 			}
-			s, err := a.Store()
-			if err != nil {
-				return err
-			}
-
-			if len(args) == 0 {
-				return runFleetStatus(c, a, s)
-			}
-
-			item, err := s.Item(c, args[0])
-			if err != nil {
-				return err
-			}
-			st, err := s.Status(c, item.ID)
-			if err != nil {
-				return err
-			}
-
-			if a.jsonOut {
-				return writeJSON(a.Out(), st)
-			}
-			return renderStatus(c, a, item.Name, st)
+			return runList(c, a, args)
 		},
 	}
+}
+
+// runList is shared with the bare `scour item`, so the two cannot drift.
+func runList(c context.Context, a *app, args []string) error {
+	s, err := a.Store()
+	if err != nil {
+		return err
+	}
+	if len(args) == 0 {
+		return runFleetStatus(c, a, s)
+	}
+	item, err := s.Item(c, args[0])
+	if err != nil {
+		return err
+	}
+	st, err := s.Status(c, item.ID)
+	if err != nil {
+		return err
+	}
+	if a.jsonOut {
+		return writeJSON(a.Out(), st)
+	}
+	return renderStatus(c, a, item.Name, st)
 }
 
 func renderStatus(c context.Context, a *app, name string, st *store.Status) error {
@@ -65,6 +67,7 @@ func renderStatus(c context.Context, a *app, name string, st *store.Status) erro
 	}
 
 	line("item", name)
+	line("state", itemState(st))
 	line("targets", fmt.Sprintf("%d  (%d aliases, %d properties)", st.Targets, st.Aliases, st.Properties))
 	line("frontier", fmt.Sprintf("%d queued / %d visited", st.Queued, st.Visited))
 
@@ -156,7 +159,7 @@ func runFleetStatus(c context.Context, a *app, s *store.Store) error {
 		return err
 	}
 	if len(items) == 0 {
-		a.Println("no items yet: scour add <name>")
+		a.Println("no items yet: scour item add <name>")
 		return nil
 	}
 
@@ -168,6 +171,7 @@ func runFleetStatus(c context.Context, a *app, s *store.Store) error {
 		Records int64  `json:"records"`
 		Rules   int64  `json:"rules"`
 		Trained string `json:"trained"`
+		State   string `json:"state"`
 	}
 
 	rows := make([]row, 0, len(items))
@@ -190,7 +194,7 @@ func runFleetStatus(c context.Context, a *app, s *store.Store) error {
 		rows = append(rows, row{
 			Name: summary.Name, Targets: st.Targets, Queued: st.Queued,
 			Visited: st.Visited, Records: st.Matches, Rules: st.Rules,
-			Trained: trained,
+			Trained: trained, State: itemState(st),
 		})
 	}
 
@@ -199,14 +203,32 @@ func runFleetStatus(c context.Context, a *app, s *store.Store) error {
 	}
 
 	t := newTable(
-		[]string{"NAME", "TARGETS", "QUEUED", "VISITED", "RECORDS", "RULES", "TRAINED"},
-		alignLeft, alignRight, alignRight, alignRight, alignRight, alignRight, alignLeft,
+		[]string{"NAME", "TARGETS", "QUEUED", "VISITED", "RECORDS", "RULES", "TRAINED", "STATE"},
+		alignLeft, alignRight, alignRight, alignRight, alignRight, alignRight, alignLeft, alignLeft,
 	)
 	for _, r := range rows {
 		t.add(r.Name,
 			fmt.Sprintf("%d", r.Targets), fmt.Sprintf("%d", r.Queued),
 			fmt.Sprintf("%d", r.Visited), fmt.Sprintf("%d", r.Records),
-			fmt.Sprintf("%d", r.Rules), r.Trained)
+			fmt.Sprintf("%d", r.Rules), r.Trained, r.State)
 	}
 	return t.render(a.Out())
+}
+
+// itemState says what an item is doing, which the counters alone cannot.
+//
+// A paused item and one whose frontier has run out both sit at zero, and
+// telling them apart is the difference between waiting for a crawl that will
+// never resume and one that has finished.
+func itemState(st *store.Status) string {
+	switch {
+	case st.Paused:
+		return "paused"
+	case st.Queued > 0:
+		return "ready"
+	case st.Visited > 0:
+		return "done"
+	default:
+		return "new"
+	}
 }

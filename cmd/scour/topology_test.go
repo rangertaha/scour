@@ -21,14 +21,14 @@ type frontier struct {
 	HasParent   bool
 }
 
-// readFrontier runs `scour crawl --json` and reduces it to the fields that
+// readFrontier runs `scour start --json` and reduces it to the fields that
 // carry meaning. Timings and ids are left out: latency is wall-clock and row
 // ids depend on insertion order, neither of which is a difference in what was
 // crawled.
 func readFrontier(t *testing.T, dir string) []frontier {
 	t.Helper()
 
-	out := runOK(t, dir, "crawl", "vehicle", "--json")
+	out := runOK(t, dir, "start", "vehicle", "--json")
 	var rows []struct {
 		URL         string
 		Depth       int
@@ -66,14 +66,14 @@ func TestTopologyEquivalence(t *testing.T) {
 	srv := carSite(t)
 
 	direct := crawlDir(t)
-	runOK(t, direct, "add", "vehicle", "--alias", "car", "-u", srv.URL+"/")
-	runOK(t, direct, "add", "vehicle", "-p", "make", "-e", "Ford")
-	runOK(t, direct, "crawl", "vehicle", "--depth", "5")
+	runOK(t, direct, "item", "add", "vehicle", "--alias", "car", "-u", srv.URL+"/")
+	runOK(t, direct, "item", "add", "vehicle", "-p", "make", "-e", "Ford")
+	runOK(t, direct, "start", "vehicle", "--depth", "5")
 
 	viaBus := crawlDir(t)
-	runOK(t, viaBus, "add", "vehicle", "--alias", "car", "-u", srv.URL+"/")
-	runOK(t, viaBus, "add", "vehicle", "-p", "make", "-e", "Ford")
-	out := runOK(t, viaBus, "crawl", "vehicle", "--depth", "5", "--bus")
+	runOK(t, viaBus, "item", "add", "vehicle", "--alias", "car", "-u", srv.URL+"/")
+	runOK(t, viaBus, "item", "add", "vehicle", "-p", "make", "-e", "Ford")
+	out := runOK(t, viaBus, "start", "vehicle", "--depth", "5", "--bus")
 
 	if strings.Contains(out, "0 fetched") {
 		t.Fatalf("the bus crawl fetched nothing:\n%s", out)
@@ -100,13 +100,13 @@ func TestBusWritesAreIdempotent(t *testing.T) {
 	srv := carSite(t)
 	dir := crawlDir(t)
 
-	runOK(t, dir, "add", "vehicle", "--alias", "car", "-u", srv.URL+"/")
-	runOK(t, dir, "crawl", "vehicle", "--depth", "5", "--bus")
+	runOK(t, dir, "item", "add", "vehicle", "--alias", "car", "-u", srv.URL+"/")
+	runOK(t, dir, "start", "vehicle", "--depth", "5", "--bus")
 	first := readFrontier(t, dir)
 
 	// Crawling again publishes the same pages a second time. The writes key on
 	// the URL hash, so the frontier must not grow.
-	runOK(t, dir, "crawl", "vehicle", "--reset", "--depth", "5", "--bus")
+	runOK(t, dir, "start", "vehicle", "--reset", "--depth", "5", "--bus")
 	second := readFrontier(t, dir)
 
 	if len(first) != len(second) {
@@ -118,8 +118,8 @@ func TestBusCrawlReportsWhatItWrote(t *testing.T) {
 	srv := carSite(t)
 	dir := crawlDir(t)
 
-	runOK(t, dir, "add", "vehicle", "-u", srv.URL+"/")
-	out := runOK(t, dir, "crawl", "vehicle", "--depth", "5", "--bus")
+	runOK(t, dir, "item", "add", "vehicle", "-u", srv.URL+"/")
+	out := runOK(t, dir, "start", "vehicle", "--depth", "5", "--bus")
 
 	// The summary is read back from the database after the writer has caught
 	// up. Printing it before would show an empty frontier that fills in a

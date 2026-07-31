@@ -136,7 +136,7 @@ type Stats struct {
 	Bytes int64
 }
 
-// Stats walks the cache. It is used by `scour list`, so it counts rather
+// Stats walks the cache. It is used by `scour item ls`, so it counts rather
 // than reads.
 func (c *Cache) Stats(_ context.Context) (Stats, error) {
 	var s Stats

@@ -110,7 +110,7 @@ func (t *Trainer) Run(ctx context.Context, item *store.Item, opts Options) (*Res
 
 	props := schemaOf(item)
 	if len(props) == 0 {
-		return nil, fmt.Errorf("%w: scour add %s -p <prop> -e <example>", ErrNoProperties, item.Name)
+		return nil, fmt.Errorf("%w: scour item add %s -p <prop> -e <example>", ErrNoProperties, item.Name)
 	}
 
 	// The field-order chain describes how people write records rather than how

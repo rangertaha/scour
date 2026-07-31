@@ -189,7 +189,7 @@ func (s *Store) FetchedURLs(ctx context.Context, itemID uint) ([]URL, error) {
 	return out, nil
 }
 
-// Status summarises an item, and is what `scour list` prints.
+// Status summarises an item, and is what `scour item ls` prints.
 type Status struct {
 	Targets    int64
 	Properties int64
@@ -198,6 +198,7 @@ type Status struct {
 	Visited    int64
 	Failed     int64
 	Skipped    int64
+	Paused     bool
 	Matches    int64
 	Valid      int64
 	Invalid    int64
@@ -212,6 +213,14 @@ type Status struct {
 func (s *Store) Status(ctx context.Context, itemID uint) (*Status, error) {
 	db := s.db.WithContext(ctx)
 	st := &Status{Formats: map[string]int64{}, Roles: map[string]int64{}}
+
+	// Paused is durable and invisible everywhere else, so an item that is
+	// simply not being worked on looks identical to one that has finished.
+	paused, err := s.IsPaused(ctx, itemID)
+	if err != nil {
+		return nil, err
+	}
+	st.Paused = paused
 
 	counts := []struct {
 		dst   *int64
@@ -241,7 +250,7 @@ func (s *Store) Status(ctx context.Context, itemID uint) (*Status, error) {
 		Key string
 		N   int64
 	}
-	err := db.Model(&URL{}).
+	err = db.Model(&URL{}).
 		Select("content_type AS key, COUNT(*) AS n").
 		Where("item_id = ? AND content_type != ''", itemID).
 		Group("content_type").Scan(&grouped).Error

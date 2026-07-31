@@ -70,13 +70,14 @@ func (a *app) busCrawler(ctx context.Context, crawler *crawl.Crawler, item strin
 		WithMeter(service.NewBusMeter(b, item)), settle, nil
 }
 
-func newRunCmd(a *app) *cli.Command {
+func newJoinCmd(a *app) *cli.Command {
 	var roles, busURL string
 
 	cmd := &cli.Command{
-		Category: "Serving",
-		Name:     "run",
-		Usage:    "Run scour's components as a long-lived process",
+		Category: "SERVER",
+		Name:     "join",
+		Aliases:  []string{"run"},
+		Usage:    "Join a cluster for distributed workload",
 		Description: "Starts the components named by --role and serves them until interrupted.\n" +
 			"With no --role it starts all of them, which is a single-process scour with\n" +
 			"an embedded broker. Point --bus-url at a NATS cluster and the same roles can\n" +

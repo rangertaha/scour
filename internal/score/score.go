@@ -34,7 +34,7 @@ type Features struct {
 
 // Scorer predicts the probability, in [0,1], that a URL leads to a match.
 type Scorer interface {
-	// Name identifies the implementation, for logs and `scour list`.
+	// Name identifies the implementation, for logs and `scour item ls`.
 	Name() string
 	// Score returns the probability that this link is worth fetching.
 	Score(f Features) float64
@@ -65,7 +65,7 @@ type Config struct {
 type Factory func(Config) (Scorer, error)
 
 // Trained is implemented by scorers that can say whether they were fitted to
-// a crawl or are still working from their seed words. `scour crawl` reports
+// a crawl or are still working from their seed words. `scour start` reports
 // the difference, because a cold scorer's rankings mean much less.
 type Trained interface {
 	Trained() bool

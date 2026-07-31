@@ -23,7 +23,7 @@ func newServerCmd(a *app) *cli.Command {
 	var listen string
 
 	cmd := &cli.Command{
-		Category: "Serving",
+		Category: "SERVER",
 		Name:     "server",
 		Usage:    "Run as a service, serving the HTTP API and MCP",
 		Description: "Serves the same scour the command line drives: one database, one set of\n" +
@@ -157,7 +157,7 @@ func closed(err error) bool {
 
 func newMCPCmd(a *app) *cli.Command {
 	return &cli.Command{
-		Category: "Serving",
+		Category: "SERVER",
 		Name:     "mcp",
 		Usage:    "Run as an MCP server over stdio",
 		Description: "Speaks the Model Context Protocol on stdin and stdout, which is what a local\n" +

@@ -234,7 +234,7 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 	// A crawler handed its work by another process has no targets of its own:
 	// what to fetch and what is in scope were both decided before it was told.
 	if len(opts.Targets) == 0 && opts.Frontier == nil {
-		return nil, fmt.Errorf("item %q has no targets: scour add %s -d <domain>", opts.Item.Name, opts.Item.Name)
+		return nil, fmt.Errorf("item %q has no targets: scour item add %s -d <domain>", opts.Item.Name, opts.Item.Name)
 	}
 	if opts.Scorer == nil {
 		opts.Scorer = score.Fixed(1)

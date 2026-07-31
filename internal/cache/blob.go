@@ -144,7 +144,7 @@ func (b *Blob) Has(ctx context.Context, rawURL string) bool {
 // Stats implements [Store].
 //
 // Counting means listing the bucket, which is a request per page of results
-// rather than a directory walk. It is called by `scour list`, not on any
+// rather than a directory walk. It is called by `scour item ls`, not on any
 // crawl path.
 func (b *Blob) Stats(ctx context.Context) (Stats, error) {
 	var s Stats

@@ -34,6 +34,9 @@ go.work.sum
 
 # Build output
 bin/
+# `go build ./cmd/scour` with no -o lands here, and a 66MB binary is easy to
+# commit by accident and expensive to carry once it is in the history.
+/scour
 
 # Coverage report
 coverage.html

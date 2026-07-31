@@ -67,11 +67,11 @@ func trained(t *testing.T) (string, *httptest.Server) {
 	srv := carSite(t)
 	dir := crawlDir(t)
 
-	runOK(t, dir, "add", "vehicle", "--alias", "car", "-u", srv.URL+"/")
-	runOK(t, dir, "add", "vehicle", "-p", "make", "-e", "Ford")
-	runOK(t, dir, "add", "vehicle", "-p", "model", "-e", "F-Series")
-	runOK(t, dir, "add", "vehicle", "-p", "year", "-e", "2026")
-	runOK(t, dir, "crawl", "vehicle", "--depth", "5")
+	runOK(t, dir, "item", "add", "vehicle", "--alias", "car", "-u", srv.URL+"/")
+	runOK(t, dir, "item", "add", "vehicle", "-p", "make", "-e", "Ford")
+	runOK(t, dir, "item", "add", "vehicle", "-p", "model", "-e", "F-Series")
+	runOK(t, dir, "item", "add", "vehicle", "-p", "year", "-e", "2026")
+	runOK(t, dir, "start", "vehicle", "--depth", "5")
 	return dir, srv
 }
 
@@ -96,7 +96,7 @@ func TestTrainThenRulesThenSearch(t *testing.T) {
 		t.Errorf("no rule was induced for make:\n%s", rules)
 	}
 
-	search := runOK(t, dir, "search", "vehicle")
+	search := runOK(t, dir, "stream", "vehicle")
 	for _, want := range []string{"ID", "CONF", "FORMAT", "MAKE", "MODEL", "YEAR"} {
 		if !strings.Contains(search, want) {
 			t.Errorf("search table missing %s:\n%s", want, search)
@@ -114,7 +114,7 @@ func TestLabelThenRetrainKeepsIDs(t *testing.T) {
 	dir, _ := trained(t)
 	runOK(t, dir, "train", "vehicle")
 
-	before := runOK(t, dir, "search", "vehicle", "--json")
+	before := runOK(t, dir, "stream", "vehicle", "--json")
 
 	out := runOK(t, dir, "invalid", "vehicle", "1")
 	if !strings.Contains(out, "marked invalid") {
@@ -122,7 +122,7 @@ func TestLabelThenRetrainKeepsIDs(t *testing.T) {
 	}
 
 	runOK(t, dir, "train", "vehicle")
-	after := runOK(t, dir, "search", "vehicle", "--json")
+	after := runOK(t, dir, "stream", "vehicle", "--json")
 
 	if !strings.Contains(after, `"ID": 1`) {
 		t.Errorf("record 1 did not survive retraining:\n%s", after)
@@ -134,7 +134,7 @@ func TestLabelThenRetrainKeepsIDs(t *testing.T) {
 		t.Errorf("record count changed across retraining")
 	}
 
-	only := runOK(t, dir, "search", "vehicle", "--label", "invalid")
+	only := runOK(t, dir, "stream", "vehicle", "--label", "invalid")
 	if !strings.Contains(only, "showing 1 of 1") {
 		t.Errorf("filtering by label did not find the labelled record:\n%s", only)
 	}
@@ -158,19 +158,19 @@ func TestSearchConfidenceFilter(t *testing.T) {
 
 	// Nothing scores 1.0, so this filters everything out, and the message has
 	// to say so rather than suggesting a model has not been trained.
-	out := runOK(t, dir, "search", "vehicle", "--confidence", "1")
+	out := runOK(t, dir, "stream", "vehicle", "--confidence", "1")
 	if !strings.Contains(out, "no records matched") {
 		t.Errorf("expected an empty filtered result:\n%s", out)
 	}
 
-	if _, err := run(t, dir, "search", "vehicle", "--confidence", "50"); err == nil {
+	if _, err := run(t, dir, "stream", "vehicle", "--confidence", "50"); err == nil {
 		t.Error("--confidence is a probability, so 50 must be rejected")
 	}
 }
 
 func TestTrainBeforeCrawl(t *testing.T) {
 	dir := crawlDir(t)
-	runOK(t, dir, "add", "vehicle", "-p", "make", "-e", "Ford")
+	runOK(t, dir, "item", "add", "vehicle", "-p", "make", "-e", "Ford")
 
 	if _, err := run(t, dir, "train", "vehicle"); err == nil {
 		t.Error("training with nothing cached must fail")
@@ -179,7 +179,7 @@ func TestTrainBeforeCrawl(t *testing.T) {
 
 func TestTrainWithoutProperties(t *testing.T) {
 	dir, srv := trained(t)
-	runOK(t, dir, "add", "other", "-u", srv.URL+"/")
+	runOK(t, dir, "item", "add", "other", "-u", srv.URL+"/")
 
 	if _, err := run(t, dir, "train", "other"); err == nil {
 		t.Error("training an item with no properties must fail")
@@ -188,7 +188,7 @@ func TestTrainWithoutProperties(t *testing.T) {
 
 func TestRulesBeforeTraining(t *testing.T) {
 	dir := crawlDir(t)
-	runOK(t, dir, "add", "vehicle")
+	runOK(t, dir, "item", "add", "vehicle")
 
 	out := runOK(t, dir, "rules", "vehicle")
 	if !strings.Contains(out, "scour train") {
@@ -198,9 +198,9 @@ func TestRulesBeforeTraining(t *testing.T) {
 
 func TestSearchBeforeTraining(t *testing.T) {
 	dir := crawlDir(t)
-	runOK(t, dir, "add", "vehicle")
+	runOK(t, dir, "item", "add", "vehicle")
 
-	out := runOK(t, dir, "search", "vehicle")
+	out := runOK(t, dir, "stream", "vehicle")
 	if !strings.Contains(out, "scour train") {
 		t.Errorf("search should say how to produce records:\n%s", out)
 	}
@@ -210,7 +210,7 @@ func TestStatusAfterTraining(t *testing.T) {
 	dir, _ := trained(t)
 	runOK(t, dir, "train", "vehicle")
 
-	out := runOK(t, dir, "list", "vehicle")
+	out := runOK(t, dir, "item", "ls", "vehicle")
 	if strings.Contains(out, "not trained yet") {
 		t.Errorf("status still says untrained after training:\n%s", out)
 	}
@@ -252,12 +252,12 @@ func TestTrainingTheScorerChangesWhatIsCrawled(t *testing.T) {
 	defer srv.Close()
 
 	dir := crawlDir(t)
-	runOK(t, dir, "add", "vehicle", "--alias", "car", "-u", srv.URL+"/")
-	runOK(t, dir, "add", "vehicle", "-p", "make", "-e", "Ford")
-	runOK(t, dir, "add", "vehicle", "-p", "model", "-e", "M1")
-	runOK(t, dir, "add", "vehicle", "-p", "year", "-e", "2001")
+	runOK(t, dir, "item", "add", "vehicle", "--alias", "car", "-u", srv.URL+"/")
+	runOK(t, dir, "item", "add", "vehicle", "-p", "make", "-e", "Ford")
+	runOK(t, dir, "item", "add", "vehicle", "-p", "model", "-e", "M1")
+	runOK(t, dir, "item", "add", "vehicle", "-p", "year", "-e", "2001")
 
-	cold := runOK(t, dir, "crawl", "vehicle", "--depth", "4")
+	cold := runOK(t, dir, "start", "vehicle", "--depth", "4")
 	if !strings.Contains(cold, "seeded from aliases and examples") {
 		t.Errorf("the first crawl should say it is running on a seeded model:\n%s", cold)
 	}
@@ -274,12 +274,12 @@ func TestTrainingTheScorerChangesWhatIsCrawled(t *testing.T) {
 	}
 
 	// The trained crawl must say so, and must spend its budget on /cars/.
-	warm := runOK(t, dir, "crawl", "vehicle", "--reset", "--depth", "4", "--max-pages", "12")
+	warm := runOK(t, dir, "start", "vehicle", "--reset", "--depth", "4", "--max-pages", "12")
 	if !strings.Contains(warm, "scoring trained model") {
 		t.Errorf("the second crawl did not pick up the trained model:\n%s", warm)
 	}
 
-	rows := runOK(t, dir, "crawl", "vehicle", "--json")
+	rows := runOK(t, dir, "start", "vehicle", "--json")
 	var cars, noise int
 	for _, line := range strings.Split(rows, "\n") {
 		if !strings.Contains(line, `"URL"`) {
@@ -303,14 +303,14 @@ func TestTrainingTheScorerChangesWhatIsCrawled(t *testing.T) {
 func TestResetReallyStartsOver(t *testing.T) {
 	dir, _ := trained(t)
 
-	before := runOK(t, dir, "list", "vehicle")
+	before := runOK(t, dir, "item", "ls", "vehicle")
 	if !strings.Contains(before, "visited") {
 		t.Fatalf("nothing was crawled:\n%s", before)
 	}
 
 	// A reset that left the visited set behind would fetch nothing at all,
 	// which looks like success and produces an empty corpus to train on.
-	out := runOK(t, dir, "crawl", "vehicle", "--reset", "--depth", "5")
+	out := runOK(t, dir, "start", "vehicle", "--reset", "--depth", "5")
 	if strings.Contains(out, "\n0 fetched") {
 		t.Errorf("--reset fetched nothing, so the visited set survived it:\n%s", out)
 	}

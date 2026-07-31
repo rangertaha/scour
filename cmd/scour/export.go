@@ -3,78 +3,69 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/csv"
 	"fmt"
-	"strings"
-	"time"
+	"os"
+	"path/filepath"
+	"sort"
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/rangertaha/scour/internal/export"
 	"github.com/rangertaha/scour/internal/store"
 )
 
-type exportFlags struct {
-	format     string
-	to         string
-	tokenEnv   string
-	confidence float64
-	label      string
-	limit      int
-	stamp      string
+type urlExportFlags struct {
+	urls     string
+	domains  string
+	props    string
+	aliases  string
+	toStdout bool
 }
 
+// newExportCmd is the other half of import.
+//
+// What an item is worth keeping outside scour is the list it was built from:
+// the domains and URLs, and the properties and words taught for them. Those
+// arrive by import from a file, and until now there was no way back out, so a
+// list assembled over a long crawl existed only inside one database.
 func newExportCmd(a *app) *cli.Command {
-	var f exportFlags
+	var f urlExportFlags
 
-	cmd := &cli.Command{
-		Category:  "Reading the results",
+	return &cli.Command{
+		Category:  "URLS",
 		Name:      "export",
 		ArgsUsage: "<name>",
-		Usage:     "Write an item's extracted records out as CSV, JSON or to a webhook",
-		Description: "Records are grouped by the domain they came from, one file per site, so an\n" +
-			"export is diffable and a site that changed shows up as a changed file.\n\n" +
-			"Files land under <data>/exports/<name>/<domain>/<date>.<ext>, and re-running\n" +
-			"on the same day overwrites rather than accumulating.",
+		Usage:     "Write domains and urls to file",
+		Description: "Writes what `scour import` reads, in the same formats, so an item can be\n" +
+			"moved between databases or kept under version control.\n\n" +
+			"With no flags the domains and urls go to stdout, which is the quick look.\n" +
+			"Naming a file writes it there instead.",
 		UsageText: "  scour export vehicle\n" +
-			"  scour export vehicle --format json\n" +
-			"  scour export vehicle --label valid --confidence 0.8\n" +
-			"  scour export vehicle --format webhook --to https://example.com/ingest",
+			"  scour export vehicle --domains domains.txt --urls urls.txt\n" +
+			"  scour export vehicle --props props.csv --aliases aliases.txt\n" +
+			"  scour export vehicle --urls - > urls.txt",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:        "format",
-				Usage:       "output format: " + exportFormats() + " (default " + export.Default + ")",
-				Destination: &f.format,
+				Name:        "urls",
+				Usage:       "write URL targets to this `file`, or - for stdout",
+				Destination: &f.urls,
 			},
 			&cli.StringFlag{
-				Name:        "to",
-				Usage:       "directory for files, or url for a webhook",
-				Destination: &f.to,
+				Name:        "domains",
+				Usage:       "write domain targets to this `file`, or - for stdout",
+				Destination: &f.domains,
 			},
 			&cli.StringFlag{
-				Name:        "token-env",
-				Usage:       "environment variable holding a bearer token for the webhook",
-				Destination: &f.tokenEnv,
-			},
-			&cli.FloatFlag{
-				Name:        "confidence",
-				Usage:       "only export records at or above this confidence",
-				Destination: &f.confidence,
+				Name:        "props",
+				Usage:       "write properties to this CSV `file`, or - for stdout",
+				Destination: &f.props,
 			},
 			&cli.StringFlag{
-				Name:        "label",
-				Usage:       "only export records with this label: valid, invalid or unlabelled",
-				Destination: &f.label,
-			},
-			&cli.IntFlag{
-				Name:        "max-records",
-				Usage:       "cap how many records are exported (0 for no limit)",
-				Destination: &f.limit,
-			},
-			&cli.StringFlag{
-				Name:        "name",
-				Usage:       "name the export file (default today's date)",
-				Destination: &f.stamp,
+				Name:        "aliases",
+				Usage:       "write the item's aliases to this `file`, or - for stdout",
+				Destination: &f.aliases,
 			},
 		},
 		Action: func(c context.Context, cmd *cli.Command) error {
@@ -82,101 +73,164 @@ func newExportCmd(a *app) *cli.Command {
 			if err != nil {
 				return err
 			}
-			return runExport(c, a, args[0], f)
+			return runURLExport(c, a, args[0], f)
 		},
 	}
-
-	return cmd
 }
 
-func runExport(c context.Context, a *app, name string, f exportFlags) error {
+func runURLExport(c context.Context, a *app, name string, f urlExportFlags) error {
 	s, err := a.Store()
 	if err != nil {
 		return err
 	}
-
 	item, err := s.Item(c, name)
 	if err != nil {
 		return err
 	}
 
-	if f.label != "" {
-		switch store.Label(f.label) {
-		case store.Valid, store.Invalid, store.Unlabelled:
-		default:
-			return fmt.Errorf("label must be valid, invalid or unlabelled, got %q", f.label)
+	// No flags means the two lists that matter, to stdout.
+	if f.urls == "" && f.domains == "" && f.props == "" && f.aliases == "" {
+		f.urls, f.domains = "-", "-"
+	}
+
+	targets, err := s.TargetsFor(c, item.ID)
+	if err != nil {
+		return err
+	}
+	var urls, domains []string
+	for _, t := range targets {
+		switch t.Kind {
+		case store.TargetURL:
+			urls = append(urls, t.Value)
+		case store.TargetDomain:
+			// Written the way import reads it back, so a subdomain target does
+			// not quietly narrow to the bare host on the way through. A
+			// trailing comment would not do: import strips a line that starts
+			// with #, not one that ends with it, so the marker came back as
+			// part of the hostname.
+			if t.Subdomains {
+				domains = append(domains, "*."+t.Value)
+				continue
+			}
+			domains = append(domains, t.Value)
 		}
 	}
+	sort.Strings(urls)
+	sort.Strings(domains)
 
-	rows, total, err := s.SearchRecords(c, item.ID, store.RecordQuery{
-		MinConfidence: f.confidence,
-		Label:         store.Label(f.label),
-		Limit:         f.limit,
-	})
-	if err != nil {
-		return err
-	}
-	if len(rows) == 0 {
-		// Not an error: a filter that matches nothing is a legitimate answer,
-		// and writing an empty file would be worse than saying so.
-		a.Printf("no records to export for %s\n", item.Name)
-		return nil
-	}
-
-	stamp := f.stamp
-	if stamp == "" {
-		stamp = time.Now().UTC().Format("2006-01-02")
-	}
-
-	// --to means a directory for file formats and a URL for the webhook, so
-	// only one of them may take it.
-	dir := a.cfg.ExportsDir()
-	if f.format != "webhook" && f.to != "" {
-		dir = f.to
-	}
-	if f.format == "webhook" && f.to == "" {
-		return fmt.Errorf("--format webhook needs --to <url>")
-	}
-
-	exporter, err := export.New(f.format, export.Config{
-		Dir:       dir,
-		URL:       f.to,
-		TokenEnv:  f.tokenEnv,
-		Timestamp: stamp,
-	})
-	if err != nil {
-		return err
-	}
-
-	result, err := exporter.Export(c, item.Name, rows)
-	if result != nil && len(result.Destinations) > 0 {
-		// Print what did go out even when the export failed part way, so a
-		// retry does not silently duplicate what was already delivered.
-		for _, dest := range result.Destinations {
-			a.Printf("%s\n", dest)
+	wrote := 0
+	if f.domains != "" {
+		n, err := writeLines(a, f.domains, domains, "domains")
+		if err != nil {
+			return err
 		}
+		wrote += n
 	}
-	if err != nil {
-		return err
+	if f.urls != "" {
+		n, err := writeLines(a, f.urls, urls, "urls")
+		if err != nil {
+			return err
+		}
+		wrote += n
+	}
+	if f.aliases != "" {
+		var words []string
+		for _, al := range item.Aliases {
+			words = append(words, al.Word)
+		}
+		sort.Strings(words)
+		n, err := writeLines(a, f.aliases, words, "aliases")
+		if err != nil {
+			return err
+		}
+		wrote += n
+	}
+	if f.props != "" {
+		n, err := writeProps(c, a, s, item, f.props)
+		if err != nil {
+			return err
+		}
+		wrote += n
 	}
 
-	if a.jsonOut {
-		return writeJSON(a.Out(), result)
+	if wrote == 0 {
+		a.Printf("%s has nothing to export yet: scour item add %s -d <domain>\n", item.Name, item.Name)
 	}
-
-	a.Printf("\n%d of %d records exported as %s to %d %s\n",
-		result.Records, total, exporter.Name(),
-		len(result.Destinations), plural(len(result.Destinations), "destination"))
 	return nil
 }
 
-// plural renders a count's noun, so a summary line reads as a sentence.
-func plural(n int, noun string) string {
-	if n == 1 {
-		return noun
+// writeLines writes one value per line, to a file or to stdout.
+func writeLines(a *app, dest string, lines []string, what string) (int, error) {
+	if len(lines) == 0 {
+		return 0, nil
 	}
-	return noun + "s"
+	if dest == "-" {
+		for _, l := range lines {
+			a.Printf("%s\n", l)
+		}
+		return len(lines), nil
+	}
+
+	if dir := filepath.Dir(dest); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return 0, fmt.Errorf("create %s: %w", dir, err)
+		}
+	}
+	file, err := os.Create(dest) //nolint:gosec // the path is operator supplied
+	if err != nil {
+		return 0, fmt.Errorf("write %s: %w", dest, err)
+	}
+	defer file.Close()
+
+	w := bufio.NewWriter(file)
+	for _, l := range lines {
+		if _, err := fmt.Fprintln(w, l); err != nil {
+			return 0, fmt.Errorf("write %s: %w", dest, err)
+		}
+	}
+	if err := w.Flush(); err != nil {
+		return 0, fmt.Errorf("write %s: %w", dest, err)
+	}
+	a.Printf("%s: %d %s\n", dest, len(lines), what)
+	return len(lines), nil
 }
 
-// exportFormats is the help text listing what is registered.
-func exportFormats() string { return strings.Join(export.Names(), ", ") }
+// writeProps writes the CSV `scour import --props` reads.
+func writeProps(c context.Context, a *app, s *store.Store, item *store.Item, dest string) (int, error) {
+	props, err := s.PropertiesFor(c, item.ID, "")
+	if err != nil {
+		return 0, err
+	}
+	if len(props) == 0 {
+		return 0, nil
+	}
+
+	out := os.Stdout
+	if dest != "-" {
+		if dir := filepath.Dir(dest); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o750); err != nil {
+				return 0, fmt.Errorf("create %s: %w", dir, err)
+			}
+		}
+		file, err := os.Create(dest) //nolint:gosec // the path is operator supplied
+		if err != nil {
+			return 0, fmt.Errorf("write %s: %w", dest, err)
+		}
+		defer file.Close()
+		out = file
+	}
+
+	w := csv.NewWriter(out)
+	// The header import expects, so a file written here reads back unchanged.
+	rows := [][]string{{"name", "type", "example", "description", "regex"}}
+	for _, p := range props {
+		rows = append(rows, []string{p.Name, p.Type, p.Example, p.Description, p.Regex})
+	}
+	if err := w.WriteAll(rows); err != nil {
+		return 0, fmt.Errorf("write %s: %w", dest, err)
+	}
+	if dest != "-" {
+		a.Printf("%s: %d properties\n", dest, len(props))
+	}
+	return len(props), nil
+}

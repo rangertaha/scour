@@ -17,10 +17,10 @@ COMMANDS:
      train    Learn where an item lives from cached pages
 
    SEARCH:
-     search  Search domains and urls for items
-     top     Watch every item live, and pause or resume a crawl
+     top     Monitor engine activity
      start   Start a search for items
-     stop    Stop search 
+     stop    Stop a search for items
+     pause   Pause a search for items
 
    SERVER:
      mcp     Run as an MCP server over stdio
