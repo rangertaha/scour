@@ -804,24 +804,49 @@ checked and ruled out. Fifty-eight candidates cleared the floor on one real
 page and the true headline lost among them, which points at grouping and
 support rather than at scoring.
 
-HTML article pages come back addressed by position: five Guardian articles gave
-`./meta[13]/@content` for modified, `./meta[19]/@content` for published and
-`./meta[28]/@content` for summary, with the container at `/html/head` and title,
-author and section missing entirely. Summary came back as "The Guardian" at 0.88.
+HTML article pages were addressed by position, and a wider corpus fixed that
+without a code change, which is what the diagnosis predicted. Nineteen news
+sites and 808 pages replaced five pages of one site, the indices varied,
+Generalize dropped them and the discriminator took over on its own:
+`./meta[@property="og:description"]/@content` where it had been `./meta[28]`.
+Summary is now filled on 93% of records. Nothing needed to be changed, and
+changing it against the narrow sample would have been the wrong fix.
 
-The positional part has a known cause and is deliberately not fixed yet.
-Predicated already knows how to write `meta[@property="article:modified_time"]`,
-and declines to, because the step still carries an index and an index is treated
-as having pinned the element down. It pinned it down on those five pages only:
-every one is from the same site and template, so the index never varied and
-Generalize kept it. On a wider crawl it would vary, the index would be dropped,
-and the predicate would fire unaided.
+What the same corpus exposed instead is worse and more interesting.
 
-So this needs a broader corpus before it is worth changing anything. Fixing it
-against five pages of one site risks preferring a predicate where an index was
-genuinely right, and would not have shown the difference either way. The measured
-symptom is recorded here so the next attempt starts from the diagnosis rather
-than repeating it.
+**The record anchors on `<head>`.** The container is `/html/head` on every site,
+so every field is fished out of page metadata and the article in `<body>` is
+never a candidate. `<head>` wins because metadata is exactly the part of a page
+that carries strong labels: og:, article:, itemprop, JSON-LD. The body has the
+headline and the byline and almost no labels at all, so it loses on coverage to
+the part of the document that is *about* the article rather than the article.
+
+**A field can be filled, confident and constant.** Over 503 records:
+
+| Field | Filled | Distinct values | What it actually located |
+| --- | --- | --- | --- |
+| summary | 93% | many | og:description, correct |
+| title | 48% | 10 | the site's name, one per site |
+| link | 15% | 4 | preconnect hints to CDNs |
+| published | 45% | many | correct |
+| modified | 45% | many | the same value as published |
+| section | 0.2% | 1 | one site |
+| author | 0% | none | never located |
+
+`title` came back as `./link[@rel="alternate"]/@title`, the RSS autodiscovery
+title, so every article on a site shares one headline. `link` came back as
+`./link[@rel="preconnect"]/@href`, which is a performance hint naming a CDN.
+Both are structurally perfect: right shape, right type, high confidence, and
+wrong.
+
+This is the sharpest statement yet of the theme already recorded above, that
+structure is checked and plausibility is not, and the corpus makes it
+measurable for the first time. Ten distinct titles across 503 records is not a
+subtle signal. A field whose value is fixed for a host and varies only between
+hosts is describing the site, not the record, and no amount of label agreement
+should let it stand as a per-record field. Detecting that needs exactly what was
+missing until now: several sites in one corpus. On a single site every field
+looks constant and nothing can be concluded.
 
 ## 9. Engineering standards
 
