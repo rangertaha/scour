@@ -3,6 +3,7 @@
 package transport
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net/http"
@@ -316,5 +317,36 @@ func TestRegistry(t *testing.T) {
 	}
 	if _, err := New("nonexistent", Config{}); err == nil {
 		t.Error("an unknown transport must be an error rather than a silent default")
+	}
+}
+
+// Only the first megabyte of a page is inspected, because judging one does not
+// need more. Handing back only that megabyte is a different thing, and is what
+// used to happen: every page over a megabyte was silently truncated for the
+// cache, the parser and extraction alike. A real corpus had 32 of 1,436 pages
+// at exactly 1,048,576 bytes.
+func TestReadBodyLeavesTheWholeBodyReadable(t *testing.T) {
+	const size = (1 << 20) + 4096
+	full := bytes.Repeat([]byte("a"), size)
+	copy(full[size-4:], "tail")
+
+	resp := &http.Response{Body: io.NopCloser(bytes.NewReader(full))}
+	head, ok := readBody(resp)
+	if !ok {
+		t.Fatal("readBody reported failure on a readable body")
+	}
+	if len(head) != 1<<20 {
+		t.Errorf("inspected %d bytes, want the first megabyte only", len(head))
+	}
+
+	got, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != size {
+		t.Fatalf("caller could read %d bytes of a %d byte page", len(got), size)
+	}
+	if !bytes.Equal(got, full) {
+		t.Error("the body the caller read is not the body that arrived")
 	}
 }
