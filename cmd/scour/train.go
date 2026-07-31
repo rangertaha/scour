@@ -23,6 +23,7 @@ func newTrainCmd(a *app) *cli.Command {
 	var f trainFlags
 
 	cmd := &cli.Command{
+		Category:  "Learning where the data is",
 		Name:      "train",
 		ArgsUsage: "<name>",
 		Usage:     "Learn where an entity's properties live, from the pages already crawled",

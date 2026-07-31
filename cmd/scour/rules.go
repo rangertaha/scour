@@ -12,6 +12,7 @@ import (
 
 func newRulesCmd(a *app) *cli.Command {
 	return &cli.Command{
+		Category:  "Learning where the data is",
 		Name:      "rules",
 		ArgsUsage: "<name>",
 		Usage:     "List the extraction rules learned for an entity",

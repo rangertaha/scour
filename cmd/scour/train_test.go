@@ -140,27 +140,14 @@ func TestLabelThenRetrainKeepsIDs(t *testing.T) {
 	}
 }
 
-func TestUnlabelPutsItBack(t *testing.T) {
-	dir, _ := trained(t)
-	runOK(t, dir, "train", "vehicle")
-
-	runOK(t, dir, "valid", "vehicle", "1")
-	runOK(t, dir, "unlabel", "vehicle", "1")
-
-	out := runOK(t, dir, "search", "vehicle", "--label", "valid")
-	if !strings.Contains(out, "no records matched") {
-		t.Errorf("the label should have been removed:\n%s", out)
-	}
-}
-
 func TestLabelUnknownRecord(t *testing.T) {
 	dir, _ := trained(t)
 	runOK(t, dir, "train", "vehicle")
 
-	if _, err := run(t, dir, "valid", "vehicle", "9999"); err == nil {
+	if _, err := run(t, dir, "invalid", "vehicle", "9999"); err == nil {
 		t.Error("labelling an unknown record must fail rather than report success")
 	}
-	if _, err := run(t, dir, "valid", "vehicle", "not-a-number"); err == nil {
+	if _, err := run(t, dir, "invalid", "vehicle", "not-a-number"); err == nil {
 		t.Error("a non-numeric id must fail")
 	}
 }

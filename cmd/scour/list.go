@@ -15,6 +15,7 @@ import (
 
 func newListCmd(a *app) *cli.Command {
 	return &cli.Command{
+		Category:  "Reading the results",
 		Name:      "list",
 		ArgsUsage: "[name]",
 		Usage:     "List entities, or show everything known about one",

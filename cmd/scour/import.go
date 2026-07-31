@@ -30,6 +30,7 @@ func newImportCmd(a *app) *cli.Command {
 	var f importFlags
 
 	cmd := &cli.Command{
+		Category:  "Defining what to look for",
 		Name:      "import",
 		ArgsUsage: "<name>",
 		Usage:     "Load targets, properties and aliases into an entity from files",

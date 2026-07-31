@@ -25,6 +25,7 @@ func newSearchCmd(a *app) *cli.Command {
 	var f searchFlags
 
 	cmd := &cli.Command{
+		Category:  "Reading the results",
 		Name:      "search",
 		ArgsUsage: "<name>",
 		Usage:     "Search the records extracted for an entity",

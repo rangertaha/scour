@@ -74,8 +74,9 @@ func newRunCmd(a *app) *cli.Command {
 	var roles, busURL string
 
 	cmd := &cli.Command{
-		Name:  "run",
-		Usage: "Run scour's components as a long-lived process",
+		Category: "Serving",
+		Name:     "run",
+		Usage:    "Run scour's components as a long-lived process",
 		Description: "Starts the components named by --role and serves them until interrupted.\n" +
 			"With no --role it starts all of them, which is a single-process scour with\n" +
 			"an embedded broker. Point --bus-url at a NATS cluster and the same roles can\n" +

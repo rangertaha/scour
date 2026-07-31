@@ -12,13 +12,6 @@ import (
 	"github.com/rangertaha/scour/internal/store"
 )
 
-func newValidCmd(a *app) *cli.Command {
-	return labelCmd(a, "valid", store.Valid,
-		"Label records as correct",
-		"Correct records are evidence of where the data really lives, and are fed\n"+
-			"back into the next training run.")
-}
-
 func newInvalidCmd(a *app) *cli.Command {
 	return labelCmd(a, "invalid", store.Invalid,
 		"Label records as wrong",
@@ -26,16 +19,10 @@ func newInvalidCmd(a *app) *cli.Command {
 			"same mistake.")
 }
 
-func newUnlabelCmd(a *app) *cli.Command {
-	return labelCmd(a, "unlabel", store.Unlabelled,
-		"Remove a label from records",
-		"Puts records back to unlabelled, for when a verdict was given in error.")
-}
-
-// labelCmd builds one of the three labelling commands, which differ only in
-// the verdict they apply.
+// labelCmd builds a labelling command from the verdict it applies.
 func labelCmd(a *app, use string, label store.Label, short, long string) *cli.Command {
 	return &cli.Command{
+		Category:    "Learning where the data is",
 		Name:        use,
 		ArgsUsage:   "<name> <id>...",
 		Usage:       short,

@@ -30,8 +30,9 @@ const interval = time.Second
 
 func newTopCmd(a *app) *cli.Command {
 	return &cli.Command{
-		Name:  "top",
-		Usage: "Watch every entity live, and pause or resume a crawl",
+		Category: "Finding pages",
+		Name:     "top",
+		Usage:    "Watch every entity live, and pause or resume a crawl",
 		Description: "One screen per fleet: what each entity has, how far its crawl has got, how\n" +
 			"fast it is going now, and whether it is running.\n\n" +
 			"Pausing keeps everything. The frontier holds its order and its leases, so a\n" +

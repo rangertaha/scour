@@ -44,6 +44,7 @@ func newAddCmd(a *app) *cli.Command {
 	var f addFlags
 
 	cmd := &cli.Command{
+		Category:  "Defining what to look for",
 		Name:      "add",
 		ArgsUsage: "<name>",
 		Usage:     "Define an entity, or add targets, properties and aliases to one",

@@ -70,8 +70,9 @@ func applyTemplate(ctx context.Context, s *store.Store, entityID uint, name stri
 // newTemplatesCmd lists what ships in the binary.
 func newTemplatesCmd(a *app) *cli.Command {
 	return &cli.Command{
-		Name:  "templates",
-		Usage: "List the built-in schemas scour ships with",
+		Category: "Defining what to look for",
+		Name:     "templates",
+		Usage:    "List the built-in schemas scour ships with",
 		Description: "Templates are starting points, not answers. Each carries the properties,\n" +
 			"aliases, descriptions and example values a kind of record usually has,\n" +
 			"which is what bootstraps labelling before anything has been crawled.",

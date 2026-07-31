@@ -23,8 +23,9 @@ func newServerCmd(a *app) *cli.Command {
 	var listen string
 
 	cmd := &cli.Command{
-		Name:  "server",
-		Usage: "Run as a service, serving the HTTP API and MCP",
+		Category: "Serving",
+		Name:     "server",
+		Usage:    "Run as a service, serving the HTTP API and MCP",
 		Description: "Serves the same scour the command line drives: one database, one set of\n" +
 			"models, one cache. Reads answer immediately; crawling and training return a\n" +
 			"job id to poll, because they run for minutes.\n\n" +
@@ -145,8 +146,9 @@ func closed(err error) bool {
 
 func newMCPCmd(a *app) *cli.Command {
 	return &cli.Command{
-		Name:  "mcp",
-		Usage: "Run as an MCP server over stdio",
+		Category: "Serving",
+		Name:     "mcp",
+		Usage:    "Run as an MCP server over stdio",
 		Description: "Speaks the Model Context Protocol on stdin and stdout, which is what a local\n" +
 			"agent launches directly. A running `scour server` also serves MCP over HTTP\n" +
 			"at /mcp for agents that attach instead of spawning.\n\n" +

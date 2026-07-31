@@ -538,3 +538,110 @@ func (s *Store) FetchRate(ctx context.Context, entityID uint, window time.Durati
 	}
 	return float64(n) / window.Seconds(), nil
 }
+
+// findProperty locates one property row exactly, without the domain fallback
+// PropertiesFor applies. Editing tags has to act on the row that was named:
+// falling back to the unscoped row would let `--delete` on a domain silently
+// strip a word every other domain still relies on.
+func (s *Store) findProperty(ctx context.Context, entityID uint, domain, name string) (*Property, error) {
+	domain = NormaliseDomain(domain)
+	name = strings.TrimSpace(name)
+
+	var prop Property
+	err := s.db.WithContext(ctx).
+		Where("entity_id = ? AND domain = ? AND name = ?", entityID, domain, name).
+		First(&prop).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		where := ""
+		if domain != "" {
+			where = " on " + domain
+		}
+		return nil, fmt.Errorf("property %q%s: %w", name, where, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find property %q: %w", name, err)
+	}
+	return &prop, nil
+}
+
+// PropertyAliases returns the words taught for one property, in order.
+func (s *Store) PropertyAliases(ctx context.Context, entityID uint, domain, propName string) ([]string, error) {
+	prop, err := s.findProperty(ctx, entityID, domain, propName)
+	if err != nil {
+		return nil, err
+	}
+	var rows []PropertyAlias
+	if err := s.db.WithContext(ctx).
+		Where("property_id = ?", prop.ID).Order("word").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("aliases for %q: %w", propName, err)
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.Word)
+	}
+	return out, nil
+}
+
+// RemovePropertyAliases deletes words from a property, returning how many went.
+func (s *Store) RemovePropertyAliases(ctx context.Context, entityID uint, domain, propName string, words []string) (int64, error) {
+	prop, err := s.findProperty(ctx, entityID, domain, propName)
+	if err != nil {
+		return 0, err
+	}
+	cleaned := trimAll(words)
+	if len(cleaned) == 0 {
+		return 0, nil
+	}
+	res := s.db.WithContext(ctx).
+		Where("property_id = ? AND word IN ?", prop.ID, cleaned).
+		Delete(&PropertyAlias{})
+	if res.Error != nil {
+		return 0, fmt.Errorf("remove aliases from %q: %w", propName, res.Error)
+	}
+	return res.RowsAffected, nil
+}
+
+// SetPropertyAliases replaces a property's words with exactly the ones given.
+//
+// It is one transaction because the intermediate state is a property with no
+// words at all, which a crawl running alongside would read as "match nothing"
+// and quietly stop extracting the field.
+func (s *Store) SetPropertyAliases(ctx context.Context, entityID uint, domain, propName string, words []string) error {
+	prop, err := s.findProperty(ctx, entityID, domain, propName)
+	if err != nil {
+		return err
+	}
+	cleaned := trimAll(words)
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("property_id = ?", prop.ID).Delete(&PropertyAlias{}).Error; err != nil {
+			return fmt.Errorf("clear aliases on %q: %w", propName, err)
+		}
+		if len(cleaned) == 0 {
+			return nil
+		}
+		rows := make([]PropertyAlias, 0, len(cleaned))
+		for _, w := range cleaned {
+			rows = append(rows, PropertyAlias{PropertyID: prop.ID, Word: w})
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error; err != nil {
+			return fmt.Errorf("set aliases on %q: %w", propName, err)
+		}
+		return nil
+	})
+}
+
+// trimAll drops blanks and repeats, so a caller can pass whatever the command
+// line gave it.
+func trimAll(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, w := range in {
+		w = strings.TrimSpace(w)
+		if w == "" || seen[w] {
+			continue
+		}
+		seen[w] = true
+		out = append(out, w)
+	}
+	return out
+}

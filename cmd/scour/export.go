@@ -28,6 +28,7 @@ func newExportCmd(a *app) *cli.Command {
 	var f exportFlags
 
 	cmd := &cli.Command{
+		Category:  "Reading the results",
 		Name:      "export",
 		ArgsUsage: "<name>",
 		Usage:     "Write an entity's extracted records out as CSV, JSON or to a webhook",

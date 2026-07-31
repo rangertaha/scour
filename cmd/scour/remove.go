@@ -19,6 +19,7 @@ func newRemoveCmd(a *app) *cli.Command {
 	var f removeFlags
 
 	cmd := &cli.Command{
+		Category:  "Defining what to look for",
 		Name:      "remove",
 		ArgsUsage: "<name>",
 		Aliases:   []string{"rm"},

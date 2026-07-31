@@ -39,6 +39,7 @@ func newCrawlCmd(a *app) *cli.Command {
 	var f crawlFlags
 
 	cmd := &cli.Command{
+		Category:  "Finding pages",
 		Name:      "crawl",
 		ArgsUsage: "<name>",
 		Usage:     "Crawl an entity's targets, ranking discovered URLs by probability",

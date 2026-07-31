@@ -15,6 +15,7 @@ import (
 // the ordinary case rather than the exception.
 func newStopCmd(a *app) *cli.Command {
 	return &cli.Command{
+		Category:  "Finding pages",
 		Name:      "stop",
 		ArgsUsage: "<name>",
 		Usage:     "Stop crawling an entity, keeping its frontier",
@@ -36,6 +37,7 @@ func newStopCmd(a *app) *cli.Command {
 
 func newStartCmd(a *app) *cli.Command {
 	return &cli.Command{
+		Category:  "Finding pages",
 		Name:      "start",
 		ArgsUsage: "<name>",
 		Usage:     "Let an entity be crawled again",
