@@ -10,6 +10,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -105,7 +106,19 @@ func (s *Storage) AddRequest(data []byte) error {
 	if f != nil {
 		score = f(data)
 	}
-	return s.store.PushQueue(s.ctx, s.entityID, score, data)
+	return s.store.PushQueue(s.ctx, s.entityID, score, s.hashOf(data), data)
+}
+
+// hashOf recovers the URL from a serialised request and keys it the way the
+// frontier does, so the item can be released when its fetch is recorded.
+func (s *Storage) hashOf(data []byte) string {
+	var req struct {
+		URL string `json:"URL"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil || req.URL == "" {
+		return ""
+	}
+	return store.URLHash(s.entityID, req.URL)
 }
 
 // GetRequest implements colly's queue.Storage.
@@ -118,10 +131,10 @@ func (s *Storage) GetRequest() ([]byte, error) {
 	if s.frozen.Load() {
 		return nil, store.ErrQueueEmpty
 	}
-	data, err := s.store.PopQueue(s.ctx, s.entityID)
+	data, err := s.store.LeaseQueue(s.ctx, s.entityID, 0)
 	if errors.Is(err, store.ErrQueueEmpty) && s.topUp() > 0 {
 		// Empty only meant the next batch of seeds had not been queued yet.
-		data, err = s.store.PopQueue(s.ctx, s.entityID)
+		data, err = s.store.LeaseQueue(s.ctx, s.entityID, 0)
 	}
 	if err != nil {
 		return nil, err

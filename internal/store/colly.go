@@ -84,26 +84,52 @@ func (s *Store) Cookies(ctx context.Context, entityID uint, host string) (string
 	return c.Value, nil
 }
 
-// PushQueue appends a serialised request.
-func (s *Store) PushQueue(ctx context.Context, entityID uint, score float64, data []byte) error {
-	item := QueueItem{EntityID: entityID, Score: score, Data: data}
+// PushQueue appends a serialised request. hash identifies the URL so the item
+// can be released when the fetch is recorded.
+func (s *Store) PushQueue(ctx context.Context, entityID uint, score float64, hash string, data []byte) error {
+	item := QueueItem{EntityID: entityID, Score: score, Hash: hash, Data: data}
 	if err := s.db.WithContext(ctx).Create(&item).Error; err != nil {
 		return fmt.Errorf("push queue: %w", err)
 	}
 	return nil
 }
 
-// PopQueue removes and returns the next request, highest score first and
-// oldest first within a score.
+// DefaultLease is how long a handed-out request may go unreported before it
+// returns to the queue.
 //
-// The select and the delete run in one transaction, so two crawlers sharing a
-// database cannot hand the same URL to both.
-func (s *Store) PopQueue(ctx context.Context, entityID uint) ([]byte, error) {
+// Comfortably longer than any fetch, including one that escalates to a browser,
+// because returning a URL that is merely slow would fetch it twice.
+const DefaultLease = 10 * time.Minute
+
+// MaxAttempts is how many times an item may be handed out before it is
+// abandoned.
+//
+// A hand-out does not always end in a fetch: colly declines a request it has
+// already visited or that is past the depth limit, and a declined request
+// reports no outcome, so nothing releases it. It would otherwise return on
+// every lease expiry and be declined again for as long as the crawl ran.
+const MaxAttempts = 3
+
+// LeaseQueue hands out the next request, highest score first and oldest first
+// within a score, and marks it in flight rather than removing it.
+//
+// The select and the update run in one transaction, so two crawlers sharing a
+// database cannot be handed the same URL. The item is removed when the fetch is
+// recorded; if nothing reports back before the lease expires it is handed out
+// again, which is what makes a crawler dying mid-page cost a retry rather than
+// a silently missing page.
+func (s *Store) LeaseQueue(ctx context.Context, entityID uint, lease time.Duration) ([]byte, error) {
+	if lease <= 0 {
+		lease = DefaultLease
+	}
+	now := time.Now().UTC()
+	until := now.Add(lease)
+
 	var data []byte
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var item QueueItem
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("entity_id = ?", entityID).
+			Where("entity_id = ? AND (leased_until IS NULL OR leased_until < ?)", entityID, now).
 			Order("score DESC, id ASC").
 			First(&item).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -112,8 +138,22 @@ func (s *Store) PopQueue(ctx context.Context, entityID uint) ([]byte, error) {
 		if err != nil {
 			return fmt.Errorf("read queue: %w", err)
 		}
-		if err := tx.Delete(&QueueItem{}, item.ID).Error; err != nil {
-			return fmt.Errorf("pop queue: %w", err)
+		if item.Attempts+1 >= MaxAttempts {
+			// Handed out as many times as it is going to be. Give it out once
+			// more and drop it, so a request nothing will ever report cannot
+			// cycle for the length of the crawl.
+			if err := tx.Delete(&QueueItem{}, item.ID).Error; err != nil {
+				return fmt.Errorf("abandon queue item: %w", err)
+			}
+			data = item.Data
+			return nil
+		}
+		if err := tx.Model(&QueueItem{}).Where("id = ?", item.ID).
+			Updates(map[string]any{
+				"leased_until": until,
+				"attempts":     item.Attempts + 1,
+			}).Error; err != nil {
+			return fmt.Errorf("lease queue item: %w", err)
 		}
 		data = item.Data
 		return nil
@@ -124,12 +164,29 @@ func (s *Store) PopQueue(ctx context.Context, entityID uint) ([]byte, error) {
 	return data, nil
 }
 
-// QueueSize returns how many requests are waiting.
+// ReleaseQueue removes a leased item once its fetch has been reported.
+func (s *Store) ReleaseQueue(ctx context.Context, entityID uint, hash string) error {
+	if hash == "" {
+		return nil
+	}
+	err := s.db.WithContext(ctx).
+		Where("entity_id = ? AND hash = ?", entityID, hash).
+		Delete(&QueueItem{}).Error
+	if err != nil {
+		return fmt.Errorf("release queue item: %w", err)
+	}
+	return nil
+}
+
+// QueueSize returns how many requests are waiting to be handed out. Items
+// already in flight are not waiting, so they are not counted: colly ends its
+// loop when the queue reports empty, and counting in-flight work would keep it
+// spinning on requests it has already been given.
 func (s *Store) QueueSize(ctx context.Context, entityID uint) (int, error) {
 	var n int64
 	err := s.db.WithContext(ctx).
 		Model(&QueueItem{}).
-		Where("entity_id = ?", entityID).
+		Where("entity_id = ? AND (leased_until IS NULL OR leased_until < ?)", entityID, time.Now().UTC()).
 		Count(&n).Error
 	if err != nil {
 		return 0, fmt.Errorf("queue size: %w", err)

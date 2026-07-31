@@ -7,6 +7,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // open returns a store backed by a file in a temp directory. A file rather
@@ -506,5 +507,119 @@ func TestOpeningSettlesDomainsAddedToExistingRows(t *testing.T) {
 	// Aliases are the expensive part, so they move to the survivor.
 	if len(props[0].Aliases) != 1 || props[0].Aliases[0].Word != "canonical" {
 		t.Errorf("aliases = %+v, want canonical carried over", props[0].Aliases)
+	}
+}
+
+// Handing an item out used to delete it, so a crawler that died between taking
+// a URL and fetching it lost that URL with no trace. A lease makes that cost a
+// retry instead.
+func TestALeasedItemComesBackIfNothingReportsIt(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	e, err := s.CreateEntity(ctx, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := URLHash(e.ID, "http://example.com/a")
+	if err := s.PushQueue(ctx, e.ID, 1, hash, []byte("req")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Taken, and now in flight: not handed out twice and not counted as
+	// waiting.
+	if _, err := s.LeaseQueue(ctx, e.ID, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LeaseQueue(ctx, e.ID, time.Minute); !errors.Is(err, ErrQueueEmpty) {
+		t.Errorf("a leased item was handed out twice: %v", err)
+	}
+	if n, err := s.QueueSize(ctx, e.ID); err != nil || n != 0 {
+		t.Errorf("QueueSize = %d (err %v), want 0 while in flight", n, err)
+	}
+
+	// The crawler dies. The lease expires and the URL is available again.
+	past := time.Now().UTC().Add(-time.Second)
+	if err := s.DB().Model(&QueueItem{}).Where("hash = ?", hash).
+		Update("leased_until", past).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.QueueSize(ctx, e.ID); err != nil || n != 1 {
+		t.Errorf("QueueSize = %d (err %v), want 1 once the lease expired", n, err)
+	}
+	got, err := s.LeaseQueue(ctx, e.ID, time.Minute)
+	if err != nil {
+		t.Fatalf("an expired lease should be handed out again: %v", err)
+	}
+	if string(got) != "req" {
+		t.Errorf("got %q, want the original request back", got)
+	}
+}
+
+// Recording the outcome is what finishes a frontier item, and both a successful
+// fetch and a failed one arrive through RecordFetch.
+func TestRecordingAFetchReleasesTheFrontierItem(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	e, err := s.CreateEntity(ctx, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, status := range []URLStatus{URLFetched, URLFailed} {
+		raw := "http://example.com/" + string(status)
+		hash := URLHash(e.ID, raw)
+		if err := s.PushQueue(ctx, e.ID, 1, hash, []byte("req")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.LeaseQueue(ctx, e.ID, time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RecordFetch(ctx, Fetched{
+			EntityID: e.ID, URL: raw, Status: status, StatusCode: 200,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var n int64
+		if err := s.DB().Model(&QueueItem{}).Where("hash = ?", hash).Count(&n).Error; err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Errorf("%s: the frontier item survived its own outcome", status)
+		}
+	}
+}
+
+// Not every hand-out ends in a fetch: colly declines a request it has already
+// visited, and a declined request reports no outcome, so nothing releases it.
+// Without a limit it would return on every lease expiry and be declined again
+// for as long as the crawl ran.
+func TestAnItemNothingReportsIsEventuallyAbandoned(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	e, err := s.CreateEntity(ctx, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := URLHash(e.ID, "http://example.com/declined")
+	if err := s.PushQueue(ctx, e.ID, 1, hash, []byte("req")); err != nil {
+		t.Fatal(err)
+	}
+
+	expire := func() {
+		past := time.Now().UTC().Add(-time.Second)
+		if err := s.DB().Model(&QueueItem{}).Where("hash = ?", hash).
+			Update("leased_until", past).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i := range MaxAttempts {
+		if _, err := s.LeaseQueue(ctx, e.ID, time.Minute); err != nil {
+			t.Fatalf("hand-out %d: %v", i+1, err)
+		}
+		expire()
+	}
+	if _, err := s.LeaseQueue(ctx, e.ID, time.Minute); !errors.Is(err, ErrQueueEmpty) {
+		t.Errorf("err = %v, want the item abandoned after %d attempts", err, MaxAttempts)
 	}
 }

@@ -298,10 +298,27 @@ type Cookie struct {
 // every score is equal, so the tie-break on ID keeps the order the crawl would
 // have had anyway.
 type QueueItem struct {
-	ID        uint    `gorm:"primaryKey"`
-	EntityID  uint    `gorm:"index:idx_queue_entity_score;not null"`
-	Score     float64 `gorm:"index:idx_queue_entity_score"`
-	Data      []byte  `gorm:"not null"`
+	ID       uint    `gorm:"primaryKey"`
+	EntityID uint    `gorm:"index:idx_queue_entity_score;not null"`
+	Score    float64 `gorm:"index:idx_queue_entity_score"`
+	// Hash identifies the URL, so the item can be released when the fetch is
+	// recorded without the releaser having to know the queue's row ids.
+	Hash string `gorm:"index"`
+	Data []byte `gorm:"not null"`
+	// LeasedUntil is when a handed-out item returns to the queue if nothing has
+	// reported back. Nil means it is waiting rather than in flight.
+	//
+	// Handing an item out used to delete it, so a crawler that died between
+	// taking a URL and fetching it lost that URL with no trace. A lease is what
+	// makes the loss recoverable, and it is the same mechanism a second crawler
+	// needs to be handed work safely.
+	LeasedUntil *time.Time `gorm:"index"`
+	// Attempts is how many times the item has been handed out. Not every
+	// hand-out ends in a fetch: colly declines a request it has already
+	// visited or that exceeds the depth, and a declined request reports no
+	// outcome, so nothing releases it. Without a limit it would be re-offered
+	// on every expiry and declined again forever.
+	Attempts  int
 	CreatedAt time.Time
 }
 

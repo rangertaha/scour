@@ -119,6 +119,14 @@ func (s *Store) RecordFetch(ctx context.Context, f Fetched) error {
 		return fmt.Errorf("record fetch %s: %w", f.URL, err)
 	}
 
+	// The frontier item is done once its outcome is on the record, whether the
+	// fetch succeeded or failed. Both paths arrive here, so this is the single
+	// place a lease is released; anything that never arrives is returned by its
+	// lease expiring instead.
+	if err := s.ReleaseQueue(ctx, f.EntityID, u.Hash); err != nil {
+		return err
+	}
+
 	if f.CacheKey == "" {
 		return nil
 	}
