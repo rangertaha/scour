@@ -139,10 +139,27 @@ func Predicated(xpath string, disc Discriminator) string {
 		return xpath
 	}
 	elemPath, leaf := splitLeafStep(xpath)
-	seg := elemPath[strings.LastIndex(elemPath, "/")+1:]
-	// An index already pins the element down; a predicate would add nothing.
-	if seg == "" || strings.ContainsAny(seg, "[@") {
+	cut := strings.LastIndex(elemPath, "/") + 1
+	seg := elemPath[cut:]
+	if seg == "" || strings.Contains(seg, "@") {
+		// Already carries a predicate; a second one would say no more.
 		return xpath
+	}
+
+	// A positional index is not the same kind of claim as a predicate, and it
+	// used to block one. `./meta[1]/@content` is only the title on the pages
+	// that happened to be sampled: it says the value is the first <meta>, which
+	// is a fact about this template on this day. `./meta[@property="og:title"]`
+	// says which meta, and holds on every page and every site that publishes
+	// OpenGraph.
+	//
+	// So when both are available the predicate replaces the index rather than
+	// deferring to it. This only arises when the index survived generalization,
+	// which means every sampled page agreed on it, and a narrow sample agreeing
+	// is exactly the situation in which an index looks more reliable than it is.
+	if i := strings.IndexByte(seg, '['); i >= 0 {
+		elemPath = elemPath[:cut] + seg[:i]
+		xpath = elemPath + leaf
 	}
 
 	predicated := elemPath + "[@" + disc.Name + "=" + quoteXPath(disc.Value) + "]" + leaf
@@ -165,8 +182,19 @@ func PredicatedSelector(selector string, disc Discriminator) string {
 	if selector == "" || !disc.Set() {
 		return selector
 	}
-	last := selector[strings.LastIndex(selector, ">")+1:]
-	if strings.ContainsAny(last, "[#:") {
+	cut := strings.LastIndex(selector, ">") + 1
+	last := selector[cut:]
+	if strings.ContainsAny(last, "[#") {
+		return selector
+	}
+	// :nth-of-type() is CSS's positional index, and it gives way to the
+	// attribute selector for the same reason the XPath index does: it describes
+	// where the element sat in the pages that were sampled, not which element
+	// it is. The two dialects have to agree, or one locator contradicts the
+	// other.
+	if i := strings.Index(last, ":nth-of-type("); i >= 0 {
+		selector = selector[:cut] + last[:i]
+	} else if strings.Contains(last, ":") {
 		return selector
 	}
 	return selector + "[" + disc.Name + "=" + quoteCSS(disc.Value) + "]"

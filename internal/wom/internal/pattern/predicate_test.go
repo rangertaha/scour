@@ -60,12 +60,45 @@ func TestPredicatedQuoting(t *testing.T) {
 	}
 }
 
-// An index already pins the element down, so no predicate is added.
-func TestPredicatedLeavesIndexedPathsAlone(t *testing.T) {
+// A positional index gives way to a predicate.
+//
+// The index used to win, on the reasoning that it already pinned the element
+// down. It pins it down only on the pages that happened to be sampled:
+// ./meta[3]/@content says the value is the third <meta>, which is a fact about
+// one template on one day, while ./meta[@property="og:title"] says which meta
+// and holds anywhere OpenGraph is published. An index survives generalization
+// exactly when every sampled page agreed on it, and a narrow sample agreeing is
+// when an index looks most reliable and is least so.
+//
+// Measured on three captured AP articles, this was the difference between
+// ./meta[1]/@content and ./meta[@property="og:title"]/@content.
+func TestAPredicateReplacesAPositionalIndex(t *testing.T) {
 	t.Parallel()
 
-	const indexed = "./meta[3]/@content"
-	if got := Predicated(indexed, Discriminator{Name: "property", Value: "x"}); got != indexed {
-		t.Errorf("Predicated on an indexed path = %q, want it unchanged", got)
+	got := Predicated("./meta[3]/@content", Discriminator{Name: "property", Value: "og:title"})
+	if want := `./meta[@property="og:title"]/@content`; got != want {
+		t.Errorf("Predicated = %q, want %q", got, want)
+	}
+}
+
+// A path that already carries a predicate is left alone: a second one would say
+// no more than the first.
+func TestPredicatedLeavesPredicatedPathsAlone(t *testing.T) {
+	t.Parallel()
+
+	const already = `./meta[@property="og:title"]/@content`
+	if got := Predicated(already, Discriminator{Name: "property", Value: "og:title"}); got != already {
+		t.Errorf("Predicated on a predicated path = %q, want it unchanged", got)
+	}
+}
+
+// The CSS dialect has to make the same choice, or one locator contradicts the
+// other.
+func TestPredicatedSelectorReplacesNthOfType(t *testing.T) {
+	t.Parallel()
+
+	got := PredicatedSelector("head > meta:nth-of-type(3)", Discriminator{Name: "property", Value: "og:title"})
+	if want := `head > meta[property="og:title"]`; got != want {
+		t.Errorf("PredicatedSelector = %q, want %q", got, want)
 	}
 }

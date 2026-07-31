@@ -57,9 +57,19 @@ func newsSites() []site {
 				"apnews-article-2.html": "https://apnews.com/article/alien-terrorist-removal-court-first-deportation-plot-112d39fcfd89f52ddc6b85cb04e0c934",
 				"apnews-article-3.html": "https://apnews.com/article/america-250-time-capsule-8d869f8aa39ef61a5721c039c397464e",
 			},
+			// AP publishes two modified times on every article and they
+			// disagree: <meta property="article:modified_time"> says
+			// 2026-07-30T18:22:23.527 where the JSON-LD dateModified says
+			// 2026-07-30T18:22:03Z, twenty seconds apart. Neither is wrong and
+			// the site asserts both. The OpenGraph one is expected here because
+			// that is where the locator now points, and it points there because
+			// ./meta[@property="article:modified_time"]/@content carries a
+			// predicate and holds on any site publishing OpenGraph, while
+			// $[0].headline depends on the JSON-LD being an array with the
+			// article first.
 			wantValues: map[string]string{
 				"published": "2026-07-30T17:04:39",
-				"modified":  "2026-07-30T18:22:03",
+				"modified":  "2026-07-30T18:22:23",
 				"authors":   "michael-kunzelman",
 				"title":     "Afghan",
 			},

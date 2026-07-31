@@ -414,7 +414,7 @@ func labelContext(n *graph.Node) []weightedLabel {
 	// attribute name, or a CSS property.
 	switch n.Kind {
 	case graph.KindAttribute, graph.KindDecl, graph.KindBinding:
-		add(n.Name, 1.0)
+		add(n.Name, attrNameWeight(n))
 	case graph.KindValue, graph.KindText, graph.KindLiteral, graph.KindLine:
 		// handled via parents below
 	}
@@ -452,10 +452,35 @@ func labelContext(n *graph.Node) []weightedLabel {
 		switch el.Format() {
 		case graph.FormatXML, graph.FormatFeed, graph.FormatSVG:
 			add(el.Name, 1.0)
+		default:
+			// Most HTML tags are structural, but not all of them. A handful
+			// name their content as plainly as any XML element does, and those
+			// are the most portable labels on the web: measured over thirteen
+			// news sites in four languages, <h1> appeared on all thirteen and
+			// <time datetime> on ten, while itemprop="author" appeared on one.
+			//
+			// The tag is not the label, though. Adding the name would add the
+			// token "h1", which matches neither "title" nor "heading". What a
+			// tag carries is a meaning, so it contributes the word it means.
+			if t, ok := semanticTags[el.Name]; ok {
+				add(t.word, t.weight)
+			}
+		}
+
+		// A declared vocabulary is added both as written and stripped of its
+		// namespace, so og:title also reads as "title". These prefixes are the
+		// one part of markup that survives translation: a Greek or Russian page
+		// still writes og:description, because the vocabulary is English by
+		// specification even when nothing else on the page is.
+		addQualified := func(v string, w float64) {
+			add(v, w)
+			if i := strings.LastIndexAny(v, ":."); i >= 0 && i+1 < len(v) {
+				add(v[i+1:], w)
+			}
 		}
 
 		if v, ok := el.Attr("itemprop"); ok {
-			add(v, 1.0)
+			addQualified(v, 1.0)
 		}
 		if v, ok := el.Attr("data-field"); ok {
 			add(v, 1.0)
@@ -463,10 +488,10 @@ func labelContext(n *graph.Node) []weightedLabel {
 		if v, ok := el.Attr("property"); ok {
 			// <meta property="article:published_time" content="...">: the
 			// sibling attribute is the only thing naming the value.
-			add(v, 1.0)
+			addQualified(v, 1.0)
 		}
 		if v, ok := el.Attr("name"); ok {
-			add(v, 0.95)
+			addQualified(v, 0.95)
 		}
 		if v, ok := el.Attr("id"); ok {
 			add(v, 0.9)
@@ -490,6 +515,80 @@ func labelContext(n *graph.Node) []weightedLabel {
 		}
 	}
 	return out
+}
+
+// genericHTMLAttrs are HTML's general-purpose attributes: slots that hold a
+// value without saying anything about what it means.
+//
+// Everywhere else a name is a description. A JSON key, an XML attribute and a
+// CSS property were each written to say what they hold, which is why the name
+// alone is worth a full-weight label. HTML's globals are the exception. `title`
+// is a tooltip, `content` is wherever a <meta> puts its payload, `value` is
+// whatever a control holds. They name a place, not a thing.
+//
+// Read as descriptions they are false friends, and the strongest one on the
+// news corpus: <link rel="alternate" title="West Florida News"> scored 1.000
+// against the `title` property, beating the <h1> holding the actual headline,
+// on every one of nineteen sites. The result was 503 records sharing ten
+// titles, one per site.
+//
+// They keep a reduced weight rather than none. An <abbr title="..."> really
+// does describe its content, so the signal is weak rather than absent.
+var genericHTMLAttrs = map[string]bool{
+	"title": true, "alt": true, "value": true, "content": true,
+	"label": true, "name": true, "id": true, "class": true,
+	"href": true, "src": true, "type": true, "role": true,
+	"style": true, "target": true, "placeholder": true,
+}
+
+// genericAttrWeight is what an HTML general-purpose attribute's own name is
+// worth as a label. Below `class` at 0.8, since a class at least names a role
+// the author chose.
+const genericAttrWeight = 0.6
+
+// attrNameWeight reports how strong a label an attribute's own name is.
+func attrNameWeight(n *graph.Node) float64 {
+	switch n.Format() {
+	case graph.FormatXML, graph.FormatFeed, graph.FormatSVG, graph.FormatJSON:
+		// The name was chosen to describe the value.
+		return 1.0
+	}
+	if genericHTMLAttrs[n.Name] {
+		return genericAttrWeight
+	}
+	// Specific HTML attributes still describe: datetime, hreflang, charset.
+	return 1.0
+}
+
+// tagLabel is the word an element name means, and how strong a claim it is.
+type tagLabel struct {
+	word   string
+	weight float64
+}
+
+// semanticTags are the HTML elements that name their own content.
+//
+// The weights say how specific the claim is rather than how sure we are of the
+// mapping. There is one <h1> and it is the page's subject, so it is nearly as
+// strong as a declared itemprop. There are many <h2> and <h3>, on related
+// stories and sidebars and nav, so a subheading is a heading without being the
+// title, and it is weighted to lose to anything better.
+//
+// Deliberately small. Every entry has to be an element whose meaning is fixed
+// by the HTML specification, because that is what makes it hold on a Greek or
+// Russian page where nothing else in the markup is a word we know.
+var semanticTags = map[string]tagLabel{
+	"h1":         {"heading", 0.95},
+	"h2":         {"heading", 0.60},
+	"h3":         {"heading", 0.55},
+	"h4":         {"heading", 0.50},
+	"h5":         {"heading", 0.50},
+	"h6":         {"heading", 0.50},
+	"time":       {"date", 0.95},
+	"address":    {"author", 0.90},
+	"figcaption": {"caption", 0.90},
+	"cite":       {"citation", 0.90},
+	"blockquote": {"quote", 0.85},
 }
 
 // labelTags are elements whose text names a sibling value.

@@ -237,6 +237,14 @@ type group struct {
 	key     string
 	disc    pattern.Discriminator
 	matches []scored
+	// spread is how many record units the group was observed in: distinct
+	// containers when the locator is relative to one, distinct documents
+	// otherwise. It is the count of independent observations, which is not the
+	// same as the number of matches.
+	spread int
+	// conflicts is how many of those units the group matched more than one
+	// distinct value in.
+	conflicts int
 }
 
 // groupMatches buckets matches by the location they generalize to. When bases
@@ -260,10 +268,68 @@ func groupMatches(matches []scored, bases map[*graph.Node]bool) []group {
 	}
 	out := make([]group, 0, len(order))
 	for _, k := range order {
-		out = append(out, group{key: k, disc: discs[k], matches: byKey[k]})
+		sp, cf := reach(byKey[k], bases)
+		out = append(out, group{
+			key: k, disc: discs[k], matches: byKey[k],
+			spread: sp, conflicts: cf,
+		})
 	}
 	return out
 }
+
+// unitOf returns the record unit a node belongs to: its container when the
+// locator is relative to one, its document otherwise.
+func unitOf(n *graph.Node, bases map[*graph.Node]bool) *graph.Node {
+	if b := baseOf(n, bases); b != nil {
+		return b
+	}
+	return n.Document()
+}
+
+// reach reports how many record units a group was observed in, and in how many
+// of them its matches disagreed with each other.
+//
+// The two are different questions and only the second says anything is wrong.
+// A location matching twice in one record with the same text is duplicated
+// markup, which is common and harmless: one real site publishes
+// <meta name="author"> twice per page with the identical byline. A location
+// matching twice with different text is not one location at all. The same site
+// publishes <meta property="article:author"> twice, once with the byline and
+// once with a Facebook URL, and half its records came back with the URL as the
+// author.
+func reach(matches []scored, bases map[*graph.Node]bool) (spread, conflicts int) {
+	byUnit := make(map[*graph.Node]map[string]bool, len(matches))
+	// Disagreement is only meaningful once the record's boundary is known.
+	// Before a container is chosen the unit is the whole document, and a
+	// document holding many records disagrees with itself by construction: a
+	// feed of forty-five articles has forty-five different titles in one file,
+	// which says nothing about the locator and everything about the feed.
+	known := len(bases) > 0
+	for _, m := range matches {
+		u := unitOf(m.node, bases)
+		if u == nil {
+			continue
+		}
+		if byUnit[u] == nil {
+			byUnit[u] = map[string]bool{}
+		}
+		byUnit[u][m.node.Text()] = true
+	}
+	if known {
+		for _, texts := range byUnit {
+			if len(texts) > 1 {
+				conflicts++
+			}
+		}
+	}
+	if len(byUnit) == 0 {
+		return 1, conflicts
+	}
+	return len(byUnit), conflicts
+}
+
+// confidence is the group's aggregate score.
+func (g group) confidence() float64 { return aggregate(g.matches, g.spread, g.conflicts) }
 
 // bestGroup ranks groups by aggregate confidence and returns the strongest.
 func bestGroup(groups []group) *group {
@@ -271,9 +337,15 @@ func bestGroup(groups []group) *group {
 		return nil
 	}
 	sort.SliceStable(groups, func(i, j int) bool {
-		gi, gj := aggregate(groups[i].matches), aggregate(groups[j].matches)
+		gi, gj := groups[i].confidence(), groups[j].confidence()
 		if gi != gj {
 			return gi > gj
+		}
+		// Reach first: a location found on more documents is a better
+		// description of the site than one found on fewer.
+		di, dj := groups[i].spread, groups[j].spread
+		if di != dj {
+			return di > dj
 		}
 		if len(groups[i].matches) != len(groups[j].matches) {
 			return len(groups[i].matches) > len(groups[j].matches)
@@ -292,7 +364,7 @@ func bestGroup(groups []group) *group {
 // should not be penalised because the other rows say "Honda" and "Ford".
 // Confidence is therefore an even blend of the mean and the best score, then
 // damped by how much the location repeated.
-func aggregate(matches []scored) float64 {
+func aggregate(matches []scored, spread, conflicts int) float64 {
 	if len(matches) == 0 {
 		return 0
 	}
@@ -304,7 +376,7 @@ func aggregate(matches []scored) float64 {
 		}
 	}
 	mean := sum / float64(len(matches))
-	return clamp((0.5*mean + 0.5*best) * supportFactor(len(matches)))
+	return clamp((0.5*mean + 0.5*best) * supportFactor(spread) * agreement(spread, conflicts))
 }
 
 // weakFieldShare is how far below the strongest field a field may fall and
@@ -373,10 +445,10 @@ func rivalGroups(groups []group) []group {
 	}
 	// bestGroup ranks in place, so the strongest group is first and the rivals
 	// that survive follow it in descending order.
-	floor := aggregate(best.matches) * rivalShare
+	floor := best.confidence() * rivalShare
 	out := make([]group, 0, len(groups))
 	for _, g := range groups {
-		if aggregate(g.matches) >= floor {
+		if g.confidence() >= floor {
 			out = append(out, g)
 		}
 	}
@@ -443,6 +515,38 @@ func dropExpanders(hits [][]*graph.Node) [][]*graph.Node {
 	return out
 }
 
+// conflictPenalty is how much of a location's confidence disagreement inside a
+// single record can cost it.
+//
+// It is bounded rather than proportional because some fields really do hold
+// several values: a feed item carries half a dozen categories and they are all
+// different, so a location whose matches always disagree is not automatically
+// wrong. What it is, reliably, is a worse way to address one value than a
+// location that does not disagree, and the bound leaves it able to win when
+// nothing better exists.
+const conflictPenalty = 0.35
+
+// agreement discounts a location by how often its matches disagreed inside one
+// record.
+//
+// A field holds one value per record. Matching twice with the same text is
+// duplicated markup and harmless: one real site publishes <meta name="author">
+// twice per page with the identical byline. Matching twice with different text
+// is not one location at all. The same site publishes
+// <meta property="article:author"> twice, once with the byline and once with a
+// Facebook URL, and it beat the unambiguous name="author" on score alone, so
+// half that site's records came back with the URL as the author.
+func agreement(spread, conflicts int) float64 {
+	if spread <= 0 || conflicts <= 0 {
+		return 1
+	}
+	share := float64(conflicts) / float64(spread)
+	if share > 1 {
+		share = 1
+	}
+	return 1 - conflictPenalty*share
+}
+
 // supportFactor rises from 0.85 at a single observation towards 1.0 as
 // support grows, saturating around five observations.
 func supportFactor(support int) float64 {
@@ -462,7 +566,7 @@ func buildResult(p schema.Prop, g *group, bases map[*graph.Node]bool) *result {
 	return &result{
 		item: schema.Item{
 			Name:        p.Name,
-			Probability: aggregate(g.matches),
+			Probability: g.confidence(),
 			Locator:     locatorFor(nodes, bases, p.Type, g.disc),
 			Support:     len(nodes),
 			Values:      sampleValues(nodes),
@@ -504,7 +608,7 @@ func (e *Engine) inferRecord(ctx context.Context, p schema.Prop, cands []*graph.
 		}
 		// The field's confidence is its best reading, not the average of the
 		// readings it is still considering.
-		confidence[i] = aggregate(rivals[0].matches)
+		confidence[i] = rivals[0].confidence()
 		found++
 	}
 
