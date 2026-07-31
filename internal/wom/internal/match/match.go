@@ -121,6 +121,13 @@ func (h Heuristic) Score(_ context.Context, p schema.Prop, n *graph.Node) float6
 	wExample, wLabel, wType, wDesc := h.weights()
 	labels := labelContext(n)
 
+	// The same veto on the naming side. A declared label pattern says which
+	// names count, so a node named something else is not this field however
+	// well its text reads.
+	if !labelled(p, labels) {
+		return 0
+	}
+
 	var sum, total float64
 
 	if len(p.Examples) > 0 {
@@ -316,6 +323,25 @@ func descriptionTokens(p schema.Prop) []string {
 	return out
 }
 
+// labelled reports whether any name attached to the node satisfies the prop's
+// declared label pattern. A prop with no pattern, or one that does not compile,
+// accepts every name.
+func labelled(p schema.Prop, labels []weightedLabel) bool {
+	if p.Label == "" {
+		return true
+	}
+	re := compiled(p.Label)
+	if re == nil {
+		return true
+	}
+	for _, l := range labels {
+		if re.MatchString(strings.TrimSpace(l.text)) {
+			return true
+		}
+	}
+	return false
+}
+
 // patternCache compiles each declared pattern once. A schema is small and
 // reused across every node in a graph, so compiling per call would dominate.
 var patternCache sync.Map // string -> *regexp.Regexp
@@ -327,20 +353,28 @@ func validates(p schema.Prop, text string) bool {
 	if p.Pattern == "" {
 		return true
 	}
-	re, ok := patternCache.Load(p.Pattern)
-	if !ok {
-		compiled, err := regexp.Compile(p.Pattern)
-		if err != nil {
-			patternCache.Store(p.Pattern, (*regexp.Regexp)(nil))
-			return true
-		}
-		patternCache.Store(p.Pattern, compiled)
-		re = compiled
-	}
-	if re == nil || re.(*regexp.Regexp) == nil {
+	re := compiled(p.Pattern)
+	if re == nil {
 		return true
 	}
-	return re.(*regexp.Regexp).MatchString(strings.TrimSpace(text))
+	return re.MatchString(strings.TrimSpace(text))
+}
+
+// compiled returns the compiled form of a declared pattern, or nil when it does
+// not compile. A schema mistake must not silently empty a field, so callers
+// treat nil as "accepts everything".
+func compiled(pattern string) *regexp.Regexp {
+	if v, ok := patternCache.Load(pattern); ok {
+		re, _ := v.(*regexp.Regexp)
+		return re
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		patternCache.Store(pattern, (*regexp.Regexp)(nil))
+		return nil
+	}
+	patternCache.Store(pattern, re)
+	return re
 }
 
 // typeScore reports whether the text parses as the declared type. A clear

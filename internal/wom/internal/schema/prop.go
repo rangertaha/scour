@@ -70,6 +70,22 @@ type Prop struct {
 	// ShapePrior. Pattern is the same idea where the knowledge is about a site
 	// rather than a type.
 	Pattern string `json:"pattern,omitempty"`
+
+	// Label is what the name attached to a value must look like: the attribute,
+	// key, class, id or neighbouring text that says what the value is.
+	//
+	// Aliases list the words a page might use, which is easy to write and
+	// imprecise. A pattern says exactly which of them count, and settles two
+	// questions aliases cannot. Substring matching finds "title" inside
+	// "subtitle" and "titlebar"; ^(og:|twitter:)?title$ does not. And terms
+	// change by language while standards do not, so
+	// titulo|título|заголовок|title says so without a stemmer that only knows
+	// English.
+	//
+	// It vetoes rather than scores, like Pattern: a name that does not match is
+	// not this field's name, however well the value beside it reads. With no
+	// Label the aliases score as before.
+	Label string `json:"label,omitempty"`
 }
 
 // Schema is an ordered set of props. It exists so a schema can be declared as

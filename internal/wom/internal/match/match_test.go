@@ -165,3 +165,30 @@ func TestUncompilablePatternValidatesEverything(t *testing.T) {
 		t.Error("a broken pattern should let text through, not reject it")
 	}
 }
+
+// A label pattern says which names count. Aliases list words, which is easy to
+// write and imprecise: substring matching finds "title" inside "subtitle" and
+// "titlebar". A pattern does not.
+func TestLabelPatternVetoesTheWrongName(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	h := DefaultHeuristic()
+	p := schema.Prop{Name: "title", Label: `^(og:|twitter:)?title$`}
+
+	right := node(t, "title", "Council approves transit line")
+	wrong := node(t, "subtitle", "Council approves transit line")
+
+	if got := h.Score(ctx, p, right); got == 0 {
+		t.Error("a name the pattern accepts must still score")
+	}
+	if got := h.Score(ctx, p, wrong); got != 0 {
+		t.Errorf("subtitle scored %.3f against ^(og:|twitter:)?title$, want 0", got)
+	}
+
+	// Without the pattern, substring matching cannot tell them apart.
+	plain := schema.Prop{Name: "title"}
+	if h.Score(ctx, plain, wrong) == 0 {
+		t.Error("without a label pattern subtitle should still score, or the test proves nothing")
+	}
+}

@@ -59,6 +59,15 @@ type Property struct {
 	// the name inside it, and an alt text reading "Author:THE NEWSROOM" carries
 	// its own label with no second node holding the name alone.
 	Regex string
+	// Label is what the name attached to the value must look like: the
+	// attribute, key, class or neighbouring text saying what the value is.
+	//
+	// Aliases list the words a page might use, which is easy to write and
+	// imprecise. A pattern says exactly which count. Substring matching finds
+	// "title" inside "subtitle" and "titlebar"; ^(og:|twitter:)?title$ does
+	// not. And terms change by language while standards do not, so
+	// titulo|título|заголовок|title says so without a stemmer.
+	Label string
 	// Description says what the field means, in words a page might also use.
 	// The matcher scores description overlap, so this is not documentation:
 	// it is training data.

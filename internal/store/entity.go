@@ -170,6 +170,8 @@ type PropertyDetail struct {
 	// Regex decides which node wins, by rejecting text it does not match, and
 	// what that node yields, through capture group one.
 	Regex string
+	// Label decides which names count, on the naming side of the same choice.
+	Label string
 }
 
 // AddPropertyDetail records a property along with what it means.
@@ -186,15 +188,21 @@ func (s *Store) AddPropertyDetail(ctx context.Context, entityID uint, d Property
 
 	// A pattern that does not compile must fail here rather than mid-crawl,
 	// where it would look like a site that stopped publishing the field.
-	if d.Regex != "" {
-		if _, err := regexp.Compile(d.Regex); err != nil {
-			return fmt.Errorf("property %q regex: %w", name, err)
+	for what, pat := range map[string]string{"regex": d.Regex, "label": d.Label} {
+		if pat == "" {
+			continue
+		}
+		if _, err := regexp.Compile(pat); err != nil {
+			return fmt.Errorf("property %q %s: %w", name, what, err)
 		}
 	}
 
 	update := []string{"type", "example"}
 	if d.Regex != "" {
 		update = append(update, "regex")
+	}
+	if d.Label != "" {
+		update = append(update, "label")
 	}
 	if d.Description != "" {
 		// An empty description must not blank one already recorded: adding an
@@ -209,7 +217,8 @@ func (s *Store) AddPropertyDetail(ctx context.Context, entityID uint, d Property
 		}).
 		Create(&Property{
 			EntityID: entityID, Domain: domain, Name: name, Type: d.Type,
-			Example: d.Example, Description: d.Description, Regex: d.Regex,
+			Example: d.Example, Description: d.Description,
+			Regex: d.Regex, Label: d.Label,
 		}).Error
 	if err != nil {
 		return fmt.Errorf("add property %q: %w", name, err)

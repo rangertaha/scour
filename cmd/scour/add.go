@@ -23,6 +23,7 @@ type addFlags struct {
 	propType   string
 	example    string
 	regex      string
+	label      string
 	subdomains bool
 	depth      int
 }
@@ -35,8 +36,8 @@ func newAddCmd(a *app) *cobra.Command {
 		Short: "Define an entity, or add targets, properties and aliases to one",
 		Long: "Creates the entity if it does not exist, then applies whatever else is given.\n" +
 			"Every form is idempotent, so repeating a command is never an error.\n\n" +
-			"--prop names the subject. With it, --example, --alias and --regex describe\n" +
-			"the property; without it --alias describes the entity. --domain adds a crawl\n" +
+			"--prop names the subject. With it, --example, --alias, --label and --regex\n" +
+			"describe the property; without it --alias describes the entity. --domain adds a crawl\n" +
 			"target on its own, and scopes the teaching when --prop is given, so what one\n" +
 			"site calls a byline does not overwrite what the next one calls it.",
 		Example: "  scour add vehicle --alias car --alias 'pickup truck'\n" +
@@ -45,6 +46,7 @@ func newAddCmd(a *app) *cobra.Command {
 			"  scour add vehicle -p make -e Ford\n" +
 			"  scour add news -d example.com -p author -e 'Hannah McLeod' -a byline\n" +
 			"  scour add news -d example.com -p author --regex '^[^@]+$'\n" +
+			"  scour add news -p title --label '^(og:|twitter:)?title$'\n" +
 			"  scour add vehicle --type html --type pdf",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -66,6 +68,8 @@ func newAddCmd(a *app) *cobra.Command {
 	fl.StringVarP(&f.example, "example", "e", "", "an example value for the property")
 	fl.StringVar(&f.regex, "regex", "",
 		"what a valid value looks like; capture group one is the value if there is one")
+	fl.StringVar(&f.label, "label", "",
+		"what the name beside the value must look like, e.g. '^(og:|twitter:)?title$'")
 	fl.BoolVar(&f.subdomains, "subdomains", false, "follow subdomains of the added domains")
 	fl.IntVar(&f.depth, "depth", 0, "depth limit for the added targets (0 for the configured default)")
 
@@ -78,6 +82,9 @@ func runAdd(cmd *cobra.Command, a *app, name string, f addFlags) error {
 	}
 	if f.regex != "" && f.prop == "" {
 		return errors.New("--regex needs --prop")
+	}
+	if f.label != "" && f.prop == "" {
+		return errors.New("--label needs --prop")
 	}
 	// --domain is a crawl target on its own and a scope alongside --prop, so
 	// asking for both at once would mean two different things by one word.
@@ -155,7 +162,8 @@ func runAdd(cmd *cobra.Command, a *app, name string, f addFlags) error {
 
 	if f.prop != "" {
 		if err := s.AddPropertyDetail(c, entity.ID, store.PropertyDetail{
-			Domain: scope, Name: f.prop, Type: f.propType, Example: f.example, Regex: f.regex}); err != nil {
+			Domain: scope, Name: f.prop, Type: f.propType,
+			Example: f.example, Regex: f.regex, Label: f.label}); err != nil {
 			return err
 		}
 		where := ""
