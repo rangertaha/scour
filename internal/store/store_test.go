@@ -447,3 +447,64 @@ func TestOpeningRepairsAStaleUniqueIndex(t *testing.T) {
 		t.Errorf("got %+v, want the domain-scoped row to win", props)
 	}
 }
+
+// A column added to an existing table is NULL for every row already in it,
+// while every new write stores "" for "no domain". In sqlite those differ, so
+// the upsert missed the original and inserted a duplicate, and PropertiesFor
+// asked for domain = ” and could not see the original at all. On a real
+// database that became `wom: duplicate prop "link"` and a silently empty
+// schema.
+func TestOpeningSettlesDomainsAddedToExistingRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scour.db")
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	e, err := s.CreateEntity(ctx, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddPropertyDetail(ctx, e.ID, PropertyDetail{
+		Name: "link", Example: "https://example.com/a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddPropertyAlias(ctx, e.ID, "", "link", "canonical"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Put the database back into the shape an upgrade leaves it in: the
+	// original row with a NULL domain, and the duplicate the missed upsert
+	// then inserted.
+	if err := s.db.Exec("UPDATE properties SET domain = NULL WHERE name = 'link'").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.Exec(
+		"INSERT INTO properties (entity_id, domain, name, example) VALUES (?, '', 'link', '')",
+		e.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	props, err := reopened.PropertiesFor(ctx, e.ID, "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(props) != 1 {
+		t.Fatalf("got %d link properties, want the duplicate merged away: %+v", len(props), props)
+	}
+	if props[0].Example != "https://example.com/a" {
+		t.Errorf("example = %q, want the original row kept", props[0].Example)
+	}
+	// Aliases are the expensive part, so they move to the survivor.
+	if len(props[0].Aliases) != 1 || props[0].Aliases[0].Word != "canonical" {
+		t.Errorf("aliases = %+v, want canonical carried over", props[0].Aliases)
+	}
+}

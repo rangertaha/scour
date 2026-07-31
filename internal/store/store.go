@@ -120,10 +120,74 @@ func (s *Store) migrate() error {
 	if err := s.dropStaleIndex("properties", "idx_prop_entity_name", "domain"); err != nil {
 		return err
 	}
+	// Before AutoMigrate, because it repairs rows the new constraints would
+	// otherwise trip over.
+	if err := s.settleDomains(); err != nil {
+		return err
+	}
 	if err := s.db.AutoMigrate(tables()...); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	return nil
+}
+
+// settleDomains repairs property rows written before Domain existed.
+//
+// A column added to an existing table is NULL for every row already in it,
+// while every new write stores the empty string for "no domain". In sqlite
+// those are different values, and the damage is in two directions: the upsert
+// looks for domain = ” and misses the NULL row, inserting a duplicate that
+// makes the schema ambiguous, and PropertiesFor asks for domain = ” and cannot
+// see the original at all. On this machine that turned into
+// `wom: duplicate prop "link"` and a silently empty schema.
+//
+// Duplicates are merged before the backfill, because collapsing NULL to ” is
+// exactly what makes them collide.
+func (s *Store) settleDomains() error {
+	// A database that has never had the column, or has never had the table,
+	// has nothing to repair.
+	if !s.db.Migrator().HasTable(&Property{}) || !s.db.Migrator().HasColumn(&Property{}, "domain") {
+		return nil
+	}
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		type dup struct {
+			Keeper uint
+			Extra  uint
+			Name   string
+		}
+		var dups []dup
+		err := tx.Raw(`
+			SELECT MIN(id) AS keeper, MAX(id) AS extra, name
+			FROM properties
+			GROUP BY entity_id, name, COALESCE(domain, '')
+			HAVING COUNT(*) > 1`).Scan(&dups).Error
+		if err != nil {
+			return fmt.Errorf("find duplicate properties: %w", err)
+		}
+
+		for _, d := range dups {
+			// Aliases are the expensive part, so they move rather than die.
+			// OR IGNORE because the survivor may already carry the same word.
+			if err := tx.Exec(
+				"UPDATE OR IGNORE property_aliases SET property_id = ? WHERE property_id = ?",
+				d.Keeper, d.Extra).Error; err != nil {
+				return fmt.Errorf("move aliases of %q: %w", d.Name, err)
+			}
+			if err := tx.Exec("DELETE FROM property_aliases WHERE property_id = ?", d.Extra).Error; err != nil {
+				return fmt.Errorf("clear aliases of %q: %w", d.Name, err)
+			}
+			if err := tx.Exec("DELETE FROM properties WHERE id = ?", d.Extra).Error; err != nil {
+				return fmt.Errorf("drop duplicate property %q: %w", d.Name, err)
+			}
+			slog.Info("merged a property duplicated by the domain column", "property", d.Name)
+		}
+
+		if err := tx.Exec("UPDATE properties SET domain = '' WHERE domain IS NULL").Error; err != nil {
+			return fmt.Errorf("backfill property domains: %w", err)
+		}
+		return nil
+	})
 }
 
 // dropStaleIndex removes an index whose definition predates a column it should

@@ -336,8 +336,21 @@ func bestGroup(groups []group) *group {
 	if len(groups) == 0 {
 		return nil
 	}
+	// Reach has to count in the score, not only as a tiebreak. supportFactor
+	// saturates at five observations, so once the whole page is in scope it
+	// cannot tell a location found on 23 records from one found on 288: a body
+	// div present on a single site outscored meta[@name="author"] present on
+	// thirteen. Measuring reach against the best-reaching group keeps this
+	// independent of how large the corpus is.
+	var widest int
+	for _, g := range groups {
+		if g.spread > widest {
+			widest = g.spread
+		}
+	}
 	sort.SliceStable(groups, func(i, j int) bool {
-		gi, gj := groups[i].confidence(), groups[j].confidence()
+		gi := groups[i].confidence() * reachFactor(groups[i].spread, widest)
+		gj := groups[j].confidence() * reachFactor(groups[j].spread, widest)
 		if gi != gj {
 			return gi > gj
 		}
@@ -545,6 +558,19 @@ func agreement(spread, conflicts int) float64 {
 		share = 1
 	}
 	return 1 - conflictPenalty*share
+}
+
+// reachWeight is how much of a location's standing rests on how much of the
+// corpus it covers, rather than on how well it reads where it does.
+const reachWeight = 0.5
+
+// reachFactor discounts a location by how far short of the widest-reaching
+// rival it falls.
+func reachFactor(spread, widest int) float64 {
+	if widest <= 0 || spread >= widest {
+		return 1
+	}
+	return math.Pow(float64(spread)/float64(widest), reachWeight)
 }
 
 // supportFactor rises from 0.85 at a single observation towards 1.0 as
@@ -923,7 +949,62 @@ func containerGroup(hits [][]*graph.Node) []*graph.Node {
 		}
 		return keys[i] < keys[j]
 	})
-	return byKey[keys[0]]
+
+	winners := byKey[keys[0]]
+
+	// Tightening only buys something when the record repeats.
+	//
+	// A container occurring exactly once per document is not separating one
+	// record from its neighbours, because it has none. All it does is put the
+	// rest of the page out of reach, since the second pass scores only the
+	// leaves inside the container. On every news site in the corpus that
+	// container was /html/head, chosen because metadata is the part of a page
+	// that carries strong labels, and the consequence was that the article's
+	// own markup was never a candidate for anything: the headline in the <h1>,
+	// the byline, the <time> were all outside the record.
+	//
+	// A feed is the opposite case, and the reason the tightening exists at all:
+	// forty-five <item> containers in one document, where widening to the
+	// document would collapse forty-five records into one.
+	//
+	// So the question is not which ancestor is deepest, it is whether the
+	// record repeats within a document. When it does not, the record is the
+	// document.
+	docs := make(map[*graph.Node]bool, len(winners))
+	for _, n := range winners {
+		d := n.Document()
+		if d == nil {
+			return winners
+		}
+		docs[d] = true
+	}
+	if len(docs) != len(winners) {
+		return winners
+	}
+
+	// Widen to the outermost element, not to the document. A document has no
+	// path, so addressing the record by it produces an empty locator that
+	// matches nothing: the fields resolve correctly and no record is ever
+	// extracted.
+	seen := make(map[*graph.Node]bool, len(winners))
+	wide := make([]*graph.Node, 0, len(winners))
+	for _, n := range winners {
+		top := outermost(n)
+		if !seen[top] {
+			seen[top] = true
+			wide = append(wide, top)
+		}
+	}
+	return wide
+}
+
+// outermost returns the highest element enclosing n within its document.
+func outermost(n *graph.Node) *graph.Node {
+	top := n
+	for a := n.Parent; a != nil && a.Kind == graph.KindElement; a = a.Parent {
+		top = a
+	}
+	return top
 }
 
 // documentsOf returns the distinct documents holding the given nodes, used as

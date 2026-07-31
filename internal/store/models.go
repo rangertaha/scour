@@ -39,7 +39,7 @@ type Property struct {
 	// the byline on one paper reads "Hannah McLeod" says nothing about the next
 	// paper, and stored entity-wide it would overwrite what the last site
 	// taught. So a taught example belongs to the site it was taught on.
-	Domain  string `gorm:"uniqueIndex:idx_prop_entity_name"`
+	Domain  string `gorm:"uniqueIndex:idx_prop_entity_name;default:''"`
 	Name    string `gorm:"uniqueIndex:idx_prop_entity_name;not null"`
 	Type    string
 	Example string
