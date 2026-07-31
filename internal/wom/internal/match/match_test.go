@@ -84,3 +84,49 @@ func TestShortCandidatesDoNotMatchByContainment(t *testing.T) {
 		t.Errorf("@r scored %v against \"authors\"; containment matched a single character", got)
 	}
 }
+
+// Utility frameworks put layout vocabulary on every element, and it was being
+// read as a label at 0.8. Measured on nineteen news sites, class:text,
+// class:font, class:hover and class:flex attached to every field alike, and
+// class:brand, class:blue and class:dark looked perfectly discriminating for
+// author only because five of those sites shared a theme.
+func TestPresentationalClassesAreNotLabels(t *testing.T) {
+	tests := map[string]bool{
+		"text-sm":         true,
+		"font-bold":       true,
+		"flex":            true,
+		"items-center":    true,
+		"hover":           true,
+		"bg-brand-blue":   true,
+		"rounded-lg":      true,
+		"sr-only":         true,
+		"max-w-full":      true,
+		"entry-title":     false,
+		"byline":          false,
+		"post-date":       false,
+		"article-summary": false,
+		"text-title":      false,
+		"published":       false,
+		"category-name":   false,
+		"c-9f3a1b":        false,
+	}
+	for cls, want := range tests {
+		if got := presentational(cls); got != want {
+			t.Errorf("presentational(%q) = %v, want %v", cls, got, want)
+		}
+	}
+}
+
+// A stop word that swallowed a property name would cost the field it names.
+func TestNoStopWordNamesAValue(t *testing.T) {
+	for _, w := range []string{
+		"title", "heading", "headline", "author", "byline", "creator",
+		"date", "published", "updated", "modified", "summary", "description",
+		"excerpt", "content", "section", "category", "topic", "link", "url",
+		"price", "make", "model", "year", "name", "caption",
+	} {
+		if stopLabels[w] {
+			t.Errorf("%q is a stop word but could name a value", w)
+		}
+	}
+}

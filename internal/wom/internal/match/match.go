@@ -494,11 +494,11 @@ func labelContext(n *graph.Node) []weightedLabel {
 			addQualified(v, 0.95)
 		}
 		if v, ok := el.Attr("id"); ok {
-			add(v, 0.9)
+			addNamed(add, v, 0.9)
 		}
 		if v, ok := el.Attr("class"); ok {
 			for _, cls := range strings.Fields(v) {
-				add(cls, 0.8)
+				addNamed(add, cls, 0.8)
 			}
 		}
 		if v, ok := el.Attr("aria-label"); ok {
@@ -509,12 +509,104 @@ func labelContext(n *graph.Node) []weightedLabel {
 		if p := el.Parent; p != nil && p.Kind == graph.KindElement {
 			if v, ok := p.Attr("class"); ok {
 				for _, cls := range strings.Fields(v) {
-					add(cls, 0.5)
+					addNamed(add, cls, 0.5)
 				}
 			}
 		}
 	}
 	return out
+}
+
+// addNamed adds a class or id as a label unless it is purely presentational.
+//
+// A class is added whole, because "entry-title" is a better label than "entry"
+// and "title" separately, and it is dropped only when every word in it is
+// presentational.
+func addNamed(add func(string, float64), value string, weight float64) {
+	if presentational(value) {
+		return
+	}
+	add(value, weight)
+}
+
+// presentational reports whether every word of a class or id is layout
+// vocabulary rather than a description of content.
+func presentational(value string) bool {
+	seen := false
+	for _, w := range strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		// A single character names nothing. Utility frameworks abbreviate their
+		// axes this way, so max-w-full and py-2 are entirely presentational and
+		// would otherwise survive on the strength of one letter.
+		if len(w) <= 1 {
+			seen = true
+			continue
+		}
+		if !stopLabels[w] {
+			return false
+		}
+		seen = true
+	}
+	return seen
+}
+
+// stopLabels is CSS vocabulary: words describing how something looks or where
+// it sits, never what it holds.
+//
+// Utility frameworks put dozens of these on every element, and they were being
+// read as labels at 0.8. Measured on nineteen news sites, class:text, class:font,
+// class:hover and class:flex attached themselves to every field indiscriminately,
+// and class:brand, class:blue and class:dark looked perfectly discriminating for
+// `author` only because five of the sites shared one theme.
+//
+// Nothing here may be a word that could name a value. `title`, `date`, `author`,
+// `byline`, `content`, `summary`, `section`, `category`, `link`, `item` and
+// `price` are all absent on purpose: several are property names in the shipped
+// templates, and a stop word that swallows one would cost the field it names.
+var stopLabels = map[string]bool{
+	// Size and spacing.
+	"xs": true, "sm": true, "md": true, "lg": true, "xl": true, "xxl": true,
+	"auto": true, "full": true, "half": true, "max": true, "min": true,
+	"pad": true, "padding": true, "margin": true, "gap": true, "space": true,
+	"width": true, "height": true, "size": true, "px": true, "rem": true,
+
+	// Layout.
+	"flex": true, "grid": true, "block": true, "inline": true, "float": true,
+	"clear": true, "wrap": true, "nowrap": true, "col": true, "cols": true,
+	"row": true, "rows": true, "container": true, "wrapper": true,
+	"inner": true, "outer": true, "justify": true, "align": true,
+	"items": true, "center": true, "middle": true, "start": true, "end": true,
+	"top": true, "bottom": true, "left": true, "right": true,
+	"absolute": true, "relative": true, "fixed": true, "sticky": true,
+	"static": true, "overflow": true, "hidden": true, "visible": true,
+	"order": true, "basis": true, "grow": true, "shrink": true,
+
+	// Typography as presentation.
+	"font": true, "text": true, "bold": true, "italic": true,
+	"uppercase": true, "lowercase": true, "capitalize": true,
+	"underline": true, "leading": true, "tracking": true,
+	"antialiased": true, "truncate": true, "nowrap2": true,
+
+	// Colour and theme.
+	"color": true, "colour": true, "bg": true, "background": true,
+	"dark": true, "light": true, "white": true, "black": true,
+	"gray": true, "grey": true, "blue": true, "red": true, "green": true,
+	"yellow": true, "orange": true, "purple": true, "pink": true,
+	"brand": true, "primary": true, "secondary": true, "accent": true,
+	"muted": true, "theme": true, "invert": true,
+
+	// Effects and state.
+	"hover": true, "focus": true, "active": true, "disabled": true,
+	"transition": true, "transform": true, "duration": true, "ease": true,
+	"shadow": true, "rounded": true, "border": true, "opacity": true,
+	"scale": true, "rotate": true, "translate": true, "cursor": true,
+	"pointer": true, "select": true, "outline": true, "ring": true,
+
+	// Responsive and accessibility helpers.
+	"mobile": true, "desktop": true, "tablet": true, "screen": true,
+	"print": true, "sr": true, "only": true, "visually": true,
+	"clearfix": true, "js": true, "no": true,
 }
 
 // genericHTMLAttrs are HTML's general-purpose attributes: slots that hold a
