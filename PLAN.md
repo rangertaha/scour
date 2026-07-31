@@ -723,8 +723,8 @@ should stay off.
 
 ## 8.5 What crawling real sites exposed
 
-Six bugs found by running against live feeds and news sites, each one
-measured. They are recorded together because they are not six accidents: most
+Eight bugs found by running against live feeds and news sites, each one
+measured. They are recorded together because they are not eight accidents: most
 of them are the same missing idea wearing different clothes.
 
 | Bug | Effect | Measured |
@@ -734,6 +734,8 @@ of them are the same missing idea wearing different clothes.
 | Date shape missed RFC-822 and ISO with a time | Locator found the node, pattern rejected every value | 0 to 3,245 values |
 | A whole inline script accepted as a field value | Publisher of 28,610 characters | 28,610 to 34 characters |
 | One observation quoted as a literal pattern | Rule matched one page and no other | Rules generalise |
+| A namespace declaration competing as a value | Guardian's author came back as a schema URI | Bylines extract |
+| The sequence model diluted every score it touched | A correct byline discarded at 0.240 against 0.25 | 5-6 fields per record to 6-7 |
 | Boilerplate outscores content on support | `data-rh="true"` ties with the headline and wins | Still open |
 
 ### The systemic part
@@ -775,6 +777,24 @@ since a record that starts repeating once a field is set aside was never that
 field's record. Ten live feeds went from 9 extracted records to 260. The wider
 lesson is that container and field locations are one decision, not two, and any
 stage that resolves half of it first will sometimes resolve it wrongly.
+
+**Two stages looked at different documents.** The pass that finds where fields
+live filtered out what could not be a value: inline scripts, whole programs,
+namespace URIs. The pass that assigns fields inside the chosen container read
+the graph directly and saw all of it again. A node ruled out as a candidate
+could still be handed a field once the container was known, which is how a
+schema URI became a byline. Any filter worth applying once is worth applying
+wherever the same question is asked.
+
+**A confidence and a distribution are not the same quantity.** The sequence
+model averaged its posterior into the Matcher's score. A posterior spreads over
+states, so with seven fields and a background state it sits near an eighth
+wherever the chain is unsure, and forty per cent of every score became that
+eighth. The threshold was calibrated against scores that had not been through
+it. Nothing looked broken, because every field simply came back a third less
+certain and the ones near the line quietly vanished: a byline located correctly
+in forty-five items was dropped for want of a hundredth. Blending two numbers is
+only meaningful when they measure the same thing.
 
 ### Still open
 
