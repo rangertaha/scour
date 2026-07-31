@@ -268,13 +268,18 @@ func (s *Store) ClearCrawlState(ctx context.Context, entityID uint) error {
 // QueuedEntities lists the entities with work waiting in the frontier, so a
 // dispatcher can find what to hand out without being told which entities are
 // being crawled.
+//
+// A paused entity is not among them, which is the whole of what pausing does to
+// a dispatcher: it keeps its frontier, its order and its leases, and simply
+// stops being asked about.
 func (s *Store) QueuedEntities(ctx context.Context) ([]uint, error) {
 	var ids []uint
 	err := s.db.WithContext(ctx).
 		Model(&QueueItem{}).
-		Distinct("entity_id").
+		Distinct("queue_items.entity_id").
+		Joins("JOIN entities ON entities.id = queue_items.entity_id AND NOT entities.paused").
 		Where("leased_until IS NULL OR leased_until < ?", time.Now().UTC()).
-		Pluck("entity_id", &ids).Error
+		Pluck("queue_items.entity_id", &ids).Error
 	if err != nil {
 		return nil, fmt.Errorf("entities with queued work: %w", err)
 	}

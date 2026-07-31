@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -484,4 +485,56 @@ func (s *Store) EntityByID(ctx context.Context, id uint) (*Entity, error) {
 		return nil, fmt.Errorf("get entity %d: %w", id, err)
 	}
 	return &e, nil
+}
+
+// SetPaused stops or resumes work for an entity.
+//
+// Pausing does not discard anything: the frontier keeps its order and its
+// leases, so resuming carries on rather than starting again. It is the same
+// promise a spent budget makes.
+func (s *Store) SetPaused(ctx context.Context, entityID uint, paused bool) error {
+	err := s.db.WithContext(ctx).
+		Model(&Entity{}).
+		Where("id = ?", entityID).
+		Update("paused", paused).Error
+	if err != nil {
+		return fmt.Errorf("set paused for entity %d: %w", entityID, err)
+	}
+	return nil
+}
+
+// IsPaused reports whether an entity is paused.
+func (s *Store) IsPaused(ctx context.Context, entityID uint) (bool, error) {
+	var e Entity
+	err := s.db.WithContext(ctx).Select("paused").First(&e, entityID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read paused for entity %d: %w", entityID, err)
+	}
+	return e.Paused, nil
+}
+
+// FetchRate is how many pages an entity fetched in the last window, as a rate
+// per second.
+//
+// Derived from the fetch timestamps rather than from the metric stream, so a
+// live view works with no broker configured. That is the ordinary case on one
+// machine, where each process would otherwise embed a broker of its own and see
+// nothing published by anyone else.
+func (s *Store) FetchRate(ctx context.Context, entityID uint, window time.Duration) (float64, error) {
+	if window <= 0 {
+		return 0, nil
+	}
+	var n int64
+	err := s.db.WithContext(ctx).
+		Model(&URL{}).
+		Where("entity_id = ? AND fetched_at IS NOT NULL AND fetched_at >= ?",
+			entityID, time.Now().UTC().Add(-window)).
+		Count(&n).Error
+	if err != nil {
+		return 0, fmt.Errorf("fetch rate for entity %d: %w", entityID, err)
+	}
+	return float64(n) / window.Seconds(), nil
 }

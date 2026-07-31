@@ -90,7 +90,8 @@ type Result struct {
 	Bytes    int64
 	Elapsed  time.Duration
 	Statuses map[int]int
-	// BudgetSpent names the budget that ended the crawl, "pages" or "time", and
+	// BudgetSpent names what ended the crawl: "pages", "time", or "pause" when
+	// someone stopped it. It is
 	// is empty when the frontier ran out. The distinction matters: an empty
 	// frontier means the site is exhausted, a spent budget means there is more
 	// to fetch next run.
@@ -135,6 +136,11 @@ type state struct {
 	// frontier simply ran out. Naming it matters: "stopped after 40 pages" and
 	// "stopped after 15 minutes" tell an operator to change different numbers.
 	spentBudget string
+
+	// pausedAt is when the entity was last seen paused, so the check is not
+	// made on every response.
+	checkedPause time.Time
+	paused       bool
 }
 
 // spend reports whether either budget is used up, and records which.
@@ -152,8 +158,38 @@ func (s *state) spend(limit int) bool {
 		s.spentBudget = "pages"
 	case !s.deadline.IsZero() && !time.Now().Before(s.deadline):
 		s.spentBudget = "time"
+	case s.paused:
+		s.spentBudget = "pause"
 	}
 	return s.spentBudget != ""
+}
+
+// pauseInterval is how often a running crawl asks whether it has been paused.
+//
+// Short enough that pressing a key feels like it did something, long enough
+// that a crawl fetching eight pages a second is not also running eight queries
+// a second to ask permission.
+const pauseInterval = time.Second
+
+// refreshPause reads the entity's paused flag, at most once per interval.
+func (c *Crawler) refreshPause(ctx context.Context, st *state, entityID uint) {
+	st.mu.Lock()
+	if time.Since(st.checkedPause) < pauseInterval {
+		st.mu.Unlock()
+		return
+	}
+	st.checkedPause = time.Now()
+	st.mu.Unlock()
+
+	paused, err := c.store.IsPaused(ctx, entityID)
+	if err != nil {
+		// Not being able to ask is not a reason to stop crawling.
+		slog.Debug("could not read paused state", "entity", entityID, "err", err)
+		return
+	}
+	st.mu.Lock()
+	st.paused = paused
+	st.mu.Unlock()
 }
 
 func (s *state) countStatus(code int) {
@@ -540,6 +576,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		st.mu.Unlock()
 		st.countStatus(r.StatusCode)
 
+		c.refreshPause(ctx, st, entityID)
 		if st.spend(opts.Limit) {
 			// Freeze rather than abort: everything still queued stays queued,
 			// so the next run resumes instead of starting over.

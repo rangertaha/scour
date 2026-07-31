@@ -104,6 +104,7 @@ func newRootCmd() *cobra.Command {
 		newImportCmd(a),
 		newInvalidCmd(a),
 		newListCmd(a),
+		newTopCmd(a),
 		newMCPCmd(a),
 		newRemoveCmd(a),
 		newRunCmd(a),

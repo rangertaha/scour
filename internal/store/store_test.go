@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -685,5 +686,105 @@ func TestLeasingSkipsHostsAskedTooRecently(t *testing.T) {
 	}
 	if h := hostOfRequest(got); h != "busy.example" {
 		t.Errorf("handed out %q, want busy.example", h)
+	}
+}
+
+// Pausing keeps everything: the frontier, its order and its leases. It stops
+// work being handed out, and nothing else.
+func TestPausingHidesAnEntityFromTheDispatcher(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	busy, err := s.CreateEntity(ctx, "busy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet, err := s.CreateEntity(ctx, "quiet")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, e := range []*Entity{busy, quiet} {
+		raw := "http://example.com/" + e.Name
+		if err := s.PushQueue(ctx, e.ID, 1, URLHash(e.ID, raw), []byte(`{"URL":"`+raw+`"}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ids, err := s.QueuedEntities(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("got %d entities with work, want 2", len(ids))
+	}
+
+	if err := s.SetPaused(ctx, quiet.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	ids, err = s.QueuedEntities(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != busy.ID {
+		t.Errorf("got %v, want only the entity that is not paused", ids)
+	}
+
+	// The frontier is untouched, so resuming carries on rather than restarting.
+	var queued int64
+	if err := s.DB().Model(&QueueItem{}).Where("entity_id = ?", quiet.ID).
+		Count(&queued).Error; err != nil {
+		t.Fatal(err)
+	}
+	if queued != 1 {
+		t.Errorf("pausing discarded %d queued items", 1-queued)
+	}
+
+	if err := s.SetPaused(ctx, quiet.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if ids, err = s.QueuedEntities(ctx); err != nil || len(ids) != 2 {
+		t.Errorf("resuming did not bring the entity back: %v %v", ids, err)
+	}
+}
+
+// A live view has to work with no broker configured, which is the ordinary case
+// on one machine, so the rate comes from the fetch timestamps.
+func TestFetchRateComesFromTheDatabase(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	e, err := s.CreateEntity(ctx, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rate, err := s.FetchRate(ctx, e.ID, 10*time.Second); err != nil || rate != 0 {
+		t.Errorf("rate = %v (err %v), want 0 before anything is fetched", rate, err)
+	}
+
+	for i := range 20 {
+		raw := fmt.Sprintf("http://example.com/%d", i)
+		if err := s.RecordFetch(ctx, Fetched{
+			EntityID: e.ID, URL: raw, Status: URLFetched, StatusCode: 200,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rate, err := s.FetchRate(ctx, e.ID, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rate != 2 {
+		t.Errorf("rate = %v, want 20 pages over a 10s window to read as 2/s", rate)
+	}
+
+	// A window that predates them all sees nothing, which is what makes the
+	// number a rate rather than a total.
+	old, err := s.FetchRate(ctx, e.ID, time.Nanosecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old != 0 {
+		t.Errorf("rate over a past window = %v, want 0", old)
 	}
 }

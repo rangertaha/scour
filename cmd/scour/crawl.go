@@ -199,7 +199,11 @@ func runCrawl(cmd *cobra.Command, a *app, name string, f crawlFlags) error {
 		// Worth saying, and worth naming: the frontier is not exhausted, so the
 		// next run has more to do, and the operator needs to know which number
 		// to raise.
-		stopped = fmt.Sprintf(", stopped on the %s budget", result.BudgetSpent)
+		if result.BudgetSpent == "pause" {
+			stopped = ", paused"
+		} else {
+			stopped = fmt.Sprintf(", stopped on the %s budget", result.BudgetSpent)
+		}
 	}
 	cmd.Printf("\n%d fetched, %d skipped, %d failed, %s in %s%s\n",
 		result.Fetched, result.Skipped, result.Failed,

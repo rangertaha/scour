@@ -11,6 +11,15 @@ type Entity struct {
 	Name      string `gorm:"uniqueIndex;not null"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// Paused stops work being handed out for this entity, without discarding
+	// anything it has.
+	//
+	// Durable state rather than a message, because a crawl has to stay paused
+	// across the restart of whatever paused it, and because the same flag has
+	// to stop a foreground crawl on this machine and a dispatcher feeding
+	// crawlers on others. A message would need a subject, a consumer, and
+	// somewhere to remember it anyway.
+	Paused bool `gorm:"index"`
 
 	Aliases      []Alias       `gorm:"constraint:OnDelete:CASCADE"`
 	Properties   []Property    `gorm:"constraint:OnDelete:CASCADE"`
