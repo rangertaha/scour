@@ -20,6 +20,8 @@ const (
 	SubjectDiscovered = "discovered"
 	// SubjectRecord carries one extracted record.
 	SubjectRecord = "record"
+	// SubjectWork carries one URL handed to a crawler to fetch.
+	SubjectWork = "work"
 )
 
 // Subject builds the subject for one entity and stage.
@@ -57,8 +59,12 @@ const (
 func (b *Bus) createStreams(ctx context.Context) error {
 	streams := []jetstream.StreamConfig{
 		{
-			Name:      StreamCrawl,
-			Subjects:  []string{AllEntities(SubjectFetched), AllEntities(SubjectDiscovered)},
+			Name: StreamCrawl,
+			Subjects: []string{
+				AllEntities(SubjectFetched),
+				AllEntities(SubjectDiscovered),
+				AllEntities(SubjectWork),
+			},
 			Retention: jetstream.WorkQueuePolicy,
 			Storage:   jetstream.MemoryStorage,
 			Discard:   jetstream.DiscardOld,

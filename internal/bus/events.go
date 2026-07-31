@@ -44,6 +44,18 @@ type Discovered struct {
 	Score     float64 `json:"score"`
 }
 
+// Work is published when the store hands a URL to a crawler.
+//
+// It carries the whole serialised request rather than only the URL, because the
+// crawler feeds it back to colly, which needs the depth and the context the
+// scorer and the lineage were recorded in.
+type Work struct {
+	Entity   string `json:"entity"`
+	EntityID uint   `json:"entity_id"`
+	URL      string `json:"url"`
+	Request  []byte `json:"request"`
+}
+
 // Publish sends a message, deduplicated on id.
 //
 // The id is what makes at-least-once delivery safe to combine with a broker

@@ -205,3 +205,19 @@ func (s *Store) ClearCrawlState(ctx context.Context, entityID uint) error {
 	}
 	return nil
 }
+
+// QueuedEntities lists the entities with work waiting in the frontier, so a
+// dispatcher can find what to hand out without being told which entities are
+// being crawled.
+func (s *Store) QueuedEntities(ctx context.Context) ([]uint, error) {
+	var ids []uint
+	err := s.db.WithContext(ctx).
+		Model(&QueueItem{}).
+		Distinct("entity_id").
+		Where("leased_until IS NULL OR leased_until < ?", time.Now().UTC()).
+		Pluck("entity_id", &ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("entities with queued work: %w", err)
+	}
+	return ids, nil
+}

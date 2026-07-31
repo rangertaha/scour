@@ -472,3 +472,16 @@ func (s *Store) TargetsFor(ctx context.Context, entityID uint) ([]Target, error)
 	}
 	return out, nil
 }
+
+// EntityByID looks one up by id.
+func (s *Store) EntityByID(ctx context.Context, id uint) (*Entity, error) {
+	var e Entity
+	err := s.db.WithContext(ctx).First(&e, id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("entity %d: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get entity %d: %w", id, err)
+	}
+	return &e, nil
+}

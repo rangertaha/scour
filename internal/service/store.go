@@ -28,11 +28,16 @@ type StoreService struct {
 	// so it reports every link it finds and the decision is made once, here.
 	mu     sync.Mutex
 	scopes map[uint]*crawl.Scope
+	names  map[uint]string
 }
 
 // NewStore returns the store service.
 func NewStore(b *bus.Bus, s *store.Store) *StoreService {
-	return &StoreService{bus: b, store: s, scopes: map[uint]*crawl.Scope{}}
+	return &StoreService{
+		bus: b, store: s,
+		scopes: map[uint]*crawl.Scope{},
+		names:  map[uint]string{},
+	}
 }
 
 // scopeFor returns the entity's scope, building it once.
@@ -74,6 +79,12 @@ func (s *StoreService) Start(ctx context.Context) error {
 		return err
 	}
 	defer stopDiscovered()
+
+	// Dispatch is deliberately not started. It is correct on its own and
+	// harmful without the other half: handing work to a crawler that does not
+	// exist yet would drain the frontier into the broker, where it would sit
+	// until the messages aged out. It is wired up in the same change that adds
+	// the crawl role.
 
 	<-ctx.Done()
 	return nil
