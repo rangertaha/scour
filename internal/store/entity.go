@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	"github.com/rangertaha/scour/internal/fuzzy"
 	"gorm.io/gorm/clause"
 )
 
@@ -41,7 +43,7 @@ func (s *Store) Entity(ctx context.Context, name string) (*Entity, error) {
 	var e Entity
 	err := s.db.WithContext(ctx).Where("name = ?", name).First(&e).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("entity %q: %w", name, ErrNotFound)
+		return nil, s.noSuchEntity(ctx, name)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get entity %q: %w", name, err)
@@ -58,12 +60,38 @@ func (s *Store) EntityFull(ctx context.Context, name string) (*Entity, error) {
 		Preload("Targets").Preload("ContentTypes").
 		Where("name = ?", name).First(&e).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("entity %q: %w", name, ErrNotFound)
+		return nil, s.noSuchEntity(ctx, name)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get entity %q: %w", name, err)
 	}
 	return &e, nil
+}
+
+// noSuchEntity reports a name that is not there, naming the closest one that is.
+//
+// The name was typed, so a near miss is the likely explanation, and saying so
+// saves re-reading the listing for the one wrong character. It lives in the
+// store rather than in the command so the API and MCP answer the same way.
+func (s *Store) noSuchEntity(ctx context.Context, name string) error {
+	if near := s.nearestEntity(ctx, name); near != "" {
+		return fmt.Errorf("entity %q: %w (did you mean %q?)", name, ErrNotFound, near)
+	}
+	return fmt.Errorf("entity %q: %w", name, ErrNotFound)
+}
+
+// nearestEntity returns the existing entity whose name is closest to the one
+// asked for, or "" when none is close enough or the lookup fails.
+//
+// A failure here is silent on purpose: this runs only to improve a message that
+// is already being returned, and reporting that the suggestion could not be
+// made would replace a clear error with a confusing one.
+func (s *Store) nearestEntity(ctx context.Context, name string) string {
+	var names []string
+	if err := s.db.WithContext(ctx).Model(&Entity{}).Pluck("name", &names).Error; err != nil {
+		return ""
+	}
+	return fuzzy.Nearest(name, names)
 }
 
 // EntitySummary is one row of the entity listing the API and MCP serve.

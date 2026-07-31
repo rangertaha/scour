@@ -14,6 +14,7 @@ import (
 
 	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/config"
+	"github.com/rangertaha/scour/internal/fuzzy"
 	"github.com/rangertaha/scour/internal/store"
 	"github.com/rangertaha/scour/internal/version"
 )
@@ -181,10 +182,14 @@ func newRootCmd() *cli.Command {
 			// recognise, so without this a typo prints the help and exits 0,
 			// which reads as success to anything scripting scour.
 			if name := cmd.Args().First(); name != "" {
-				// SuggestCommand always names its nearest match, however far
-				// away it is, so "bogus" comes back as "top". Offering that is
-				// worse than offering nothing, hence the distance gate.
-				if near := cli.SuggestCommand(cmd.Commands, name); near != "" && nearby(name, near) {
+				// Not cli.SuggestCommand: it always names its nearest match
+				// however far away it is, so "bogus" came back as "top", and a
+				// suggestion that points somewhere unrelated is worse than none.
+				names := make([]string, 0, len(cmd.Commands))
+				for _, c := range cmd.Commands {
+					names = append(names, c.Names()...)
+				}
+				if near := fuzzy.Nearest(name, names); near != "" {
 					return fmt.Errorf("unknown command %q, did you mean `scour %s`?", name, near)
 				}
 				return fmt.Errorf("unknown command %q, run `scour --help`", name)
@@ -233,43 +238,6 @@ func newVersionCmd(a *app) *cli.Command {
 			return nil
 		},
 	}
-}
-
-// nearby reports whether two command names are close enough that one was
-// plausibly a typo of the other, allowing one edit per three characters.
-//
-// Transpositions count as one edit rather than two, because swapping a pair of
-// letters is the typo people actually make: "trian" for "train" is a single
-// slip, and plain Levenshtein prices it the same as two unrelated mistakes.
-func nearby(a, b string) bool {
-	// rows holds the last two completed rows, so a transposition can look back
-	// two characters in each string.
-	rows := make([][]int, len(a)+1)
-	for i := range rows {
-		rows[i] = make([]int, len(b)+1)
-		rows[i][0] = i
-	}
-	for j := 0; j <= len(b); j++ {
-		rows[0][j] = j
-	}
-	for i := 1; i <= len(a); i++ {
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-			d := min(rows[i-1][j]+1, min(rows[i][j-1]+1, rows[i-1][j-1]+cost))
-			if i > 1 && j > 1 && a[i-1] == b[j-2] && a[i-2] == b[j-1] {
-				d = min(d, rows[i-2][j-2]+1)
-			}
-			rows[i][j] = d
-		}
-	}
-	allowed := max(len(a), len(b)) / 3
-	if allowed < 1 {
-		allowed = 1
-	}
-	return rows[len(a)][len(b)] <= allowed
 }
 
 // need checks the positional arguments, so every command reports a miscount the

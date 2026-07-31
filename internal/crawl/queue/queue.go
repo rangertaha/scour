@@ -39,7 +39,23 @@ type Storage struct {
 	// the seeds are.
 	refill func() int
 
-	mu     sync.Mutex
+	// afford is asked, before a request is handed out, whether the crawl can
+	// still pay for one, and claims the slot when it says yes. It is called
+	// under deq, so the claim and the lease it pays for cannot interleave.
+	//
+	// The check belongs here and nowhere later. A callback that decides a
+	// request is unaffordable has only one way to stop it, and aborting marks
+	// the URL visited in this same storage, so a page nobody fetched is
+	// remembered as done. Declining to hand it out leaves it queued for the
+	// next run, which is the whole point of stopping on a budget rather than
+	// on exhaustion.
+	afford func() bool
+
+	mu sync.Mutex
+	// deq serialises handing a request out. Without it two threads can both
+	// find the budget affordable and both take one, and the crawl overshoots
+	// by however many were asking at once.
+	deq    sync.Mutex
 	frozen atomic.Bool
 }
 
@@ -66,6 +82,15 @@ func (s *Storage) SetRefill(f func() int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.refill = f
+}
+
+// SetBudget installs the function consulted before each request is handed out.
+//
+// Passing nil, or never calling this, leaves the queue unmetered.
+func (s *Storage) SetBudget(f func() bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.afford = f
 }
 
 // topUp adds the next batch of seeds, returning how many were added.
@@ -131,6 +156,19 @@ func (s *Storage) GetRequest() ([]byte, error) {
 	if s.frozen.Load() {
 		return nil, store.ErrQueueEmpty
 	}
+	s.deq.Lock()
+	defer s.deq.Unlock()
+
+	s.mu.Lock()
+	afford := s.afford
+	s.mu.Unlock()
+
+	// Asked before the lease, so a request the crawl cannot pay for is never
+	// taken out of the queue in the first place.
+	if afford != nil && !afford() {
+		return nil, store.ErrQueueEmpty
+	}
+
 	data, err := s.store.LeaseQueue(s.ctx, s.entityID, 0)
 	if errors.Is(err, store.ErrQueueEmpty) && s.topUp() > 0 {
 		// Empty only meant the next batch of seeds had not been queued yet.

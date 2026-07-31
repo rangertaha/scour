@@ -36,6 +36,10 @@ type Work struct {
 	// of polling.
 	wake chan struct{}
 
+	// afford is asked before handing work out, so --max-pages means the same
+	// thing to a crawler fed by the broker as to one reading the database.
+	afford func() bool
+
 	done atomic.Bool
 }
 
@@ -73,6 +77,12 @@ func (w *Work) GetRequest() ([]byte, error) {
 	for {
 		w.mu.Lock()
 		if len(w.ready) > 0 {
+			// Claimed under the same lock that hands the request out, so two
+			// threads cannot both spend the last of the budget.
+			if w.afford != nil && !w.afford() {
+				w.mu.Unlock()
+				return nil, store.ErrQueueEmpty
+			}
 			data := w.ready[0]
 			w.ready = w.ready[1:]
 			w.mu.Unlock()
@@ -128,3 +138,10 @@ func (w *Work) SetScorer(func([]byte) float64) {}
 // SetRefill implements the frontier a crawl expects, and does nothing: there
 // are no seeds here to top up.
 func (w *Work) SetRefill(func() int) {}
+
+// SetBudget installs the function consulted before each request is handed out.
+func (w *Work) SetBudget(f func() bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.afford = f
+}

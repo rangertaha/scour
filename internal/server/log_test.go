@@ -8,18 +8,43 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
+// syncBuffer is a buffer safe to write from another goroutine while the test
+// reads it.
+//
+// The lock is not decoration. capture redirects the process-wide logger, and
+// jobs started by other tests in this package outlive them and go on logging,
+// so a plain bytes.Buffer here is written by a stray goroutine and read by the
+// test at the same time.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // capture installs a logger writing into a buffer, at the given level, and
 // restores the previous default when the test ends.
-func capture(t *testing.T, level slog.Level) *bytes.Buffer {
+func capture(t *testing.T, level slog.Level) *syncBuffer {
 	t.Helper()
-	var buf bytes.Buffer
+	buf := &syncBuffer{}
 	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: level})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: level})))
 	t.Cleanup(func() { slog.SetDefault(prev) })
-	return &buf
+	return buf
 }
 
 // serve runs one request through the middleware under test.

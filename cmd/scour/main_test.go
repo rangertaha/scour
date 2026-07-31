@@ -317,3 +317,58 @@ func TestACrawlThatCannotRunSaysNothingFirst(t *testing.T) {
 		t.Errorf("it announced a crawl it could not run:\n%s", out)
 	}
 }
+
+// A name that is not there is nearly always a typo, so the error names the
+// closest one rather than leaving someone to re-read the listing.
+func TestUnknownEntitySuggestsTheNearestName(t *testing.T) {
+	dir := t.TempDir()
+	runOK(t, dir, "add", "vehicle")
+	runOK(t, dir, "add", "news-html")
+
+	for _, tc := range []struct{ typed, want string }{
+		{"vehicel", "vehicle"},
+		{"newshtml", "news-html"},
+	} {
+		out, err := run(t, dir, "list", tc.typed)
+		if err == nil {
+			t.Fatalf("%q should not have been found", tc.typed)
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("error for %q did not suggest %q: %v", tc.typed, tc.want, err)
+		}
+		_ = out
+	}
+
+	// Nothing close enough is offered nothing, because a suggestion pointing
+	// somewhere unrelated is read as "this is what you meant".
+	_, err := run(t, dir, "list", "zzzzzzzz")
+	if err == nil {
+		t.Fatal("an absent entity must fail")
+	}
+	if strings.Contains(err.Error(), "did you mean") {
+		t.Errorf("a distant name should not be suggested: %v", err)
+	}
+}
+
+// The suggestion has to reach every command, not only the one it was added to.
+func TestUnknownEntitySuggestsAcrossCommands(t *testing.T) {
+	dir := t.TempDir()
+	runOK(t, dir, "add", "vehicle", "-p", "make", "-e", "Ford")
+
+	for _, args := range [][]string{
+		{"list", "vehicel"},
+		{"rules", "vehicel"},
+		{"search", "vehicel"},
+		{"stop", "vehicel"},
+		{"tag", "vehicel", "-p", "make"},
+	} {
+		_, err := run(t, dir, args...)
+		if err == nil {
+			t.Errorf("scour %s should have failed", strings.Join(args, " "))
+			continue
+		}
+		if !strings.Contains(err.Error(), `did you mean "vehicle"`) {
+			t.Errorf("scour %s did not suggest the near name: %v", strings.Join(args, " "), err)
+		}
+	}
+}

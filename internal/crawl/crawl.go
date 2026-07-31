@@ -80,6 +80,9 @@ type Frontier interface {
 	SetScorer(func(data []byte) float64)
 	// SetRefill supplies the next batch of seeds when the queue runs dry.
 	SetRefill(func() int)
+	// SetBudget is asked, before each request is handed out, whether the crawl
+	// can still pay for one, and claims the slot when it says yes.
+	SetBudget(func() bool)
 }
 
 // Result reports what a crawl did.
@@ -123,10 +126,17 @@ func (c *Crawler) WithSink(sink Sink) *Crawler {
 // state is the per-run mutable data the callbacks share. colly runs callbacks
 // from its worker pool, so every field here is guarded.
 type state struct {
-	mu       sync.Mutex
-	fetched  int
-	skipped  int
-	failed   int
+	mu      sync.Mutex
+	fetched int
+	skipped int
+	failed  int
+	// claimed counts requests that have gone out, whether or not they have
+	// come back. The page budget has to be spent against this rather than
+	// against fetched: by the time a response arrives, every other thread has
+	// a request in flight already, and stopping then overshoots by a whole
+	// batch. Requests that end up skipped or failed cost nothing, because the
+	// budget counts pages fetched and not requests attempted.
+	claimed  int
 	bytes    int64
 	statuses map[int]int
 
@@ -149,6 +159,26 @@ type state struct {
 // does, leaving everything queued still queued and everything fetched written,
 // so the next run resumes. Cancelling the context instead would take the
 // database writes down with it and turn a normal stop into a tail of failures.
+// claim reports whether the crawl can pay for one more request, and takes the
+// slot when it can.
+//
+// The budget counts pages fetched, so a claim that ends up skipped or failed is
+// refunded by the arithmetic rather than tracked separately: what is
+// outstanding is whatever was claimed and has not yet come back one way or the
+// other, and what is committed is that plus what has already been fetched.
+func (s *state) claim(limit int) bool {
+	if limit <= 0 {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.claimed-s.skipped-s.failed >= limit {
+		return false
+	}
+	s.claimed++
+	return true
+}
+
 func (s *state) spend(limit int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -248,6 +278,10 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 	// queue pops in score order, and the score of a link is decided when it is
 	// discovered, then carried on the request itself.
 	pending.SetScorer(queuedScore)
+	// The page budget is enforced where requests are handed out, so one that
+	// cannot be paid for is left in the queue rather than dispatched and then
+	// stopped on the way back, which overshot by whatever was in flight.
+	pending.SetBudget(func() bool { return st.claim(opts.Limit) })
 
 	q, err := collyqueue.New(threads, pending)
 	if err != nil {
