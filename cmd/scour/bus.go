@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rangertaha/scour/internal/bus"
+	"github.com/rangertaha/scour/internal/cache"
+	"github.com/rangertaha/scour/internal/content"
 	"github.com/rangertaha/scour/internal/crawl"
 	"github.com/rangertaha/scour/internal/service"
 )
@@ -125,12 +127,21 @@ func runServices(cmd *cobra.Command, a *app, spec string) error {
 	for _, role := range wanted {
 		switch role {
 		case service.RoleStore:
-			services = append(services, service.NewStore(b, s))
+			// This store dispatches: `scour run` starts a crawl role, here or
+			// on another machine, to take the work.
+			services = append(services, service.NewStore(b, s, service.Dispatching()))
 		case service.RoleCrawl:
-			// The crawl role is driven by `scour crawl` for now: there is no
-			// scheduler yet to decide which entity to crawl unprompted, so
-			// starting it here would be a component with nothing to do.
-			cmd.Println("crawl role: nothing to do until a scheduler exists, skipping")
+			// Content types and the browser policy come from this process's
+			// configuration rather than from the entity: a crawler does not
+			// read the database, and both describe the machine doing the
+			// fetching rather than the thing being looked for.
+			types, err := content.New(a.cfg.Crawl.ContentTypes, nil)
+			if err != nil {
+				return err
+			}
+			crawler := crawl.New(a.cfg, s, cache.New(a.cfg.PagesDir()))
+			services = append(services,
+				service.NewCrawl(b, crawler, types, a.cfg.Browser.Policy))
 		}
 	}
 	if len(services) == 0 {

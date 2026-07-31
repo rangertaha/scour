@@ -86,7 +86,27 @@ func (s *Store) Cookies(ctx context.Context, entityID uint, host string) (string
 
 // PushQueue appends a serialised request. hash identifies the URL so the item
 // can be released when the fetch is recorded.
+//
+// A URL already waiting is not queued again. The same link is found on many
+// pages of a site, and in a distributed crawl it can arrive from two directions
+// at once: the crawler that found it queues it, and the store queues it again
+// when the discovery is reported. Either way, fetching it twice is not what
+// anyone wanted.
 func (s *Store) PushQueue(ctx context.Context, entityID uint, score float64, hash string, data []byte) error {
+	if hash != "" {
+		var n int64
+		err := s.db.WithContext(ctx).
+			Model(&QueueItem{}).
+			Where("entity_id = ? AND hash = ?", entityID, hash).
+			Count(&n).Error
+		if err != nil {
+			return fmt.Errorf("check queue for %s: %w", hash, err)
+		}
+		if n > 0 {
+			return nil
+		}
+	}
+
 	item := QueueItem{EntityID: entityID, Score: score, Hash: hash, Data: data}
 	if err := s.db.WithContext(ctx).Create(&item).Error; err != nil {
 		return fmt.Errorf("push queue: %w", err)
@@ -220,4 +240,42 @@ func (s *Store) QueuedEntities(ctx context.Context) ([]uint, error) {
 		return nil, fmt.Errorf("entities with queued work: %w", err)
 	}
 	return ids, nil
+}
+
+// ReturnLeases puts every in-flight item of an entity back in the queue.
+//
+// A lease expiring is the net under a crawler that died. A crawler that stops
+// on purpose should not make the frontier wait for it: everything it had taken
+// and not fetched is available again immediately, which is what makes a crawl
+// stopped on its budget resumable rather than resumable in ten minutes.
+func (s *Store) ReturnLeases(ctx context.Context, entityID uint) error {
+	err := s.db.WithContext(ctx).
+		Model(&QueueItem{}).
+		Where("entity_id = ? AND leased_until IS NOT NULL", entityID).
+		Update("leased_until", nil).Error
+	if err != nil {
+		return fmt.Errorf("return leases: %w", err)
+	}
+	return nil
+}
+
+// InFlight counts an entity's handed-out items that have not reported back.
+//
+// This is what bounds dispatch. Counting unacknowledged broker messages instead
+// measures the wrong thing: a crawler acknowledges work when it queues it, not
+// when it fetches it, so the broker looks idle while the crawler holds
+// thousands of URLs it has not got to. Left unbounded the frontier drains into
+// a crawler's memory, which is the failure lazy seeding was introduced to cure,
+// one layer further along.
+func (s *Store) InFlight(ctx context.Context, entityID uint) (int, error) {
+	var n int64
+	err := s.db.WithContext(ctx).
+		Model(&QueueItem{}).
+		Where("entity_id = ? AND leased_until IS NOT NULL AND leased_until >= ?",
+			entityID, time.Now().UTC()).
+		Count(&n).Error
+	if err != nil {
+		return 0, fmt.Errorf("in-flight count: %w", err)
+	}
+	return int(n), nil
 }

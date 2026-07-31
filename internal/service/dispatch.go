@@ -19,24 +19,26 @@ const (
 	// frontier is not a busy loop.
 	dispatchInterval = 250 * time.Millisecond
 
-	// dispatchCeiling is how many handed-out URLs may be unacknowledged before
-	// the store stops handing out more.
+	// dispatchCeiling is how many URLs may be out with a crawler, per entity,
+	// before the store stops handing out more.
 	//
-	// This is the backpressure. Without it a fast dispatcher would empty the
-	// frontier into the broker, which would put the queue back where it was
-	// before seeding was made lazy: everything queued, nothing fetched, and no
-	// way to stop early without losing the order it was queued in.
-	dispatchCeiling = 200
+	// This is the backpressure, and it counts leases rather than unacknowledged
+	// broker messages because those measure different things. A crawler
+	// acknowledges work when it queues it, not when it fetches it, so the
+	// broker looks idle while the crawler holds thousands of URLs it has not
+	// got to: measured on a live site the whole frontier ended up leased and
+	// waiting in one process's memory. A lease is only released when a fetch is
+	// reported, so counting leases counts work actually outstanding.
+	//
+	// Enough to keep every thread of several crawlers busy, small enough that
+	// the frontier keeps its order instead of being emptied into memory.
+	dispatchCeiling = 100
 
 	// dispatchBatch is how many items are leased in one pass.
 	dispatchBatch = 50
 )
 
 // dispatch hands frontier work to crawlers until ctx is cancelled.
-//
-// Not yet started by the store service: see the note in Start. It is here
-// because it is the half of the problem that belongs to the component holding
-// the frontier, and it is finished; what is missing is something to consume it.
 //
 // The frontier stays here rather than becoming a stream because the order is
 // the product: it pops highest score first, and a broker delivers in publish
@@ -60,26 +62,26 @@ func (s *StoreService) dispatch(ctx context.Context) {
 
 // dispatchOnce hands out at most one batch, for every entity with work.
 func (s *StoreService) dispatchOnce(ctx context.Context) error {
-	pending, err := s.bus.Pending(ctx, bus.StreamCrawl)
-	if err != nil {
-		return err
-	}
-	room := dispatchCeiling - int(pending)
-	if room <= 0 {
-		// The crawlers are behind. Leaving the work in the frontier is what
-		// keeps it in score order.
-		return nil
-	}
-	if room > dispatchBatch {
-		room = dispatchBatch
-	}
-
 	entities, err := s.store.QueuedEntities(ctx)
 	if err != nil {
 		return err
 	}
 
 	for _, id := range entities {
+		inFlight, err := s.store.InFlight(ctx, id)
+		if err != nil {
+			return err
+		}
+		room := dispatchCeiling - inFlight
+		if room <= 0 {
+			// The crawlers are behind. Leaving the work in the frontier is
+			// what keeps it in score order.
+			continue
+		}
+		if room > dispatchBatch {
+			room = dispatchBatch
+		}
+
 		name, err := s.entityName(ctx, id)
 		if err != nil {
 			return err

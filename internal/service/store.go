@@ -26,18 +26,38 @@ type StoreService struct {
 	// here because this is the process that holds the targets: a crawler in
 	// another process cannot be handed a scope built from a million of them,
 	// so it reports every link it finds and the decision is made once, here.
+	// dispatches says whether this store hands frontier work to crawlers.
+	// Off by default, because a store that dispatches with nothing consuming
+	// empties the frontier onto the broker where it sits until the messages
+	// age out. `scour crawl --bus` runs a store beside a crawler that has its
+	// own frontier, and turning this on there stalled the crawl.
+	dispatches bool
+
 	mu     sync.Mutex
 	scopes map[uint]*crawl.Scope
 	names  map[uint]string
 }
 
+// StoreOption configures the store service.
+type StoreOption func(*StoreService)
+
+// Dispatching hands frontier work to crawlers over the bus. Only correct when
+// a crawl role is running to take it.
+func Dispatching() StoreOption {
+	return func(s *StoreService) { s.dispatches = true }
+}
+
 // NewStore returns the store service.
-func NewStore(b *bus.Bus, s *store.Store) *StoreService {
-	return &StoreService{
+func NewStore(b *bus.Bus, s *store.Store, opts ...StoreOption) *StoreService {
+	svc := &StoreService{
 		bus: b, store: s,
 		scopes: map[uint]*crawl.Scope{},
 		names:  map[uint]string{},
 	}
+	for _, o := range opts {
+		o(svc)
+	}
+	return svc
 }
 
 // scopeFor returns the entity's scope, building it once.
@@ -80,11 +100,10 @@ func (s *StoreService) Start(ctx context.Context) error {
 	}
 	defer stopDiscovered()
 
-	// Dispatch is deliberately not started. It is correct on its own and
-	// harmful without the other half: handing work to a crawler that does not
-	// exist yet would drain the frontier into the broker, where it would sit
-	// until the messages aged out. It is wired up in the same change that adds
-	// the crawl role.
+	// The frontier is here, so handing work out is too, when asked.
+	if s.dispatches {
+		go s.dispatch(ctx)
+	}
 
 	<-ctx.Done()
 	return nil
@@ -145,6 +164,21 @@ func (s *StoreService) handleDiscovered(ctx context.Context, data []byte) error 
 	err = s.store.Discovered(ctx, ev.EntityID, ev.URL, ev.ParentURL, ev.Depth, ev.Score)
 	if err != nil {
 		return fmt.Errorf("store discovered %s: %w", ev.URL, err)
+	}
+
+	// And into the frontier, which is the half the single-process crawler does
+	// for itself. Without it a distributed crawl fetches its seeds, discovers
+	// hundreds of links, records every one of them, and then stops with nothing
+	// left to hand out.
+	data, err2 := crawl.MarshalRequest(ev.URL, ev.ParentURL, ev.Depth, ev.Score)
+	if err2 != nil {
+		// A link that cannot be turned into a request is not one worth
+		// retrying the message for.
+		return nil //nolint:nilerr // deliberate: unusable link, see comment
+	}
+	err = s.store.PushQueue(ctx, ev.EntityID, ev.Score, store.URLHash(ev.EntityID, ev.URL), data)
+	if err != nil {
+		return fmt.Errorf("queue discovered %s: %w", ev.URL, err)
 	}
 	return nil
 }

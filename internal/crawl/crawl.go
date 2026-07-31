@@ -53,6 +53,33 @@ type Options struct {
 	Browser string
 	Scorer  score.Scorer
 	Debug   bool
+	// Frontier is where the crawl takes its work from. Nil builds the
+	// database-backed one, which is the single-process default; a crawler
+	// being handed work by another process supplies its own.
+	Frontier Frontier
+}
+
+// Frontier is the queue a crawl takes its work from.
+//
+// Declared here because this package is the consumer. It exists so a crawler
+// fed by a broker and one reading the database are the same crawler: colly's
+// loop, robots, cookies, redirects and the browser escalation are shared, and
+// only where the next request comes from differs.
+type Frontier interface {
+	Init() error
+	AddRequest([]byte) error
+	GetRequest() ([]byte, error)
+	QueueSize() (int, error)
+	IsEmpty() (bool, error)
+
+	// Freeze makes the queue report itself empty without discarding anything,
+	// which is how a crawl stops early and stays resumable.
+	Freeze()
+	Frozen() bool
+	// SetScorer decides a request's priority as it is added.
+	SetScorer(func(data []byte) float64)
+	// SetRefill supplies the next batch of seeds when the queue runs dry.
+	SetRefill(func() int)
 }
 
 // Result reports what a crawl did.
@@ -137,7 +164,9 @@ func (s *state) countStatus(code int) {
 // Run crawls one entity and returns when the frontier is exhausted, the budget
 // is spent, or ctx is cancelled.
 func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
-	if len(opts.Targets) == 0 {
+	// A crawler handed its work by another process has no targets of its own:
+	// what to fetch and what is in scope were both decided before it was told.
+	if len(opts.Targets) == 0 && opts.Frontier == nil {
 		return nil, fmt.Errorf("entity %q has no targets: scour add %s -d <domain>", opts.Entity.Name, opts.Entity.Name)
 	}
 	if opts.Scorer == nil {
@@ -170,7 +199,10 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	// So does the queue, which is also where scour's crawl order will live.
-	pending := crawlqueue.New(ctx, c.store, opts.Entity.ID)
+	var pending Frontier = opts.Frontier
+	if pending == nil {
+		pending = crawlqueue.New(ctx, c.store, opts.Entity.ID)
+	}
 	threads := c.cfg.Crawl.Concurrency
 	if threads < 1 {
 		threads = 1
@@ -228,6 +260,17 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 		return nil, fmt.Errorf("run queue: %w", err)
 	}
 	collector.Wait()
+
+	// Anything taken and not fetched goes back now rather than waiting for its
+	// lease to expire. A crawl stopped on its budget has usually taken a
+	// threadful of requests it never got to, and leaving them in flight would
+	// make the next run wait ten minutes for work it already has. Only for the
+	// database frontier: a crawler handed its work does not own the queue.
+	if opts.Frontier == nil {
+		if err := c.store.ReturnLeases(ctx, opts.Entity.ID); err != nil {
+			slog.Warn("could not return leases", "entity", opts.Entity.Name, "err", err)
+		}
+	}
 
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -408,7 +451,7 @@ const (
 )
 
 // register wires the callbacks. This is the whole integration with colly.
-func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pending *crawlqueue.Storage, sc *Scope, opts Options, st *state) {
+func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pending Frontier, sc *Scope, opts Options, st *state) {
 	entityID := opts.Entity.ID
 
 	// Attach the timing and lineage this request will be recorded with, and
@@ -515,6 +558,13 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		})
 		if predicted < c.cfg.Model.MinScore {
 			slog.Debug("link below cutoff", "url", link, "score", predicted)
+			return
+		}
+
+		// Out of scope is not discovered: recording it would put links to
+		// anywhere at all in the entity's URL table, which is what the bus
+		// path did until the store started applying the same test.
+		if !sc.Allows(link) {
 			return
 		}
 
@@ -646,7 +696,7 @@ const seedBatch = 500
 // entirely, and is safe because every call happens inside an active request:
 // the loop only terminates when the queue is empty and nothing is in flight,
 // and this row lands before that request reports itself complete.
-func enqueue(pending *crawlqueue.Storage, sc *Scope, r *colly.Request) error {
+func enqueue(pending Frontier, sc *Scope, r *colly.Request) error {
 	// Out-of-scope links are dropped here rather than filtered on the way out.
 	// colly checks its URLFilters when a request is dequeued, so a link that
 	// was never going to be fetched would still be stored, scored and read
@@ -701,4 +751,35 @@ func parseSize(header string) int64 {
 		return 0
 	}
 	return n
+}
+
+// MarshalRequest builds the serialised request a frontier stores for a
+// discovered link.
+//
+// Exported because in a distributed crawl the frontier is filled by the store
+// rather than by the crawler that found the link: the crawler reports what it
+// saw and the store decides what is worth queueing. Both paths have to produce
+// the same bytes, or a request queued by one would lose the score and the
+// lineage when read by the other.
+func MarshalRequest(rawURL, parentURL string, depth int, score float64) ([]byte, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse %q: %w", rawURL, err)
+	}
+	ctx := colly.NewContext()
+	ctx.Put(ctxScore, formatScore(score))
+	ctx.Put(ctxParent, parentURL)
+
+	req := &colly.Request{
+		URL:     u,
+		Method:  "GET",
+		Depth:   depth,
+		Headers: &http.Header{},
+		Ctx:     ctx,
+	}
+	data, err := req.Marshal()
+	if err != nil {
+		return nil, fmt.Errorf("marshal request for %q: %w", rawURL, err)
+	}
+	return data, nil
 }
