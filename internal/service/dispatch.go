@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/rangertaha/scour/internal/bus"
@@ -60,9 +62,50 @@ func (s *StoreService) dispatch(ctx context.Context) {
 	}
 }
 
+// cooling lists the hosts asked for something too recently to be asked again,
+// and records this pass's hand-outs as it goes.
+//
+// The per-host rate is the site's, not the crawl's: an override recorded for a
+// host wins over the configured default, which is how a fragile server is
+// treated gently without slowing everything else down.
+func (s *StoreService) cooling(now time.Time, rates map[string]time.Duration) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var hot []string
+	for host, last := range s.lastAsked {
+		rate := s.hostRate
+		if r, ok := rates[host]; ok {
+			rate = r
+		}
+		if now.Sub(last) < rate {
+			hot = append(hot, host)
+			continue
+		}
+		// Long enough ago to be irrelevant, and keeping it would grow the map
+		// by one entry per host for the life of the process.
+		delete(s.lastAsked, host)
+	}
+	return hot
+}
+
+// asked records that a host has just been handed out.
+func (s *StoreService) asked(host string, at time.Time) {
+	if host == "" {
+		return
+	}
+	s.mu.Lock()
+	s.lastAsked[host] = at
+	s.mu.Unlock()
+}
+
 // dispatchOnce hands out at most one batch, for every entity with work.
 func (s *StoreService) dispatchOnce(ctx context.Context) error {
 	entities, err := s.store.QueuedEntities(ctx)
+	if err != nil {
+		return err
+	}
+	rates, err := s.store.HostRates(ctx)
 	if err != nil {
 		return err
 	}
@@ -103,10 +146,14 @@ func (s *StoreService) dispatchOnce(ctx context.Context) error {
 		})
 
 		for range room {
-			data, err := s.store.LeaseQueue(ctx, id, 0)
+			now := time.Now()
+			data, err := s.store.LeaseQueueSkipping(ctx, id, 0, s.cooling(now, rates))
 			if err != nil {
-				break // empty, or unreadable: either way stop on this entity
+				// Empty, or every host still cooling. Either way there is
+				// nothing to hand out for this entity right now.
+				break
 			}
+			s.asked(hostOf(data), now)
 			ev := bus.Work{
 				Entity:   name,
 				EntityID: id,
@@ -123,6 +170,15 @@ func (s *StoreService) dispatchOnce(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// hostOf reads the host a serialised request will be sent to.
+func hostOf(data []byte) string {
+	u, err := url.Parse(urlOf(data))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
 }
 
 // urlOf recovers the URL from a serialised colly request.

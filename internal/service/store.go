@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/rangertaha/scour/internal/bus"
 	"github.com/rangertaha/scour/internal/crawl"
@@ -32,6 +33,11 @@ type StoreService struct {
 	// age out. `scour crawl --bus` runs a store beside a crawler that has its
 	// own frontier, and turning this on there stalled the crawl.
 	dispatches bool
+	// hostRate is how often one host may be asked for something, unless it has
+	// an override of its own.
+	hostRate time.Duration
+	// lastAsked is when each host was last handed out.
+	lastAsked map[string]time.Time
 
 	mu     sync.Mutex
 	scopes map[uint]*crawl.Scope
@@ -41,18 +47,28 @@ type StoreService struct {
 // StoreOption configures the store service.
 type StoreOption func(*StoreService)
 
-// Dispatching hands frontier work to crawlers over the bus. Only correct when
-// a crawl role is running to take it.
-func Dispatching() StoreOption {
-	return func(s *StoreService) { s.dispatches = true }
+// Dispatching hands frontier work to crawlers over the bus, no faster than
+// hostRate per host. Only correct when a crawl role is running to take it.
+//
+// The rate belongs here rather than in the crawler because politeness is owed
+// to a server, not to a process. A limit inside a crawler bounds what that
+// crawler does; with several crawlers a site sees the sum, and no crawler can
+// see the others. The dispatcher hands out every URL, so it is the only place
+// that can bound what a site actually receives.
+func Dispatching(hostRate time.Duration) StoreOption {
+	return func(s *StoreService) {
+		s.dispatches = true
+		s.hostRate = hostRate
+	}
 }
 
 // NewStore returns the store service.
 func NewStore(b *bus.Bus, s *store.Store, opts ...StoreOption) *StoreService {
 	svc := &StoreService{
 		bus: b, store: s,
-		scopes: map[uint]*crawl.Scope{},
-		names:  map[uint]string{},
+		scopes:    map[uint]*crawl.Scope{},
+		names:     map[uint]string{},
+		lastAsked: map[string]time.Time{},
 	}
 	for _, o := range opts {
 		o(svc)

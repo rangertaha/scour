@@ -131,7 +131,7 @@ func runServices(cmd *cobra.Command, a *app, spec string) error {
 		case service.RoleStore:
 			// This store dispatches: `scour run` starts a crawl role, here or
 			// on another machine, to take the work.
-			services = append(services, service.NewStore(b, s, service.Dispatching()))
+			services = append(services, service.NewStore(b, s, service.Dispatching(a.cfg.Crawl.Rate.Duration())))
 		case service.RoleCrawl:
 			// Content types and the browser policy come from this process's
 			// configuration rather than from the entity: a crawler does not

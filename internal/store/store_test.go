@@ -4,6 +4,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -621,5 +622,68 @@ func TestAnItemNothingReportsIsEventuallyAbandoned(t *testing.T) {
 	}
 	if _, err := s.LeaseQueue(ctx, e.ID, time.Minute); !errors.Is(err, ErrQueueEmpty) {
 		t.Errorf("err = %v, want the item abandoned after %d attempts", err, MaxAttempts)
+	}
+}
+
+// Politeness is owed to a server, not to a crawl. A rate limit inside a crawler
+// bounds what that process does; with several crawlers a site sees the sum, and
+// no crawler can see the others. Handing work out is the one place that can
+// bound what a site actually receives.
+func TestLeasingSkipsHostsAskedTooRecently(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	e, err := s.CreateEntity(ctx, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	push := func(raw string) {
+		t.Helper()
+		data, err := json.Marshal(map[string]any{"URL": raw})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.PushQueue(ctx, e.ID, 1, URLHash(e.ID, raw), data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	push("http://busy.example/a")
+	push("http://busy.example/b")
+	push("http://other.example/a")
+
+	// The host is read from the request, which is what makes pacing possible.
+	var item QueueItem
+	if err := s.DB().Where("hash = ?", URLHash(e.ID, "http://busy.example/a")).
+		First(&item).Error; err != nil {
+		t.Fatal(err)
+	}
+	if item.Host != "busy.example" {
+		t.Fatalf("host = %q, want busy.example", item.Host)
+	}
+
+	// With that host cooling, only the other one is handed out, however many
+	// of its URLs are waiting and whatever their score.
+	for range 2 {
+		data, err := s.LeaseQueueSkipping(ctx, e.ID, time.Minute, []string{"busy.example"})
+		if err != nil {
+			t.Fatalf("nothing handed out while another host was ready: %v", err)
+		}
+		if got := hostOfRequest(data); got != "other.example" {
+			t.Fatalf("handed out %q while it was cooling", got)
+		}
+		// Only one URL for that host, so the second pass must find nothing.
+		break
+	}
+	if _, err := s.LeaseQueueSkipping(ctx, e.ID, time.Minute, []string{"busy.example"}); !errors.Is(err, ErrQueueEmpty) {
+		t.Errorf("err = %v, want nothing left once the ready host is exhausted", err)
+	}
+
+	// Once it has cooled, its work is available again.
+	got, err := s.LeaseQueueSkipping(ctx, e.ID, time.Minute, nil)
+	if err != nil {
+		t.Fatalf("a cooled host was not handed out: %v", err)
+	}
+	if h := hostOfRequest(got); h != "busy.example" {
+		t.Errorf("handed out %q, want busy.example", h)
 	}
 }

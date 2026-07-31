@@ -304,6 +304,11 @@ type QueueItem struct {
 	// Hash identifies the URL, so the item can be released when the fetch is
 	// recorded without the releaser having to know the queue's row ids.
 	Hash string `gorm:"index"`
+	// Host is who the fetch will be asked of. Politeness is owed to a server
+	// rather than to a crawl, so it has to be visible where work is handed out:
+	// several crawlers each obeying a per-process rate limit still add up to
+	// several times the load on one site.
+	Host string `gorm:"index"`
 	Data []byte `gorm:"not null"`
 	// LeasedUntil is when a handed-out item returns to the queue if nothing has
 	// reported back. Nil means it is waiting rather than in flight.

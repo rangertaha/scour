@@ -4,8 +4,11 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -107,7 +110,10 @@ func (s *Store) PushQueue(ctx context.Context, entityID uint, score float64, has
 		}
 	}
 
-	item := QueueItem{EntityID: entityID, Score: score, Hash: hash, Data: data}
+	item := QueueItem{
+		EntityID: entityID, Score: score, Hash: hash,
+		Host: hostOfRequest(data), Data: data,
+	}
 	if err := s.db.WithContext(ctx).Create(&item).Error; err != nil {
 		return fmt.Errorf("push queue: %w", err)
 	}
@@ -130,6 +136,21 @@ const DefaultLease = 10 * time.Minute
 // every lease expiry and be declined again for as long as the crawl ran.
 const MaxAttempts = 3
 
+// hostOfRequest reads the host a serialised request will be sent to.
+func hostOfRequest(data []byte) string {
+	var req struct {
+		URL string `json:"URL"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		return ""
+	}
+	u, err := url.Parse(req.URL)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
 // LeaseQueue hands out the next request, highest score first and oldest first
 // within a score, and marks it in flight rather than removing it.
 //
@@ -139,6 +160,18 @@ const MaxAttempts = 3
 // again, which is what makes a crawler dying mid-page cost a retry rather than
 // a silently missing page.
 func (s *Store) LeaseQueue(ctx context.Context, entityID uint, lease time.Duration) ([]byte, error) {
+	return s.LeaseQueueSkipping(ctx, entityID, lease, nil)
+}
+
+// LeaseQueueSkipping is LeaseQueue, ignoring items for hosts that have been
+// asked for something too recently.
+//
+// This is where politeness survives being distributed. A rate limit inside a
+// crawler bounds what that process does; with several crawlers the site sees
+// the sum, and no crawler can see the others. The dispatcher can: it is the one
+// component handing out every URL, so pacing here bounds what a site actually
+// receives however many crawlers there are.
+func (s *Store) LeaseQueueSkipping(ctx context.Context, entityID uint, lease time.Duration, cooling []string) ([]byte, error) {
 	if lease <= 0 {
 		lease = DefaultLease
 	}
@@ -148,8 +181,14 @@ func (s *Store) LeaseQueue(ctx context.Context, entityID uint, lease time.Durati
 	var data []byte
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var item QueueItem
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("entity_id = ? AND (leased_until IS NULL OR leased_until < ?)", entityID, now).
+		q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("entity_id = ? AND (leased_until IS NULL OR leased_until < ?)", entityID, now)
+		if len(cooling) > 0 {
+			// An item with no host recorded predates the column and is never
+			// skipped: it would otherwise be stuck for the life of the queue.
+			q = q.Where("host = '' OR host NOT IN ?", cooling)
+		}
+		err := q.
 			Order("score DESC, id ASC").
 			First(&item).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {

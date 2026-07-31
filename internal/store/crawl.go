@@ -342,3 +342,22 @@ func (s *Store) HostTransport(ctx context.Context, host string) (string, error) 
 	}
 	return row.Transport, nil
 }
+
+// HostRates returns the per-host rate overrides that have been recorded.
+//
+// Returned in one query rather than looked up per URL: the dispatcher consults
+// them on every pass, and politeness settings are few and change rarely.
+func (s *Store) HostRates(ctx context.Context) (map[string]time.Duration, error) {
+	var rows []Host
+	err := s.db.WithContext(ctx).
+		Where("rate > 0").
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list host rates: %w", err)
+	}
+	out := make(map[string]time.Duration, len(rows))
+	for _, r := range rows {
+		out[r.Host] = r.Rate
+	}
+	return out, nil
+}
