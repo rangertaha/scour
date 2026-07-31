@@ -721,6 +721,53 @@ turn it on for a given model and a given entity. Named after what it actually
 collects, the classifier removes false negatives at no cost; named `proj7`, it
 should stay off.
 
+## 8.5 What crawling real sites exposed
+
+Five bugs found by running against live feeds and news sites, each one
+measured. They are recorded together because they are not five accidents: four
+of them are the same missing idea wearing different clothes.
+
+| Bug | Effect | Measured |
+| --- | --- | --- |
+| Absent fields voted on where the record is | Container chosen at the document root | 1 to 36 records per feed |
+| Date shape missed RFC-822 and ISO with a time | Locator found the node, pattern rejected every value | 0 to 3,245 values |
+| A whole inline script accepted as a field value | Publisher of 28,610 characters | 28,610 to 34 characters |
+| One observation quoted as a literal pattern | Rule matched one page and no other | Rules generalise |
+| Boilerplate outscores content on support | `data-rh="true"` ties with the headline and wins | Still open |
+
+### The systemic part
+
+**Structure is checked and plausibility is not.** wom decides where a value is
+with real care and then accepts whatever is there. Three of the five bugs are
+that gap: a date that is not a date, a value that is an entire program, a
+pattern transcribed from a single sample. Each was invisible, because a field
+that fails silently is simply absent from the record and nothing reports it.
+The bounds added so far are specific and defensive; the general form is a
+plausibility check between locating a value and accepting it, which does not
+exist as a stage today.
+
+**Repetition is treated as evidence without asking what repeats.** Support
+raises confidence, which is right for a record that occurs many times and wrong
+for chrome that occurs on every element. A framework attribute repeated across
+a page outweighs the headline it sits beside. The same instinct, applied to
+containers, is what made an earlier attempt at the container bug pick a JSON-LD
+array over the right node. Support needs to be weighed against whether the
+repeated thing is content, and nothing currently makes that distinction.
+
+**A schema is a wish list, and was read as an assertion.** Naming a field the
+document does not have used to move the record, weaken its probability, and
+change what was extracted. Two of these are fixed; the general rule, that
+absence of a declared field is absence of data rather than evidence against the
+record, is worth applying wherever a schema is consulted.
+
+### Still open
+
+`headline` is not located on HTML pages while working on feeds. Confirmed not a
+regression, not the alias list, and not `data-*` attribute values, all three
+checked and ruled out. Fifty-eight candidates cleared the floor on one real
+page and the true headline lost among them, which points at grouping and
+support rather than at scoring.
+
 ## 9. Engineering standards
 
 Mirrors what `wom` already does, so the two repos feel like one codebase.
