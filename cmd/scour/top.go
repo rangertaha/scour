@@ -13,7 +13,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/content"
 	"github.com/rangertaha/scour/internal/crawl"
@@ -28,23 +28,22 @@ import (
 // watching a crawl is not itself a load on the database the crawl is writing to.
 const interval = time.Second
 
-func newTopCmd(a *app) *cobra.Command {
-	return &cobra.Command{
-		Use:   "top",
-		Short: "Watch every entity live, and pause or resume a crawl",
-		Long: "One screen per fleet: what each entity has, how far its crawl has got, how\n" +
+func newTopCmd(a *app) *cli.Command {
+	return &cli.Command{
+		Name:  "top",
+		Usage: "Watch every entity live, and pause or resume a crawl",
+		Description: "One screen per fleet: what each entity has, how far its crawl has got, how\n" +
 			"fast it is going now, and whether it is running.\n\n" +
 			"Pausing keeps everything. The frontier holds its order and its leases, so a\n" +
 			"resumed crawl carries on rather than starting again, and a crawl paused here\n" +
 			"stays paused after this exits.",
-		Example: "  scour top",
-		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		UsageText: "  scour top",
+		Action: func(c context.Context, cmd *cli.Command) error {
 			s, err := a.Store()
 			if err != nil {
 				return err
 			}
-			return runTop(ctx(cmd), a, s)
+			return runTop(c, a, s)
 		},
 	}
 }

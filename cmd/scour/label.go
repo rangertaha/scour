@@ -3,29 +3,30 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/store"
 )
 
-func newValidCmd(a *app) *cobra.Command {
+func newValidCmd(a *app) *cli.Command {
 	return labelCmd(a, "valid", store.Valid,
 		"Label records as correct",
 		"Correct records are evidence of where the data really lives, and are fed\n"+
 			"back into the next training run.")
 }
 
-func newInvalidCmd(a *app) *cobra.Command {
+func newInvalidCmd(a *app) *cli.Command {
 	return labelCmd(a, "invalid", store.Invalid,
 		"Label records as wrong",
 		"Wrong records are excluded from training, so the next model stops making the\n"+
 			"same mistake.")
 }
 
-func newUnlabelCmd(a *app) *cobra.Command {
+func newUnlabelCmd(a *app) *cli.Command {
 	return labelCmd(a, "unlabel", store.Unlabelled,
 		"Remove a label from records",
 		"Puts records back to unlabelled, for when a verdict was given in error.")
@@ -33,19 +34,22 @@ func newUnlabelCmd(a *app) *cobra.Command {
 
 // labelCmd builds one of the three labelling commands, which differ only in
 // the verdict they apply.
-func labelCmd(a *app, use string, label store.Label, short, long string) *cobra.Command {
-	return &cobra.Command{
-		Use:     use + " <name> <id>...",
-		Short:   short,
-		Long:    long,
-		Example: "  scour " + use + " vehicle 1042 1043",
-		Args:    cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
+func labelCmd(a *app, use string, label store.Label, short, long string) *cli.Command {
+	return &cli.Command{
+		Name:        use,
+		ArgsUsage:   "<name> <id>...",
+		Usage:       short,
+		Description: long,
+		UsageText:   "  scour " + use + " vehicle 1042 1043",
+		Action: func(c context.Context, cmd *cli.Command) error {
+			args, err := atLeast(cmd, 2, "an entity name and at least one record id")
+			if err != nil {
+				return err
+			}
 			s, err := a.Store()
 			if err != nil {
 				return err
 			}
-			c := ctx(cmd)
 
 			entity, err := s.Entity(c, args[0])
 			if err != nil {
@@ -69,14 +73,14 @@ func labelCmd(a *app, use string, label store.Label, short, long string) *cobra.
 				return fmt.Errorf("no records matched: %w", store.ErrNotFound)
 			}
 			if int(n) < len(ids) {
-				cmd.Printf("%s: labelled %d of %d, the rest are not %s's records\n",
+				a.Printf("%s: labelled %d of %d, the rest are not %s's records\n",
 					entity.Name, n, len(ids), entity.Name)
 				return nil
 			}
 
-			cmd.Printf("%s: %d records marked %s\n", entity.Name, n, label)
+			a.Printf("%s: %d records marked %s\n", entity.Name, n, label)
 			if label != store.Unlabelled {
-				cmd.Printf("run `scour train %s` to fold that back into the model\n", entity.Name)
+				a.Printf("run `scour train %s` to fold that back into the model\n", entity.Name)
 			}
 			return nil
 		},

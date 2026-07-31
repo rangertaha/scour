@@ -3,12 +3,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/store"
 )
@@ -20,37 +21,62 @@ type searchFlags struct {
 	label       string
 }
 
-func newSearchCmd(a *app) *cobra.Command {
+func newSearchCmd(a *app) *cli.Command {
 	var f searchFlags
 
-	cmd := &cobra.Command{
-		Use:   "search <name>",
-		Short: "Search the records extracted for an entity",
-		Long: "One row per match, one column per property you defined. FORMAT is the content\n" +
+	cmd := &cli.Command{
+		Name:      "search",
+		ArgsUsage: "<name>",
+		Usage:     "Search the records extracted for an entity",
+		Description: "One row per match, one column per property you defined. FORMAT is the content\n" +
 			"type the record came from, which is how you tell whether one source is\n" +
 			"dragging the results down.",
-		Example: "  scour search vehicle --confidence 0.5\n" +
+		UsageText: "  scour search vehicle --confidence 0.5\n" +
 			"  scour search vehicle --type pdf\n" +
 			"  scour search vehicle --exclude-type pdf --limit 50",
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSearch(cmd, a, args[0], f)
+		Flags: []cli.Flag{
+			&cli.FloatFlag{
+				Name:        "confidence",
+				Usage:       "only records at or above this confidence, 0 to 1",
+				Destination: &f.confidence,
+			},
+			&cli.StringSliceFlag{
+				Name:        "type",
+				Usage:       "only records extracted from a content type (repeatable)",
+				Destination: &f.types,
+			},
+			&cli.StringSliceFlag{
+				Name:        "exclude-type",
+				Usage:       "skip records from a content type (repeatable)",
+				Destination: &f.excludeType,
+			},
+			&cli.StringFlag{
+				Name:        "label",
+				Usage:       "only records with this label: valid, invalid, unlabelled",
+				Destination: &f.label,
+			},
+			&cli.StringSliceFlag{
+				Name:        "format",
+				Usage:       "alias for --type",
+				Destination: &f.types,
+			},
+		},
+		Action: func(c context.Context, cmd *cli.Command) error {
+			args, err := need(cmd, 1, "one entity name")
+			if err != nil {
+				return err
+			}
+			return runSearch(c, a, args[0], f)
 		},
 	}
 
-	fl := cmd.Flags()
-	fl.Float64Var(&f.confidence, "confidence", 0, "only records at or above this confidence, 0 to 1")
-	fl.StringArrayVar(&f.types, "type", nil, "only records extracted from a content type (repeatable)")
-	fl.StringArrayVar(&f.excludeType, "exclude-type", nil, "skip records from a content type (repeatable)")
-	fl.StringVar(&f.label, "label", "", "only records with this label: valid, invalid, unlabelled")
 	// The FORMAT column is a content type, while a property named "type" is
 	// the user's own; --format says which one is meant.
-	fl.StringArrayVar(&f.types, "format", nil, "alias for --type")
 
 	return cmd
 }
 
-func runSearch(cmd *cobra.Command, a *app, name string, f searchFlags) error {
+func runSearch(c context.Context, a *app, name string, f searchFlags) error {
 	if f.confidence < 0 || f.confidence > 1 {
 		return fmt.Errorf("--confidence must be between 0 and 1, got %v", f.confidence)
 	}
@@ -63,7 +89,6 @@ func runSearch(cmd *cobra.Command, a *app, name string, f searchFlags) error {
 	if err != nil {
 		return err
 	}
-	c := ctx(cmd)
 
 	entity, err := s.EntityFull(c, name)
 	if err != nil {
@@ -82,7 +107,7 @@ func runSearch(cmd *cobra.Command, a *app, name string, f searchFlags) error {
 	}
 
 	if a.jsonOut {
-		return writeJSON(cmd.OutOrStdout(), rows)
+		return writeJSON(a.Out(), rows)
 	}
 	if len(rows) == 0 {
 		filtered := f.confidence > 0 || len(f.types) > 0 || len(f.excludeType) > 0 || label != ""
@@ -94,10 +119,10 @@ func runSearch(cmd *cobra.Command, a *app, name string, f searchFlags) error {
 			if err != nil {
 				return err
 			}
-			cmd.Printf("no records matched, out of %d\n", all)
+			a.Printf("no records matched, out of %d\n", all)
 			return nil
 		}
-		cmd.Printf("no records yet: scour train %s\n", entity.Name)
+		a.Printf("no records yet: scour train %s\n", entity.Name)
 		return nil
 	}
 
@@ -120,11 +145,11 @@ func runSearch(cmd *cobra.Command, a *app, name string, f searchFlags) error {
 		}
 		t.add(cells...)
 	}
-	if err := t.render(cmd.OutOrStdout()); err != nil {
+	if err := t.render(a.Out()); err != nil {
 		return err
 	}
 
-	cmd.Printf("\nshowing %d of %d records\n", len(rows), total)
+	a.Printf("\nshowing %d of %d records\n", len(rows), total)
 	return nil
 }
 

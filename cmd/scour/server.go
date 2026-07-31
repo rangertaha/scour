@@ -14,36 +14,41 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/server"
 )
 
-func newServerCmd(a *app) *cobra.Command {
+func newServerCmd(a *app) *cli.Command {
 	var listen string
 
-	cmd := &cobra.Command{
-		Use:   "server",
-		Short: "Run as a service, serving the HTTP API and MCP",
-		Long: "Serves the same scour the command line drives: one database, one set of\n" +
+	cmd := &cli.Command{
+		Name:  "server",
+		Usage: "Run as a service, serving the HTTP API and MCP",
+		Description: "Serves the same scour the command line drives: one database, one set of\n" +
 			"models, one cache. Reads answer immediately; crawling and training return a\n" +
 			"job id to poll, because they run for minutes.\n\n" +
 			"The default listen address is loopback and auth is off. To reach it from\n" +
 			"another machine, bind an external address and set token_file, or leave it on\n" +
 			"loopback behind a reverse proxy.",
-		Example: "  scour server\n" +
+		UsageText: "  scour server\n" +
 			"  scour server --listen 0.0.0.0:8080",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runServer(cmd, a, listen)
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "listen",
+				Usage:       "address to listen on (overrides config)",
+				Destination: &listen,
+			},
+		},
+		Action: func(c context.Context, cmd *cli.Command) error {
+			return runServer(c, a, listen)
 		},
 	}
 
-	cmd.Flags().StringVar(&listen, "listen", "", "address to listen on (overrides config)")
 	return cmd
 }
 
-func runServer(cmd *cobra.Command, a *app, listen string) error {
+func runServer(c context.Context, a *app, listen string) error {
 	s, err := a.Store()
 	if err != nil {
 		return err
@@ -69,20 +74,20 @@ func runServer(cmd *cobra.Command, a *app, listen string) error {
 	// Signals are handled here rather than left to the default, because the
 	// default kills the process mid-crawl and loses whatever that crawl had
 	// not yet written.
-	ctx, stop := signal.NotifyContext(ctx(cmd), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(c, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	errs := make(chan error, 1)
 	go func() {
-		cmd.Printf("scour listening on %s\n", cfg.Server.Listen)
+		a.Printf("scour listening on %s\n", cfg.Server.Listen)
 		if cfg.Server.MCP {
-			cmd.Printf("mcp at http://%s/mcp\n", cfg.Server.Listen)
+			a.Printf("mcp at http://%s/mcp\n", cfg.Server.Listen)
 		}
 		if cfg.Server.Metrics != "" {
-			cmd.Printf("metrics at http://%s%s\n", cfg.Server.Listen, cfg.Server.Metrics)
+			a.Printf("metrics at http://%s%s\n", cfg.Server.Listen, cfg.Server.Metrics)
 		}
 		if cfg.Server.TokenFile == "" {
-			cmd.Println("auth is off: set token_file to require a bearer token")
+			a.Println("auth is off: set token_file to require a bearer token")
 		}
 
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -94,7 +99,7 @@ func runServer(cmd *cobra.Command, a *app, listen string) error {
 	case err := <-errs:
 		return err
 	case <-ctx.Done():
-		cmd.Println("\nshutting down")
+		a.Println("\nshutting down")
 	}
 
 	// Stop accepting first, then let running jobs finish. A crawl abandoned
@@ -115,7 +120,7 @@ func runServer(cmd *cobra.Command, a *app, listen string) error {
 	select {
 	case <-done:
 	case <-shutdown.Done():
-		cmd.Println("jobs still running after the grace period, exiting anyway")
+		a.Println("jobs still running after the grace period, exiting anyway")
 	}
 	return nil
 }
@@ -138,17 +143,16 @@ func closed(err error) bool {
 		strings.Contains(err.Error(), "server is closing")
 }
 
-func newMCPCmd(a *app) *cobra.Command {
-	return &cobra.Command{
-		Use:   "mcp",
-		Short: "Run as an MCP server over stdio",
-		Long: "Speaks the Model Context Protocol on stdin and stdout, which is what a local\n" +
+func newMCPCmd(a *app) *cli.Command {
+	return &cli.Command{
+		Name:  "mcp",
+		Usage: "Run as an MCP server over stdio",
+		Description: "Speaks the Model Context Protocol on stdin and stdout, which is what a local\n" +
 			"agent launches directly. A running `scour server` also serves MCP over HTTP\n" +
 			"at /mcp for agents that attach instead of spawning.\n\n" +
 			"Both views share one database, so an entity defined over MCP is the entity\n" +
 			"the CLI sees.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Action: func(c context.Context, cmd *cli.Command) error {
 			s, err := a.Store()
 			if err != nil {
 				return err
@@ -166,7 +170,7 @@ func newMCPCmd(a *app) *cobra.Command {
 
 			// Nothing may be written to stdout but protocol: a stray line makes
 			// the transport unparseable to the agent on the other end.
-			ctx, stop := signal.NotifyContext(ctx(cmd), syscall.SIGINT, syscall.SIGTERM)
+			ctx, stop := signal.NotifyContext(c, syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
 			// An agent that closes stdin has ended the session, which is the

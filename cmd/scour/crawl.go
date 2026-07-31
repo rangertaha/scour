@@ -3,13 +3,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/content"
 	"github.com/rangertaha/scour/internal/crawl"
@@ -34,45 +35,85 @@ type crawlFlags struct {
 	browser     string
 }
 
-func newCrawlCmd(a *app) *cobra.Command {
+func newCrawlCmd(a *app) *cli.Command {
 	var f crawlFlags
 
-	cmd := &cobra.Command{
-		Use:   "crawl <name>",
-		Short: "Crawl an entity's targets, ranking discovered URLs by probability",
-		Long: "Follows links out from the entity's targets up to a depth, caching every page\n" +
+	cmd := &cli.Command{
+		Name:      "crawl",
+		ArgsUsage: "<name>",
+		Usage:     "Crawl an entity's targets, ranking discovered URLs by probability",
+		Description: "Follows links out from the entity's targets up to a depth, caching every page\n" +
 			"it keeps. Until a model has been trained, every URL scores the same, so the\n" +
 			"first crawl is broad by design.",
-		Example: "  scour crawl vehicle --depth 3\n" +
+		UsageText: "  scour crawl vehicle --depth 3\n" +
 			"  scour crawl vehicle --depth 3 --type html --type pdf\n" +
 			"  scour crawl vehicle --max-pages 200",
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCrawl(cmd, a, args[0], f)
+		Flags: []cli.Flag{
+			&cli.IntFlag{
+				Name:        "depth",
+				Usage:       "how many links deep to follow (0 for the configured default)",
+				Destination: &f.depth,
+			},
+			&cli.IntFlag{
+				Name:        "max-pages",
+				Usage:       "stop after this many pages (0 for no limit)",
+				Destination: &f.limit,
+			},
+			&cli.DurationFlag{
+				Name:        "max-time",
+				Usage:       "stop after this long, keeping what was fetched (0 for no limit)",
+				Destination: &f.maxTime,
+			},
+			&cli.StringSliceFlag{
+				Name:        "type",
+				Usage:       "limit this crawl to a content type (repeatable)",
+				Destination: &f.types,
+			},
+			&cli.StringSliceFlag{
+				Name:        "exclude-type",
+				Usage:       "skip a content type in this crawl (repeatable)",
+				Destination: &f.excludeType,
+			},
+			&cli.BoolFlag{
+				Name:        "reset",
+				Usage:       "discard the existing frontier and start over",
+				Destination: &f.reset,
+			},
+			&cli.BoolFlag{
+				Name:        "debug",
+				Usage:       "log colly's own request trace",
+				Destination: &f.debug,
+			},
+			&cli.BoolFlag{
+				Name:        "bus",
+				Usage:       "route results through the message bus instead of writing them directly",
+				Destination: &f.bus,
+			},
+			&cli.StringFlag{
+				Name:        "browser",
+				Usage:       "when to render in a browser: never, auto or always (default from config)",
+				Destination: &f.browser,
+			},
+		},
+		Action: func(c context.Context, cmd *cli.Command) error {
+			args, err := need(cmd, 1, "one entity name")
+			if err != nil {
+				return err
+			}
+			return runCrawl(c, a, args[0], f)
 		},
 	}
 
-	fl := cmd.Flags()
 	// No short form: -d already means domain on add and import.
-	fl.IntVar(&f.depth, "depth", 0, "how many links deep to follow (0 for the configured default)")
-	fl.IntVar(&f.limit, "max-pages", 0, "stop after this many pages (0 for no limit)")
-	fl.DurationVar(&f.maxTime, "max-time", 0, "stop after this long, keeping what was fetched (0 for no limit)")
-	fl.StringArrayVar(&f.types, "type", nil, "limit this crawl to a content type (repeatable)")
-	fl.StringArrayVar(&f.excludeType, "exclude-type", nil, "skip a content type in this crawl (repeatable)")
-	fl.BoolVar(&f.reset, "reset", false, "discard the existing frontier and start over")
-	fl.BoolVar(&f.debug, "debug", false, "log colly's own request trace")
-	fl.BoolVar(&f.bus, "bus", false, "route results through the message bus instead of writing them directly")
-	fl.StringVar(&f.browser, "browser", "", "when to render in a browser: never, auto or always (default from config)")
 
 	return cmd
 }
 
-func runCrawl(cmd *cobra.Command, a *app, name string, f crawlFlags) error {
+func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 	s, err := a.Store()
 	if err != nil {
 		return err
 	}
-	c := ctx(cmd)
 
 	entity, err := s.EntityFull(c, name)
 	if err != nil {
@@ -144,7 +185,7 @@ func runCrawl(cmd *cobra.Command, a *app, name string, f crawlFlags) error {
 		// results back, and this catches the paths that return early.
 		defer func() {
 			if err := settle(); err != nil {
-				cmd.PrintErrf("bus did not settle: %v\n", err)
+				a.Errorf("bus did not settle: %v\n", err)
 			}
 		}()
 	}
@@ -164,7 +205,7 @@ func runCrawl(cmd *cobra.Command, a *app, name string, f crawlFlags) error {
 		if chained {
 			scoring += " with crawl chain"
 		}
-		cmd.Printf("crawling %s: %d targets, depth %d, types %s, scoring %s\n",
+		a.Printf("crawling %s: %d targets, depth %d, types %s, scoring %s\n",
 			entity.Name, len(entity.Targets), depth, strings.Join(types.Names(), " "), scoring)
 	}
 
@@ -199,11 +240,11 @@ func runCrawl(cmd *cobra.Command, a *app, name string, f crawlFlags) error {
 	}
 
 	if a.jsonOut {
-		return writeJSON(cmd.OutOrStdout(), rows)
+		return writeJSON(a.Out(), rows)
 	}
 
-	cmd.Println()
-	if err := renderFrontier(cmd, rows, result, a.cfg.Crawl.Rate.String(), a.limit); err != nil {
+	a.Println()
+	if err := renderFrontier(a, rows, result, a.cfg.Crawl.Rate.String(), a.limit); err != nil {
 		return err
 	}
 	stopped := ""
@@ -217,14 +258,14 @@ func runCrawl(cmd *cobra.Command, a *app, name string, f crawlFlags) error {
 			stopped = fmt.Sprintf(", stopped on the %s budget", result.BudgetSpent)
 		}
 	}
-	cmd.Printf("\n%d fetched, %d skipped, %d failed, %s in %s%s\n",
+	a.Printf("\n%d fetched, %d skipped, %d failed, %s in %s%s\n",
 		result.Fetched, result.Skipped, result.Failed,
 		formatBytes(result.Bytes), result.Elapsed.Round(time.Millisecond), stopped)
 
 	// Pages on their own are not the point, and the next step is not guessable
 	// from the ones already run.
 	if result.Fetched > 0 && !a.jsonOut {
-		cmd.Printf("\nnext: scour train %s\n", entity.Name)
+		a.Printf("\nnext: scour train %s\n", entity.Name)
 	}
 	return nil
 }
@@ -243,10 +284,10 @@ type subtree struct {
 // renderFrontier prints the crawl table. Rows are URL prefixes rather than
 // single pages, because what a crawl is really reporting is which parts of a
 // site paid off.
-func renderFrontier(cmd *cobra.Command, rows []store.URL, result *crawl.Result, rate string, limit int) error {
+func renderFrontier(a *app, rows []store.URL, result *crawl.Result, rate string, limit int) error {
 	trees := rollup(rows)
 	if len(trees) == 0 {
-		cmd.Println("nothing fetched")
+		a.Println("nothing fetched")
 		return nil
 	}
 	sort.Slice(trees, func(i, j int) bool {
@@ -292,7 +333,7 @@ func renderFrontier(cmd *cobra.Command, rows []store.URL, result *crawl.Result, 
 			truncate(s.prefix, 60),
 		)
 	}
-	return t.render(cmd.OutOrStdout())
+	return t.render(a.Out())
 }
 
 // rollup aggregates fetched URLs into their directory prefixes, so a page

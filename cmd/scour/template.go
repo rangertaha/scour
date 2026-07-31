@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/defaults"
 	"github.com/rangertaha/scour/internal/store"
@@ -68,16 +68,15 @@ func applyTemplate(ctx context.Context, s *store.Store, entityID uint, name stri
 }
 
 // newTemplatesCmd lists what ships in the binary.
-func newTemplatesCmd(_ *app) *cobra.Command {
-	return &cobra.Command{
-		Use:   "templates",
-		Short: "List the built-in schemas scour ships with",
-		Long: "Templates are starting points, not answers. Each carries the properties,\n" +
+func newTemplatesCmd(a *app) *cli.Command {
+	return &cli.Command{
+		Name:  "templates",
+		Usage: "List the built-in schemas scour ships with",
+		Description: "Templates are starting points, not answers. Each carries the properties,\n" +
 			"aliases, descriptions and example values a kind of record usually has,\n" +
 			"which is what bootstraps labelling before anything has been crawled.",
-		Example: "  scour templates\n  scour add cars --template vehicle",
-		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		UsageText: "  scour templates\n  scour add cars --template vehicle",
+		Action: func(c context.Context, cmd *cli.Command) error {
 			names, err := defaults.Names()
 			if err != nil {
 				return err
@@ -100,7 +99,7 @@ func newTemplatesCmd(_ *app) *cobra.Command {
 				}
 				t.add(name, fmt.Sprintf("%d", len(props)), truncate(strings.Join(shown, ", "), 60))
 			}
-			return t.render(cmd.OutOrStdout())
+			return t.render(a.Out())
 		},
 	}
 }

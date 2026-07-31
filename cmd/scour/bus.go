@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/bus"
 	"github.com/rangertaha/scour/internal/content"
@@ -70,39 +70,45 @@ func (a *app) busCrawler(ctx context.Context, crawler *crawl.Crawler, entity str
 		WithMeter(service.NewBusMeter(b, entity)), settle, nil
 }
 
-func newRunCmd(a *app) *cobra.Command {
+func newRunCmd(a *app) *cli.Command {
 	var roles, busURL string
 
-	cmd := &cobra.Command{
-		Use:   "run",
-		Short: "Run scour's components as a long-lived process",
-		Long: "Starts the components named by --role and serves them until interrupted.\n" +
+	cmd := &cli.Command{
+		Name:  "run",
+		Usage: "Run scour's components as a long-lived process",
+		Description: "Starts the components named by --role and serves them until interrupted.\n" +
 			"With no --role it starts all of them, which is a single-process scour with\n" +
 			"an embedded broker. Point --bus-url at a NATS cluster and the same roles can\n" +
 			"be spread across machines.",
-		Example: "  scour run\n" +
+		UsageText: "  scour run\n" +
 			"  scour run --role store\n" +
 			"  scour run --role store --bus-url nats://broker:4222",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runServices(cmd, a, roles)
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "role",
+				Usage:       "components to run: store, crawl, or all (default all)",
+				Destination: &roles,
+			},
+			&cli.StringFlag{
+				Name:        "bus-url",
+				Usage:       "NATS server to use instead of the embedded one (default from [bus] url in the config)",
+				Destination: &busURL,
+			},
+		},
+		Action: func(c context.Context, cmd *cli.Command) error {
+			// The flag was advertised in the help and the examples before it
+			// existed, so the documented command failed with "unknown flag".
+			if busURL != "" {
+				a.cfg.Bus.URL = busURL
+			}
+			return runServices(c, a, roles)
 		},
 	}
 
-	cmd.Flags().StringVar(&roles, "role", "", "components to run: store, crawl, or all (default all)")
-	cmd.Flags().StringVar(&busURL, "bus-url", "",
-		"NATS server to use instead of the embedded one (default from [bus] url in the config)")
-	// The flag was advertised in the help and the examples before it existed,
-	// so the documented command failed with "unknown flag".
-	cmd.PreRun = func(*cobra.Command, []string) {
-		if busURL != "" {
-			a.cfg.Bus.URL = busURL
-		}
-	}
 	return cmd
 }
 
-func runServices(cmd *cobra.Command, a *app, spec string) error {
+func runServices(c context.Context, a *app, spec string) error {
 	wanted, err := service.ParseRoles(spec)
 	if err != nil {
 		return err
@@ -113,7 +119,6 @@ func runServices(cmd *cobra.Command, a *app, spec string) error {
 		return err
 	}
 
-	c := ctx(cmd)
 	b, err := bus.Open(c, bus.Options{
 		URL:      a.cfg.Bus.URL,
 		StoreDir: a.cfg.Bus.StoreDir,
@@ -153,12 +158,12 @@ func runServices(cmd *cobra.Command, a *app, spec string) error {
 		return fmt.Errorf("none of the requested roles can run yet")
 	}
 
-	cmd.Printf("scour running: %v\n", wanted)
-	cmd.Println("press ctrl-c to stop")
+	a.Printf("scour running: %v\n", wanted)
+	a.Println("press ctrl-c to stop")
 
 	if err := service.New(services...).Run(c); err != nil {
 		return err
 	}
-	cmd.Println("stopped")
+	a.Println("stopped")
 	return nil
 }

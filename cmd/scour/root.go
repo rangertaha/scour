@@ -5,10 +5,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/config"
@@ -20,18 +22,54 @@ import (
 // already been reported.
 var errSilent = errors.New("silent")
 
-// app carries what every command needs: the resolved configuration and a lazily
-// opened store. Commands that only print help never touch the database.
+// app carries what every command needs: the resolved configuration, a lazily
+// opened store, and where to write. Commands that only print help never touch
+// the database.
+//
+// Output goes through the app rather than through the command, so the commands
+// say nothing about which library parses the arguments.
 type app struct {
 	cfg   config.Config
 	store *store.Store
 	pages cache.Store
+
+	out io.Writer
+	err io.Writer
 
 	configPath string
 	verbose    bool
 	jsonOut    bool
 	limit      int
 }
+
+// Printf writes to the command's output.
+func (a *app) Printf(format string, args ...any) { fmt.Fprintf(a.writer(), format, args...) }
+
+// Println writes a line to the command's output.
+func (a *app) Println(args ...any) { fmt.Fprintln(a.writer(), args...) }
+
+// Print writes to the command's output.
+func (a *app) Print(args ...any) { fmt.Fprint(a.writer(), args...) }
+
+// Errorf writes to the command's error output.
+func (a *app) Errorf(format string, args ...any) { fmt.Fprintf(a.errWriter(), format, args...) }
+
+func (a *app) writer() io.Writer {
+	if a.out != nil {
+		return a.out
+	}
+	return os.Stdout
+}
+
+func (a *app) errWriter() io.Writer {
+	if a.err != nil {
+		return a.err
+	}
+	return os.Stderr
+}
+
+// Out is the writer commands hand to anything that renders into it.
+func (a *app) Out() io.Writer { return a.writer() }
 
 // Store opens the database on first use and reuses it afterwards.
 func (a *app) Store() (*store.Store, error) {
@@ -54,100 +92,6 @@ func (a *app) Close() error {
 	err := a.store.Close()
 	a.store = nil
 	return err
-}
-
-func newRootCmd() *cobra.Command {
-	a := &app{}
-
-	cmd := &cobra.Command{
-		Use:   "scour",
-		Short: "A focused web crawler that ranks links by how likely they are to hold what you want",
-		Long: "scour crawls outward from your seed targets, assigning every discovered URL a\n" +
-			"probability that it holds a match, so the crawl budget is spent on the pages\n" +
-			"most likely to pay off.",
-		Version:       version.Version(),
-		SilenceUsage:  true,
-		SilenceErrors: true,
-		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			setupLogging(a.verbose)
-
-			cfg, err := config.Load(a.configPath)
-			if err != nil {
-				return err
-			}
-			a.cfg = cfg
-
-			// Help and version need no directories on disk.
-			if cmd.Name() == "help" || cmd.Name() == "version" {
-				return nil
-			}
-			return cfg.MkdirAll()
-		},
-		PersistentPostRunE: func(_ *cobra.Command, _ []string) error {
-			return a.Close()
-		},
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
-		},
-	}
-
-	f := cmd.PersistentFlags()
-	f.StringVar(&a.configPath, "config", "", "configuration file (default: /etc/scour/config.toml, else the user config)")
-	f.BoolVarP(&a.verbose, "verbose", "v", false, "log at debug level")
-	f.BoolVar(&a.jsonOut, "json", false, "print machine-readable output")
-	f.IntVar(&a.limit, "limit", 0, "cap the number of rows printed (0 for no cap)")
-
-	cmd.AddCommand(
-		newAddCmd(a),
-		newCrawlCmd(a),
-		newExportCmd(a),
-		newImportCmd(a),
-		newInvalidCmd(a),
-		newListCmd(a),
-		newTopCmd(a),
-		newStartCmd(a),
-		newStopCmd(a),
-		newMCPCmd(a),
-		newRemoveCmd(a),
-		newRunCmd(a),
-		newRulesCmd(a),
-		newSearchCmd(a),
-		newServerCmd(a),
-		newTemplatesCmd(a),
-		newTrainCmd(a),
-		newUnlabelCmd(a),
-		newValidCmd(a),
-		newVersionCmd(),
-	)
-	return cmd
-}
-
-func setupLogging(verbose bool) {
-	level := slog.LevelInfo
-	if verbose {
-		level = slog.LevelDebug
-	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
-}
-
-func newVersionCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "version",
-		Short: "Print the version",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			cmd.Println(version.Version())
-			return nil
-		},
-	}
-}
-
-// ctx returns the command's context, which carries cancellation from SIGINT.
-func ctx(cmd *cobra.Command) context.Context {
-	if c := cmd.Context(); c != nil {
-		return c
-	}
-	return context.Background()
 }
 
 // Pages returns the store fetched bodies are kept in, built from the
@@ -173,4 +117,137 @@ func (a *app) Pages() (cache.Store, error) {
 	}
 	a.pages = p
 	return p, nil
+}
+
+func newRootCmd() *cli.Command {
+	a := &app{}
+
+	root := &cli.Command{
+		Name:  "scour",
+		Usage: "A focused web crawler that ranks links by how likely they are to hold what you want",
+		Description: "scour crawls outward from your seed targets, assigning every discovered URL a\n" +
+			"probability that it holds a match, so the crawl budget is spent on the pages\n" +
+			"most likely to pay off.",
+		Version: version.Version(),
+		// A mistyped command should suggest the one that was meant rather than
+		// only saying it does not exist.
+		Suggest:               true,
+		EnableShellCompletion: true,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "config",
+				Usage:       "configuration `file` (default: /etc/scour/config.toml, else the user config)",
+				Destination: &a.configPath,
+			},
+			&cli.BoolFlag{
+				Name:        "verbose",
+				Aliases:     []string{"v"},
+				Usage:       "log at debug level",
+				Destination: &a.verbose,
+			},
+			&cli.BoolFlag{
+				Name:        "json",
+				Usage:       "print machine-readable output",
+				Destination: &a.jsonOut,
+			},
+			&cli.IntFlag{
+				Name:        "limit",
+				Usage:       "cap the number of rows printed (0 for no cap)",
+				Destination: &a.limit,
+			},
+		},
+		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			a.out, a.err = cmd.Root().Writer, cmd.Root().ErrWriter
+			setupLogging(a.verbose)
+
+			cfg, err := config.Load(a.configPath)
+			if err != nil {
+				return ctx, err
+			}
+			a.cfg = cfg
+
+			// Help and version need no directories on disk.
+			switch cmd.Args().First() {
+			case "help", "version", "":
+				return ctx, nil
+			}
+			return ctx, cfg.MkdirAll()
+		},
+		After: func(_ context.Context, _ *cli.Command) error {
+			return a.Close()
+		},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			return cli.ShowAppHelp(cmd)
+		},
+		Commands: []*cli.Command{
+			newAddCmd(a),
+			newCrawlCmd(a),
+			newExportCmd(a),
+			newImportCmd(a),
+			newInvalidCmd(a),
+			newListCmd(a),
+			newTopCmd(a),
+			newStartCmd(a),
+			newStopCmd(a),
+			newMCPCmd(a),
+			newRemoveCmd(a),
+			newRunCmd(a),
+			newRulesCmd(a),
+			newSearchCmd(a),
+			newServerCmd(a),
+			newTemplatesCmd(a),
+			newTrainCmd(a),
+			newUnlabelCmd(a),
+			newValidCmd(a),
+			newVersionCmd(a),
+		},
+	}
+	return root
+}
+
+func setupLogging(verbose bool) {
+	level := slog.LevelInfo
+	if verbose {
+		level = slog.LevelDebug
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+}
+
+func newVersionCmd(a *app) *cli.Command {
+	return &cli.Command{
+		Name:  "version",
+		Usage: "Print the version",
+		Action: func(_ context.Context, _ *cli.Command) error {
+			a.Println(version.Version())
+			return nil
+		},
+	}
+}
+
+// need checks the positional arguments, so every command reports a miscount the
+// same way and names what it wanted.
+func need(cmd *cli.Command, n int, what string) ([]string, error) {
+	got := cmd.Args().Slice()
+	if len(got) != n {
+		return nil, fmt.Errorf("%s takes %s, got %d", cmd.Name, what, len(got))
+	}
+	return got, nil
+}
+
+// atLeast checks for a minimum number of positional arguments.
+func atLeast(cmd *cli.Command, n int, what string) ([]string, error) {
+	got := cmd.Args().Slice()
+	if len(got) < n {
+		return nil, fmt.Errorf("%s takes %s, got %d", cmd.Name, what, len(got))
+	}
+	return got, nil
+}
+
+// atMost checks for a maximum number of positional arguments.
+func atMost(cmd *cli.Command, n int, what string) ([]string, error) {
+	got := cmd.Args().Slice()
+	if len(got) > n {
+		return nil, fmt.Errorf("%s takes %s, got %d", cmd.Name, what, len(got))
+	}
+	return got, nil
 }

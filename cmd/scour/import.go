@@ -12,7 +12,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/store"
 )
@@ -26,31 +26,59 @@ type importFlags struct {
 	depth      int
 }
 
-func newImportCmd(a *app) *cobra.Command {
+func newImportCmd(a *app) *cli.Command {
 	var f importFlags
 
-	cmd := &cobra.Command{
-		Use:   "import <name>",
-		Short: "Load targets, properties and aliases into an entity from files",
-		Long: "The same additions `scour add` makes one at a time, from a file. Every form\n" +
+	cmd := &cli.Command{
+		Name:      "import",
+		ArgsUsage: "<name>",
+		Usage:     "Load targets, properties and aliases into an entity from files",
+		Description: "The same additions `scour add` makes one at a time, from a file. Every form\n" +
 			"is idempotent, so re-importing a file that has grown only adds what is new.\n\n" +
 			"Blank lines and lines starting with # are ignored, so a list can carry notes.",
-		Example: "  scour import vehicle --urls urls.txt\n" +
+		UsageText: "  scour import vehicle --urls urls.txt\n" +
 			"  scour import vehicle --domains domains.txt --subdomains\n" +
 			"  scour import vehicle --props props.csv",
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runImport(cmd, a, args[0], f)
+		Flags: []cli.Flag{
+			&cli.StringSliceFlag{
+				Name:        "urls",
+				Usage:       "file of URLs, one per line (repeatable)",
+				Destination: &f.urls,
+			},
+			&cli.StringSliceFlag{
+				Name:        "domains",
+				Usage:       "file of domains, one per line (repeatable)",
+				Destination: &f.domains,
+			},
+			&cli.StringSliceFlag{
+				Name:        "props",
+				Usage:       "CSV of properties (repeatable)",
+				Destination: &f.props,
+			},
+			&cli.StringSliceFlag{
+				Name:        "aliases",
+				Usage:       "file of aliases, one per line (repeatable)",
+				Destination: &f.aliases,
+			},
+			&cli.BoolFlag{
+				Name:        "subdomains",
+				Usage:       "follow subdomains of the imported domains",
+				Destination: &f.subdomains,
+			},
+			&cli.IntFlag{
+				Name:        "depth",
+				Usage:       "depth limit for the imported targets (0 for the configured default)",
+				Destination: &f.depth,
+			},
+		},
+		Action: func(c context.Context, cmd *cli.Command) error {
+			args, err := need(cmd, 1, "one entity name")
+			if err != nil {
+				return err
+			}
+			return runImport(c, a, args[0], f)
 		},
 	}
-
-	fl := cmd.Flags()
-	fl.StringArrayVar(&f.urls, "urls", nil, "file of URLs, one per line (repeatable)")
-	fl.StringArrayVar(&f.domains, "domains", nil, "file of domains, one per line (repeatable)")
-	fl.StringArrayVar(&f.props, "props", nil, "CSV of properties (repeatable)")
-	fl.StringArrayVar(&f.aliases, "aliases", nil, "file of aliases, one per line (repeatable)")
-	fl.BoolVar(&f.subdomains, "subdomains", false, "follow subdomains of the imported domains")
-	fl.IntVar(&f.depth, "depth", 0, "depth limit for the imported targets (0 for the configured default)")
 
 	return cmd
 }
@@ -61,7 +89,7 @@ type importResult struct {
 	skipped int
 }
 
-func runImport(cmd *cobra.Command, a *app, name string, f importFlags) error {
+func runImport(c context.Context, a *app, name string, f importFlags) error {
 	if len(f.urls) == 0 && len(f.domains) == 0 && len(f.props) == 0 && len(f.aliases) == 0 {
 		return errors.New("nothing to import: pass --urls, --domains, --props or --aliases")
 	}
@@ -70,7 +98,6 @@ func runImport(cmd *cobra.Command, a *app, name string, f importFlags) error {
 	if err != nil {
 		return err
 	}
-	c := ctx(cmd)
 
 	entity, err := s.CreateEntity(c, name)
 	if err != nil {
@@ -84,7 +111,7 @@ func runImport(cmd *cobra.Command, a *app, name string, f importFlags) error {
 		if err != nil {
 			return err
 		}
-		report(cmd, path, "urls", res)
+		report(a, path, "urls", res)
 		total.add(res)
 	}
 
@@ -93,7 +120,7 @@ func runImport(cmd *cobra.Command, a *app, name string, f importFlags) error {
 		if err != nil {
 			return err
 		}
-		report(cmd, path, "domains", res)
+		report(a, path, "domains", res)
 		total.add(res)
 	}
 
@@ -104,7 +131,7 @@ func runImport(cmd *cobra.Command, a *app, name string, f importFlags) error {
 		if err != nil {
 			return err
 		}
-		report(cmd, path, "aliases", res)
+		report(a, path, "aliases", res)
 		total.add(res)
 	}
 
@@ -113,15 +140,15 @@ func runImport(cmd *cobra.Command, a *app, name string, f importFlags) error {
 		if err != nil {
 			return err
 		}
-		report(cmd, path, "properties", res)
+		report(a, path, "properties", res)
 		total.add(res)
 	}
 
-	cmd.Printf("\n%s: %d imported", entity.Name, total.added)
+	a.Printf("\n%s: %d imported", entity.Name, total.added)
 	if total.skipped > 0 {
-		cmd.Printf(", %d skipped", total.skipped)
+		a.Printf(", %d skipped", total.skipped)
 	}
-	cmd.Println()
+	a.Println()
 	return nil
 }
 
@@ -130,12 +157,12 @@ func (r *importResult) add(other importResult) {
 	r.skipped += other.skipped
 }
 
-func report(cmd *cobra.Command, path, kind string, res importResult) {
-	cmd.Printf("%s: %d %s", path, res.added, kind)
+func report(a *app, path, kind string, res importResult) {
+	a.Printf("%s: %d %s", path, res.added, kind)
 	if res.skipped > 0 {
-		cmd.Printf(", %d skipped", res.skipped)
+		a.Printf(", %d skipped", res.skipped)
 	}
-	cmd.Println()
+	a.Println()
 }
 
 // importTargets reads a list of targets and writes them in batches.

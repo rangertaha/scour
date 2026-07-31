@@ -3,36 +3,40 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/store"
 )
 
-func newListCmd(a *app) *cobra.Command {
-	return &cobra.Command{
-		Use:   "list [name]",
-		Short: "List entities, or show everything known about one",
-		Long: "With no name, a line per entity: what it has, how far its crawl has got\n" +
+func newListCmd(a *app) *cli.Command {
+	return &cli.Command{
+		Name:      "list",
+		ArgsUsage: "[name]",
+		Usage:     "List entities, or show everything known about one",
+		Description: "With no name, a line per entity: what it has, how far its crawl has got\n" +
 			"and whether it has been trained. With a name, everything known about that\n" +
 			"one.\n\n" +
 			"Crawls resume from the stored frontier, so this is also where you see what a\n" +
 			"restarted crawl will pick up.",
-		Example: "  scour list\n" +
+		UsageText: "  scour list\n" +
 			"  scour list vehicle",
-		Args: cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Action: func(c context.Context, cmd *cli.Command) error {
+			args, err := atMost(cmd, 1, "at most one entity name")
+			if err != nil {
+				return err
+			}
 			s, err := a.Store()
 			if err != nil {
 				return err
 			}
-			c := ctx(cmd)
 
 			if len(args) == 0 {
-				return runFleetStatus(cmd, a, s)
+				return runFleetStatus(c, a, s)
 			}
 
 			entity, err := s.Entity(c, args[0])
@@ -45,15 +49,15 @@ func newListCmd(a *app) *cobra.Command {
 			}
 
 			if a.jsonOut {
-				return writeJSON(cmd.OutOrStdout(), st)
+				return writeJSON(a.Out(), st)
 			}
-			return renderStatus(cmd, a, entity.Name, st)
+			return renderStatus(c, a, entity.Name, st)
 		},
 	}
 }
 
-func renderStatus(cmd *cobra.Command, a *app, name string, st *store.Status) error {
-	out := cmd.OutOrStdout()
+func renderStatus(c context.Context, a *app, name string, st *store.Status) error {
+	out := a.Out()
 
 	line := func(label, value string) {
 		fmt.Fprintf(out, "%-10s  %s\n", label, value)
@@ -78,7 +82,7 @@ func renderStatus(cmd *cobra.Command, a *app, name string, st *store.Status) err
 	if err != nil {
 		return err
 	}
-	stats, err := pages.Stats(ctx(cmd))
+	stats, err := pages.Stats(c)
 	if err != nil {
 		return err
 	}
@@ -144,15 +148,14 @@ func joinCounts(counts map[string]int64) string {
 // A service crawling several entities at once needs the shape of the whole
 // fleet more often than the detail of any one of them: which are stalled,
 // which are producing, which have never been trained.
-func runFleetStatus(cmd *cobra.Command, a *app, s *store.Store) error {
-	c := ctx(cmd)
+func runFleetStatus(c context.Context, a *app, s *store.Store) error {
 
 	entities, err := s.Entities(c)
 	if err != nil {
 		return err
 	}
 	if len(entities) == 0 {
-		cmd.Println("no entities yet: scour add <name>")
+		a.Println("no entities yet: scour add <name>")
 		return nil
 	}
 
@@ -191,7 +194,7 @@ func runFleetStatus(cmd *cobra.Command, a *app, s *store.Store) error {
 	}
 
 	if a.jsonOut {
-		return writeJSON(cmd.OutOrStdout(), rows)
+		return writeJSON(a.Out(), rows)
 	}
 
 	t := newTable(
@@ -204,5 +207,5 @@ func runFleetStatus(cmd *cobra.Command, a *app, s *store.Store) error {
 			fmt.Sprintf("%d", r.Visited), fmt.Sprintf("%d", r.Records),
 			fmt.Sprintf("%d", r.Rules), r.Trained)
 	}
-	return t.render(cmd.OutOrStdout())
+	return t.render(a.Out())
 }

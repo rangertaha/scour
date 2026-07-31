@@ -3,10 +3,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/content"
 	"github.com/rangertaha/scour/internal/train"
@@ -18,37 +19,52 @@ type trainFlags struct {
 	noChain bool
 }
 
-func newTrainCmd(a *app) *cobra.Command {
+func newTrainCmd(a *app) *cli.Command {
 	var f trainFlags
 
-	cmd := &cobra.Command{
-		Use:   "train <name>",
-		Short: "Learn where an entity's properties live, from the pages already crawled",
-		Long: "Reads the cached pages, works out an extraction rule per property, saves the\n" +
+	cmd := &cli.Command{
+		Name:      "train",
+		ArgsUsage: "<name>",
+		Usage:     "Learn where an entity's properties live, from the pages already crawled",
+		Description: "Reads the cached pages, works out an extraction rule per property, saves the\n" +
 			"model, and applies it. Records you have labelled valid feed back in, so each\n" +
 			"round of labelling sharpens the next model.",
-		Example: "  scour train vehicle\n" +
+		UsageText: "  scour train vehicle\n" +
 			"  scour train vehicle --pages 200",
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTrain(cmd, a, args[0], f)
+		Flags: []cli.Flag{
+			&cli.IntFlag{
+				Name:        "pages",
+				Usage:       "cap how many cached pages to learn from (0 for all)",
+				Destination: &f.limit,
+			},
+			&cli.StringSliceFlag{
+				Name:        "type",
+				Usage:       "learn only from a content type (repeatable)",
+				Destination: &f.types,
+			},
+			&cli.BoolFlag{
+				Name:        "no-chain",
+				Usage:       "skip the crawl chain, scoring each URL on its own tokens",
+				Destination: &f.noChain,
+			},
+		},
+		Action: func(c context.Context, cmd *cli.Command) error {
+			args, err := need(cmd, 1, "one entity name")
+			if err != nil {
+				return err
+			}
+			return runTrain(c, a, args[0], f)
 		},
 	}
-
-	fl := cmd.Flags()
-	fl.IntVar(&f.limit, "pages", 0, "cap how many cached pages to learn from (0 for all)")
-	fl.StringArrayVar(&f.types, "type", nil, "learn only from a content type (repeatable)")
-	fl.BoolVar(&f.noChain, "no-chain", false, "skip the crawl chain, scoring each URL on its own tokens")
 
 	return cmd
 }
 
-func runTrain(cmd *cobra.Command, a *app, name string, f trainFlags) error {
+func runTrain(c context.Context, a *app, name string, f trainFlags) error {
 	s, err := a.Store()
 	if err != nil {
 		return err
 	}
-	c := ctx(cmd)
 
 	entity, err := s.EntityFull(c, name)
 	if err != nil {
@@ -77,10 +93,10 @@ func runTrain(cmd *cobra.Command, a *app, name string, f trainFlags) error {
 	}
 
 	if a.jsonOut {
-		return writeJSON(cmd.OutOrStdout(), result)
+		return writeJSON(a.Out(), result)
 	}
 
-	out := cmd.OutOrStdout()
+	out := a.Out()
 	fmt.Fprintf(out, "pages       %d read, %d skipped, %s\n", result.Pages, result.Skipped, formatBytes(result.Bytes))
 	if result.Corrected > 0 {
 		fmt.Fprintf(out, "labels      %d valid records fed back in\n", result.Corrected)

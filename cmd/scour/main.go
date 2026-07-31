@@ -17,8 +17,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := newRootCmd().ExecuteContext(ctx); err != nil {
-		// Cobra has already printed usage errors; anything else is ours.
+	if err := newRootCmd().Run(ctx, os.Args); err != nil {
+		// urfave has already printed usage errors; anything else is ours.
 		if !errors.Is(err, errSilent) {
 			fmt.Fprintln(os.Stderr, "scour:", err)
 		}

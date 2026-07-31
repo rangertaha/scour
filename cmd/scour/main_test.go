@@ -30,11 +30,13 @@ func run(t *testing.T, dir string, args ...string) (string, error) {
 
 	cmd := newRootCmd()
 	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
-	cmd.SetArgs(append(args, "--config", filepath.Join(dir, "config.toml")))
+	cmd.Writer = &out
+	cmd.ErrWriter = &out
 
-	err := cmd.ExecuteContext(context.Background())
+	// urfave reads root flags before the subcommand name, where cobra took them
+	// anywhere, so --config leads rather than trails.
+	argv := append([]string{"scour", "--config", filepath.Join(dir, "config.toml")}, args...)
+	err := cmd.Run(context.Background(), argv)
 	return out.String(), err
 }
 

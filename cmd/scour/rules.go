@@ -3,26 +3,30 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 )
 
-func newRulesCmd(a *app) *cobra.Command {
-	return &cobra.Command{
-		Use:   "rules <name>",
-		Short: "List the extraction rules learned for an entity",
-		Long: "Rules nest: the parent locates each record on the page, and its children\n" +
+func newRulesCmd(a *app) *cli.Command {
+	return &cli.Command{
+		Name:      "rules",
+		ArgsUsage: "<name>",
+		Usage:     "List the extraction rules learned for an entity",
+		Description: "Rules nest: the parent locates each record on the page, and its children\n" +
 			"pull one property out of that record. HIT is the share of matching pages\n" +
 			"where the rule fires.",
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Action: func(c context.Context, cmd *cli.Command) error {
+			args, err := need(cmd, 1, "one entity name")
+			if err != nil {
+				return err
+			}
 			s, err := a.Store()
 			if err != nil {
 				return err
 			}
-			c := ctx(cmd)
 
 			entity, err := s.Entity(c, args[0])
 			if err != nil {
@@ -34,10 +38,10 @@ func newRulesCmd(a *app) *cobra.Command {
 			}
 
 			if a.jsonOut {
-				return writeJSON(cmd.OutOrStdout(), rules)
+				return writeJSON(a.Out(), rules)
 			}
 			if len(rules) == 0 {
-				cmd.Printf("no rules yet: scour train %s\n", entity.Name)
+				a.Printf("no rules yet: scour train %s\n", entity.Name)
 				return nil
 			}
 			if a.limit > 0 && len(rules) > a.limit {
@@ -64,7 +68,7 @@ func newRulesCmd(a *app) *cobra.Command {
 					truncate(r.URIPattern, 30),
 				)
 			}
-			return t.render(cmd.OutOrStdout())
+			return t.render(a.Out())
 		},
 	}
 }
