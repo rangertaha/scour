@@ -89,7 +89,7 @@ func TestAddIsIdempotent(t *testing.T) {
 	runOK(t, dir, "add", "vehicle", "--alias", "car")
 
 	out := runOK(t, dir, "list", "--json")
-	if strings.Count(out, `"Name": "vehicle"`) != 1 {
+	if strings.Count(out, `"name": "vehicle"`) != 1 {
 		t.Errorf("the entity was created more than once:\n%s", out)
 	}
 }
