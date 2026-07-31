@@ -33,14 +33,14 @@ import (
 type Server struct {
 	cfg   config.Config
 	store *store.Store
-	pages *cache.Cache
+	pages cache.Store
 	jobs  *Jobs
 	auth  *Auth
 	stats *Metrics
 }
 
 // New builds a server.
-func New(cfg config.Config, s *store.Store, pages *cache.Cache) (*Server, error) {
+func New(cfg config.Config, s *store.Store, pages cache.Store) (*Server, error) {
 	auth, err := NewAuth(cfg.Server.TokenFile)
 	if err != nil {
 		return nil, err

@@ -89,7 +89,7 @@ func harness(t *testing.T) (*Crawler, *store.Store, config.Config) {
 	cfg.Crawl.Robots = false            // httptest serves no robots.txt
 	cfg.Crawl.Concurrency = 4
 
-	return New(cfg, s, cache.New(cfg.PagesDir())), s, cfg
+	return New(cfg, s, cache.Local(cfg.PagesDir())), s, cfg
 }
 
 // entity creates an entity with one URL target pointing at the test server.
@@ -151,8 +151,8 @@ func TestCrawlFollowsLinksAndCachesPages(t *testing.T) {
 	}
 
 	// Bodies are in the cache, and the row records how big each was.
-	pages := cache.New(cfg.PagesDir())
-	if !pages.Has(srv.URL + "/cars/one/") {
+	pages := cache.Local(cfg.PagesDir())
+	if !pages.Has(context.Background(), srv.URL+"/cars/one/") {
 		t.Error("page body was not cached")
 	}
 	if got := found["/cars/one/"]; got.Size == 0 || got.ContentType != "html" {
@@ -209,11 +209,11 @@ func TestContentTypeFilteringSkipsUnwantedBodies(t *testing.T) {
 		t.Error("the pdf and the image should have been skipped")
 	}
 
-	pages := cache.New(cfg.PagesDir())
-	if pages.Has(srv.URL + "/logo.png") {
+	pages := cache.Local(cfg.PagesDir())
+	if pages.Has(context.Background(), srv.URL+"/logo.png") {
 		t.Error("an image body was downloaded despite the html-only filter")
 	}
-	if pages.Has(srv.URL + "/brochure.pdf") {
+	if pages.Has(context.Background(), srv.URL+"/brochure.pdf") {
 		t.Error("a pdf body was downloaded despite the html-only filter")
 	}
 
@@ -244,10 +244,10 @@ func TestPDFIsFetchedWhenAllowed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !cache.New(cfg.PagesDir()).Has(srv.URL + "/brochure.pdf") {
+	if !cache.Local(cfg.PagesDir()).Has(context.Background(), srv.URL+"/brochure.pdf") {
 		t.Error("the pdf should have been fetched once pdf was allowed")
 	}
-	if cache.New(cfg.PagesDir()).Has(srv.URL + "/logo.png") {
+	if cache.Local(cfg.PagesDir()).Has(context.Background(), srv.URL+"/logo.png") {
 		t.Error("the image should still have been skipped")
 	}
 }

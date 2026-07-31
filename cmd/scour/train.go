@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/content"
 	"github.com/rangertaha/scour/internal/train"
 )
@@ -63,7 +62,11 @@ func runTrain(cmd *cobra.Command, a *app, name string, f trainFlags) error {
 		}
 	}
 
-	trainer := train.New(a.cfg, s, cache.New(a.cfg.PagesDir()))
+	pages, err := a.Pages()
+	if err != nil {
+		return err
+	}
+	trainer := train.New(a.cfg, s, pages)
 	result, err := trainer.Run(c, entity, train.Options{
 		Limit:   f.limit,
 		Types:   types,

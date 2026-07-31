@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/store"
 )
 
@@ -72,7 +71,11 @@ func renderStatus(cmd *cobra.Command, a *app, name string, st *store.Status) err
 		line("roles", joinCounts(st.Roles))
 	}
 
-	stats, err := cache.New(a.cfg.PagesDir()).Stats()
+	pages, err := a.Pages()
+	if err != nil {
+		return err
+	}
+	stats, err := pages.Stats(ctx(cmd))
 	if err != nil {
 		return err
 	}

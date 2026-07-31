@@ -549,6 +549,12 @@ url       = ""                       # NATS server; empty runs an embedded one i
 store_dir = ""                       # where the embedded broker keeps JetStream data;
                                      # empty keeps streams in memory
 
+[cache]
+driver = "local"                     # where fetched bodies go: local, s3, gcs
+url    = ""                          # empty means the default pages directory
+# [cache.options]                    # whatever the driver needs beyond the location
+# region = "us-east-1"
+
 [model]
 scorer    = "bayes"                  # URL scoring: bayes or embed
 vectors   = ""                       # word vectors, for the embed scorer
@@ -598,6 +604,47 @@ transport = "webdriver"
 widens how many hosts are in flight at once rather than how hard any one of them
 is hit. The `RATE` column in `scour crawl` output shows the value actually
 applied to each URL, which is where a `[[host]]` override becomes visible.
+
+### Page storage
+
+Fetched bodies are the only part of scour's state that does not have to be
+local. The database records that a page was fetched and what its key is; the
+body itself is kept separately.
+
+On one machine a directory is right. With crawlers on several it is wrong: each
+writes to its own disk, and the trainer reads an empty cache with a database
+full of keys pointing at nothing. Point them all at the same bucket instead:
+
+```toml
+[cache]
+driver = "s3"
+url    = "s3://my-bucket/pages"
+
+[cache.options]
+region = "us-east-1"
+```
+
+```toml
+[cache]
+driver = "gcs"
+url    = "gs://my-bucket/pages"
+```
+
+Credentials are the provider's own: `AWS_*` and the shared config for S3,
+application default credentials for Google. scour takes no keys in its
+configuration, so a crawler needs no secrets in the file that also says what to
+crawl.
+
+The object stores are behind a build tag, because linking the AWS and Google
+SDKs takes the binary from 64MB to 105MB and most crawls keep their pages in a
+directory:
+
+```
+make build-cloud        # or: go build -tags cloud ./cmd/scour
+```
+
+A build without them still knows the names, and says the driver needs a
+different build rather than pretending it does not exist.
 
 ### systemd
 

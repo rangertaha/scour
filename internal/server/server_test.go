@@ -33,7 +33,7 @@ func newServer(t *testing.T, mutate func(*config.Config)) *Server {
 		mutate(&cfg)
 	}
 
-	srv, err := New(cfg, db, cache.New(filepath.Join(dir, "pages")))
+	srv, err := New(cfg, db, cache.Local(filepath.Join(dir, "pages")))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -31,6 +31,7 @@ type Config struct {
 	Model   Model   `toml:"model"`
 	Store   Store   `toml:"store"`
 	Bus     Bus     `toml:"bus"`
+	Cache   Cache   `toml:"cache"`
 	Paths   Paths   `toml:"paths"`
 	AI      []AI    `toml:"ai"`
 	Hosts   []Host  `toml:"host"`
@@ -100,6 +101,24 @@ type Model struct {
 type Bus struct {
 	URL      string `toml:"url"`
 	StoreDir string `toml:"store_dir"`
+}
+
+// Cache configures where fetched bodies are kept.
+//
+// Separate from Paths because the bodies are the only part of scour's state
+// that does not have to be local. On one machine a directory is right; with
+// crawlers on several, each writes to its own disk and the trainer reads an
+// empty cache, so the location has to be somewhere they all share.
+type Cache struct {
+	// Driver names the implementation: local, or one registered by a build
+	// that includes it. Empty means local.
+	Driver string `toml:"driver"`
+	// URL says where bodies go, in the driver's dialect. Empty means the
+	// default pages directory.
+	URL string `toml:"url"`
+	// Options carries whatever a driver needs beyond the location: a region,
+	// an endpoint, a credentials profile.
+	Options map[string]string `toml:"options"`
 }
 
 // Store configures the database backing every entity.

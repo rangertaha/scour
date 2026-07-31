@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/config"
 	"github.com/rangertaha/scour/internal/store"
 	"github.com/rangertaha/scour/internal/version"
@@ -24,6 +25,7 @@ var errSilent = errors.New("silent")
 type app struct {
 	cfg   config.Config
 	store *store.Store
+	pages cache.Store
 
 	configPath string
 	verbose    bool
@@ -144,4 +146,29 @@ func ctx(cmd *cobra.Command) context.Context {
 		return c
 	}
 	return context.Background()
+}
+
+// Pages returns the store fetched bodies are kept in, built from the
+// configuration and reused for the life of the command.
+//
+// The default is a directory on this machine, which is right until crawlers run
+// on more than one: each would write to its own disk and the trainer would read
+// an empty cache with a database full of keys pointing at nothing.
+func (a *app) Pages() (cache.Store, error) {
+	if a.pages != nil {
+		return a.pages, nil
+	}
+	url := a.cfg.Cache.URL
+	if url == "" {
+		url = a.cfg.PagesDir()
+	}
+	p, err := cache.New(a.cfg.Cache.Driver, cache.Config{
+		URL:     url,
+		Options: a.cfg.Cache.Options,
+	})
+	if err != nil {
+		return nil, err
+	}
+	a.pages = p
+	return p, nil
 }

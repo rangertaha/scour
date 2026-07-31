@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rangertaha/scour/internal/bus"
-	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/content"
 	"github.com/rangertaha/scour/internal/crawl"
 	"github.com/rangertaha/scour/internal/service"
@@ -141,7 +140,11 @@ func runServices(cmd *cobra.Command, a *app, spec string) error {
 			if err != nil {
 				return err
 			}
-			crawler := crawl.New(a.cfg, s, cache.New(a.cfg.PagesDir()))
+			pages, err := a.Pages()
+			if err != nil {
+				return err
+			}
+			crawler := crawl.New(a.cfg, s, pages)
 			services = append(services,
 				service.NewCrawl(b, crawler, types, a.cfg.Browser.Policy))
 		}

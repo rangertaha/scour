@@ -25,6 +25,11 @@ build: ## Build the binary into bin/
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BIN) $(CMD)
 
+.PHONY: build-cloud
+build-cloud: ## Build with the S3 and GCS page stores included
+	@mkdir -p $(BUILD_DIR)
+	$(GO) build -trimpath -tags cloud -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BIN) $(CMD)
+
 .PHONY: install
 install: ## Install the binary into GOBIN
 	$(GO) install -trimpath -ldflags '$(LDFLAGS)' $(CMD)

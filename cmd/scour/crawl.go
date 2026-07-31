@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/content"
 	"github.com/rangertaha/scour/internal/crawl"
 	"github.com/rangertaha/scour/internal/store"
@@ -114,7 +113,11 @@ func runCrawl(cmd *cobra.Command, a *app, name string, f crawlFlags) error {
 		return err
 	}
 
-	crawler := crawl.New(a.cfg, s, cache.New(a.cfg.PagesDir()))
+	pages, err := a.Pages()
+	if err != nil {
+		return err
+	}
+	crawler := crawl.New(a.cfg, s, pages)
 
 	// The bus path publishes results for the store service to write. It is the
 	// same crawl either way; only where the results go differs.

@@ -48,7 +48,7 @@ func harness(t *testing.T) (*Trainer, *store.Store, *store.Entity) {
 	cfg := config.Default()
 	cfg.Paths.Data = dir
 	cfg.Paths.Cache = filepath.Join(dir, "cache")
-	pages := cache.New(cfg.PagesDir())
+	pages := cache.Local(cfg.PagesDir())
 
 	e, err := s.CreateEntity(ctx, "vehicle")
 	if err != nil {
@@ -68,7 +68,7 @@ func harness(t *testing.T) (*Trainer, *store.Store, *store.Entity) {
 	}
 
 	for url, body := range corpus {
-		key, err := pages.Put(url, []byte(body))
+		key, err := pages.Put(context.Background(), url, []byte(body))
 		if err != nil {
 			t.Fatal(err)
 		}

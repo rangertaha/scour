@@ -5,6 +5,7 @@
 package cache
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -22,9 +23,15 @@ type Cache struct {
 	root string
 }
 
-// New returns a cache rooted at dir. The directory is created on first write
+// Local returns a cache rooted at dir. The directory is created on first write
 // rather than here, so opening a cache never fails.
-func New(dir string) *Cache { return &Cache{root: dir} }
+func Local(dir string) *Cache { return &Cache{root: dir} }
+
+func init() {
+	Register(driverLocal, func(cfg Config) (Store, error) {
+		return Local(strings.TrimPrefix(cfg.URL, "file://")), nil
+	})
+}
 
 // Root returns the directory the cache lives in.
 func (c *Cache) Root() string { return c.root }
@@ -67,7 +74,7 @@ func (c *Cache) path(rawURL string) (string, error) {
 // Put stores a body. Writes go to a temporary file first and are renamed into
 // place, so an interrupted crawl cannot leave a half-written page behind for
 // the next pass to parse.
-func (c *Cache) Put(rawURL string, body []byte) (string, error) {
+func (c *Cache) Put(_ context.Context, rawURL string, body []byte) (string, error) {
 	dst, err := c.path(rawURL)
 	if err != nil {
 		return "", err
@@ -98,7 +105,7 @@ func (c *Cache) Put(rawURL string, body []byte) (string, error) {
 
 // Get returns a stored body. A missing entry reports fs.ErrNotExist, so
 // callers can tell "not cached" from "cache broken" with errors.Is.
-func (c *Cache) Get(rawURL string) ([]byte, error) {
+func (c *Cache) Get(_ context.Context, rawURL string) ([]byte, error) {
 	src, err := c.path(rawURL)
 	if err != nil {
 		return nil, err
@@ -114,7 +121,7 @@ func (c *Cache) Get(rawURL string) ([]byte, error) {
 }
 
 // Has reports whether a URL's body is already stored.
-func (c *Cache) Has(rawURL string) bool {
+func (c *Cache) Has(_ context.Context, rawURL string) bool {
 	src, err := c.path(rawURL)
 	if err != nil {
 		return false
@@ -131,7 +138,7 @@ type Stats struct {
 
 // Stats walks the cache. It is used by `scour status`, so it counts rather
 // than reads.
-func (c *Cache) Stats() (Stats, error) {
+func (c *Cache) Stats(_ context.Context) (Stats, error) {
 	var s Stats
 	err := filepath.WalkDir(c.root, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil {

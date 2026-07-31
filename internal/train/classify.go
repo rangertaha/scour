@@ -98,7 +98,7 @@ func (t *Trainer) classifyPages(
 			continue
 		}
 
-		body, err := t.cache.Get(row.URL)
+		body, err := t.cache.Get(ctx, row.URL)
 		if err != nil {
 			if !errors.Is(err, fs.ErrNotExist) {
 				slog.Debug("page not read for classification", "url", row.URL, "err", err)

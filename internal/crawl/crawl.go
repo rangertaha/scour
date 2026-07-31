@@ -101,13 +101,13 @@ type Result struct {
 type Crawler struct {
 	cfg   config.Config
 	store *store.Store
-	cache *cache.Cache
+	cache cache.Store
 	sink  Sink
 	meter Meter
 }
 
 // New returns a crawler that writes results straight to the database.
-func New(cfg config.Config, s *store.Store, c *cache.Cache) *Crawler {
+func New(cfg config.Config, s *store.Store, c cache.Store) *Crawler {
 	return &Crawler{cfg: cfg, store: s, cache: c, sink: DirectSink{Store: s}}
 }
 
@@ -502,7 +502,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		rawURL := r.Request.URL.String()
 		latency := elapsed(r.Ctx.Get(ctxStart))
 
-		key, err := c.cache.Put(rawURL, r.Body)
+		key, err := c.cache.Put(ctx, rawURL, r.Body)
 		if err != nil {
 			slog.Error("cache write failed", "url", rawURL, "err", err)
 		}

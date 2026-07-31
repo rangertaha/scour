@@ -16,7 +16,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
-	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/server"
 )
 
@@ -55,7 +54,12 @@ func runServer(cmd *cobra.Command, a *app, listen string) error {
 		cfg.Server.Listen = listen
 	}
 
-	srv, err := server.New(cfg, s, cache.New(cfg.PagesDir()))
+	pages, err := a.Pages()
+	if err != nil {
+		return err
+	}
+
+	srv, err := server.New(cfg, s, pages)
 	if err != nil {
 		return err
 	}
@@ -150,7 +154,12 @@ func newMCPCmd(a *app) *cobra.Command {
 				return err
 			}
 
-			srv, err := server.New(a.cfg, s, cache.New(a.cfg.PagesDir()))
+			pages, err := a.Pages()
+			if err != nil {
+				return err
+			}
+
+			srv, err := server.New(a.cfg, s, pages)
 			if err != nil {
 				return err
 			}

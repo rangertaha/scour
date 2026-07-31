@@ -3,6 +3,7 @@
 package cache
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -12,20 +13,20 @@ import (
 )
 
 func TestPutThenGet(t *testing.T) {
-	c := New(t.TempDir())
+	c := Local(t.TempDir())
 	const url = "http://www.example.com/cars/one/"
 
-	if c.Has(url) {
+	if c.Has(context.Background(), url) {
 		t.Fatal("a fresh cache should be empty")
 	}
-	if _, err := c.Put(url, []byte("hello")); err != nil {
+	if _, err := c.Put(context.Background(), url, []byte("hello")); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	if !c.Has(url) {
+	if !c.Has(context.Background(), url) {
 		t.Error("Has should report the stored page")
 	}
 
-	body, err := c.Get(url)
+	body, err := c.Get(context.Background(), url)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -35,8 +36,8 @@ func TestPutThenGet(t *testing.T) {
 }
 
 func TestGetMissingReportsNotExist(t *testing.T) {
-	c := New(t.TempDir())
-	_, err := c.Get("http://example.com/never-fetched")
+	c := Local(t.TempDir())
+	_, err := c.Get(context.Background(), "http://example.com/never-fetched")
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("err = %v, want fs.ErrNotExist so callers can tell it apart", err)
 	}
@@ -44,14 +45,14 @@ func TestGetMissingReportsNotExist(t *testing.T) {
 
 func TestURLsWithSameHostShareADirectory(t *testing.T) {
 	root := t.TempDir()
-	c := New(root)
+	c := Local(root)
 
 	for _, u := range []string{
 		"http://www.example.com/a",
 		"http://www.example.com/b",
 		"http://other.test/c",
 	} {
-		if _, err := c.Put(u, []byte(u)); err != nil {
+		if _, err := c.Put(context.Background(), u, []byte(u)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -70,15 +71,15 @@ func TestURLsWithSameHostShareADirectory(t *testing.T) {
 }
 
 func TestQueryStringsAreDistinctEntries(t *testing.T) {
-	c := New(t.TempDir())
-	if _, err := c.Put("http://example.com/search?q=a", []byte("a")); err != nil {
+	c := Local(t.TempDir())
+	if _, err := c.Put(context.Background(), "http://example.com/search?q=a", []byte("a")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Put("http://example.com/search?q=b", []byte("b")); err != nil {
+	if _, err := c.Put(context.Background(), "http://example.com/search?q=b", []byte("b")); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := c.Get("http://example.com/search?q=a")
+	got, err := c.Get(context.Background(), "http://example.com/search?q=a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,8 +90,8 @@ func TestQueryStringsAreDistinctEntries(t *testing.T) {
 
 func TestPutIsAtomic(t *testing.T) {
 	root := t.TempDir()
-	c := New(root)
-	if _, err := c.Put("http://example.com/x", []byte("body")); err != nil {
+	c := Local(root)
+	if _, err := c.Put(context.Background(), "http://example.com/x", []byte("body")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,17 +111,17 @@ func TestPutIsAtomic(t *testing.T) {
 }
 
 func TestOverwriteReplacesTheBody(t *testing.T) {
-	c := New(t.TempDir())
+	c := Local(t.TempDir())
 	const url = "http://example.com/x"
 
-	if _, err := c.Put(url, []byte("first")); err != nil {
+	if _, err := c.Put(context.Background(), url, []byte("first")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Put(url, []byte("second")); err != nil {
+	if _, err := c.Put(context.Background(), url, []byte("second")); err != nil {
 		t.Fatal(err)
 	}
 
-	body, err := c.Get(url)
+	body, err := c.Get(context.Background(), url)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,14 +131,14 @@ func TestOverwriteReplacesTheBody(t *testing.T) {
 }
 
 func TestStats(t *testing.T) {
-	c := New(t.TempDir())
+	c := Local(t.TempDir())
 	for _, u := range []string{"http://example.com/a", "http://example.com/b"} {
-		if _, err := c.Put(u, []byte("12345")); err != nil {
+		if _, err := c.Put(context.Background(), u, []byte("12345")); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	s, err := c.Stats()
+	s, err := c.Stats(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,8 +151,8 @@ func TestStats(t *testing.T) {
 }
 
 func TestStatsOnAnAbsentCache(t *testing.T) {
-	c := New(filepath.Join(t.TempDir(), "never-created"))
-	s, err := c.Stats()
+	c := Local(filepath.Join(t.TempDir(), "never-created"))
+	s, err := c.Stats(context.Background())
 	if err != nil {
 		t.Fatalf("a cache that was never written to is not an error: %v", err)
 	}

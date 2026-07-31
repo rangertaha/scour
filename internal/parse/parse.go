@@ -52,7 +52,7 @@ type Options struct {
 // A page whose body has fallen out of the cache is skipped rather than fatal:
 // the cache is disposable by design, so a partial corpus is a smaller corpus,
 // not a failure.
-func Load(ctx context.Context, s *store.Store, pages *cache.Cache, entityID uint, opts Options) (*Result, error) {
+func Load(ctx context.Context, s *store.Store, pages cache.Store, entityID uint, opts Options) (*Result, error) {
 	rows, err := s.FetchedURLs(ctx, entityID)
 	if err != nil {
 		return nil, err
@@ -71,7 +71,7 @@ func Load(ctx context.Context, s *store.Store, pages *cache.Cache, entityID uint
 			continue
 		}
 
-		body, err := pages.Get(row.URL)
+		body, err := pages.Get(ctx, row.URL)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				res.Skipped++

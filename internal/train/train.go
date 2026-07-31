@@ -32,7 +32,7 @@ var ErrNoProperties = errors.New("entity has no properties")
 type Trainer struct {
 	cfg   config.Config
 	store *store.Store
-	cache *cache.Cache
+	cache cache.Store
 
 	// classified is what the page classifier found during this run, kept here
 	// because it is produced while labelling and reported with the result.
@@ -65,7 +65,7 @@ func (t *Trainer) measure(ctx context.Context, name string, value float64, label
 }
 
 // New returns a trainer.
-func New(cfg config.Config, s *store.Store, c *cache.Cache) *Trainer {
+func New(cfg config.Config, s *store.Store, c cache.Store) *Trainer {
 	return &Trainer{cfg: cfg, store: s, cache: c}
 }
 
