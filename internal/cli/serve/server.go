@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package serve
 
 import (
 	"context"
@@ -14,15 +14,17 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/urfave/cli/v3"
+	ucli "github.com/urfave/cli/v3"
+
+	"github.com/rangertaha/scour/internal/cli"
 
 	"github.com/rangertaha/scour/internal/server"
 )
 
-func newServerCmd(a *app) *cli.Command {
+func Server(a *cli.App) *ucli.Command {
 	var listen string
 
-	cmd := &cli.Command{
+	cmd := &ucli.Command{
 		Category: "SERVER",
 		Name:     "server",
 		Usage:    "Run as a service, serving the HTTP API and MCP",
@@ -34,14 +36,14 @@ func newServerCmd(a *app) *cli.Command {
 			"loopback behind a reverse proxy.",
 		UsageText: "  scour server\n" +
 			"  scour server --listen 0.0.0.0:8080",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
+		Flags: []ucli.Flag{
+			&ucli.StringFlag{
 				Name:        "listen",
 				Usage:       "address to listen on (overrides config)",
 				Destination: &listen,
 			},
 		},
-		Action: func(c context.Context, cmd *cli.Command) error {
+		Action: func(c context.Context, cmd *ucli.Command) error {
 			return runServer(c, a, listen)
 		},
 	}
@@ -49,14 +51,14 @@ func newServerCmd(a *app) *cli.Command {
 	return cmd
 }
 
-func runServer(c context.Context, a *app, listen string) error {
-	logProgress()
+func runServer(c context.Context, a *cli.App, listen string) error {
+	cli.LogProgress()
 	s, err := a.Store()
 	if err != nil {
 		return err
 	}
 
-	cfg := a.cfg
+	cfg := a.Cfg
 	if listen != "" {
 		cfg.Server.Listen = listen
 	}
@@ -156,8 +158,8 @@ func closed(err error) bool {
 		strings.Contains(err.Error(), "server is closing")
 }
 
-func newMCPCmd(a *app) *cli.Command {
-	return &cli.Command{
+func MCP(a *cli.App) *ucli.Command {
+	return &ucli.Command{
 		Category: "SERVER",
 		Name:     "mcp",
 		Usage:    "Run as an MCP server over stdio",
@@ -171,7 +173,7 @@ func newMCPCmd(a *app) *cli.Command {
 			`  {"command": "scour", "args": ["mcp"]}` + "\n\n" +
 			"Over HTTP instead, for an agent attaching to a running service:\n" +
 			"  scour server            # then point the agent at http://localhost:8080/mcp",
-		Action: func(c context.Context, cmd *cli.Command) error {
+		Action: func(c context.Context, cmd *ucli.Command) error {
 			s, err := a.Store()
 			if err != nil {
 				return err
@@ -182,7 +184,7 @@ func newMCPCmd(a *app) *cli.Command {
 				return err
 			}
 
-			srv, err := server.New(a.cfg, s, pages)
+			srv, err := server.New(a.Cfg, s, pages)
 			if err != nil {
 				return err
 			}

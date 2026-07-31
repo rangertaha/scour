@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package items
 
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net/url"
 	"strings"
 
-	"github.com/urfave/cli/v3"
+	ucli "github.com/urfave/cli/v3"
+
+	"github.com/rangertaha/scour/internal/cli"
 
 	"github.com/rangertaha/scour/internal/store"
 )
@@ -40,10 +40,10 @@ type addFlags struct {
 	depth      int
 }
 
-func newAddCmd(a *app) *cli.Command {
+func Add(a *cli.App) *ucli.Command {
 	var f addFlags
 
-	cmd := &cli.Command{
+	cmd := &ucli.Command{
 		Name:      "add",
 		ArgsUsage: "<name>",
 		Usage:     "Define an item, or add targets, properties and aliases to one",
@@ -54,75 +54,75 @@ func newAddCmd(a *app) *cli.Command {
 			"target on its own, and scopes the teaching when --prop is given, so what one\n" +
 			"site calls a byline does not overwrite what the next one calls it.",
 		UsageText: addExamples,
-		Flags: []cli.Flag{
-			&cli.StringSliceFlag{
+		Flags: []ucli.Flag{
+			&ucli.StringSliceFlag{
 				Name:        "alias",
 				Aliases:     []string{"a"},
 				Usage:       "another word a page might use; for the property when --prop is given, else for the item (repeatable)",
 				Destination: &f.aliases,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "domain",
 				Aliases:     []string{"d"},
 				Usage:       "add a whole domain as a crawl target, or scope the property when --prop is given (repeatable)",
 				Destination: &f.domains,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "url",
 				Aliases:     []string{"u"},
 				Usage:       "add a single URL as a crawl target (repeatable)",
 				Destination: &f.urls,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "type",
 				Usage:       "restrict crawls to a content type (repeatable)",
 				Destination: &f.types,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "template",
 				Usage:       "start from a built-in schema: see scour list templates",
 				Destination: &f.template,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "prop",
 				Aliases:     []string{"p"},
 				Usage:       "add a property",
 				Destination: &f.prop,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "prop-type",
 				Usage:       "the property's type: string, number, bool, date, url, email (date covers times)",
 				Destination: &f.propType,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "example",
 				Aliases:     []string{"e"},
 				Usage:       "an example value for the property",
 				Destination: &f.example,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "regex",
 				Usage:       "what a valid value looks like; capture group one is the value if there is one",
 				Destination: &f.regex,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "label",
 				Usage:       "what the name beside the value must look like, e.g. '^(og:|twitter:)?title$'",
 				Destination: &f.label,
 			},
-			&cli.BoolFlag{
+			&ucli.BoolFlag{
 				Name:        "subdomains",
 				Usage:       "follow subdomains of the added domains",
 				Destination: &f.subdomains,
 			},
-			&cli.IntFlag{
+			&ucli.IntFlag{
 				Name:        "depth",
 				Usage:       "depth limit for the added targets (0 for the configured default)",
 				Destination: &f.depth,
 			},
 		},
-		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one item name")
+		Action: func(c context.Context, cmd *ucli.Command) error {
+			args, err := cli.Need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -133,7 +133,7 @@ func newAddCmd(a *app) *cli.Command {
 	return cmd
 }
 
-func runAdd(c context.Context, a *app, name string, f addFlags) error {
+func runAdd(c context.Context, a *cli.App, name string, f addFlags) error {
 	if f.example != "" && f.prop == "" {
 		return errors.New("--example needs --prop")
 	}
@@ -164,7 +164,7 @@ func runAdd(c context.Context, a *app, name string, f addFlags) error {
 	// With --prop the domain scopes the teaching; without it, it is a target.
 	scope := ""
 	if f.prop != "" && len(f.domains) == 1 {
-		host, err := normaliseDomain(f.domains[0])
+		host, err := cli.NormaliseDomain(f.domains[0])
 		if err != nil {
 			return err
 		}
@@ -186,7 +186,7 @@ func runAdd(c context.Context, a *app, name string, f addFlags) error {
 
 	if scope == "" {
 		for _, d := range f.domains {
-			host, err := normaliseDomain(d)
+			host, err := cli.NormaliseDomain(d)
 			if err != nil {
 				return err
 			}
@@ -198,7 +198,7 @@ func runAdd(c context.Context, a *app, name string, f addFlags) error {
 	}
 
 	for _, u := range f.urls {
-		normalised, err := normaliseURL(u)
+		normalised, err := cli.NormaliseURL(u)
 		if err != nil {
 			return err
 		}
@@ -261,52 +261,4 @@ func runAdd(c context.Context, a *app, name string, f addFlags) error {
 		a.Printf("%s: %s\n", item.Name, change)
 	}
 	return nil
-}
-
-// normaliseDomain reduces a domain to its bare host, so example.com,
-// www.example.com and https://example.com/ are one target.
-func normaliseDomain(raw string) (string, error) {
-	host := strings.TrimSpace(strings.ToLower(raw))
-	if host == "" {
-		return "", errors.New("domain must not be empty")
-	}
-	if strings.Contains(host, "://") {
-		u, err := url.Parse(host)
-		if err != nil {
-			return "", fmt.Errorf("parse domain %q: %w", raw, err)
-		}
-		host = u.Host
-	}
-	host = strings.TrimSuffix(host, "/")
-	if i := strings.IndexByte(host, '/'); i >= 0 {
-		host = host[:i]
-	}
-	host = strings.TrimPrefix(host, "www.")
-	if host == "" {
-		return "", fmt.Errorf("domain %q has no host", raw)
-	}
-	if strings.ContainsAny(host, " \t#") {
-		return "", fmt.Errorf("domain %q is not a hostname", raw)
-	}
-	return host, nil
-}
-
-// normaliseURL checks a URL is absolute and returns it with a scheme.
-func normaliseURL(raw string) (string, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return "", errors.New("url must not be empty")
-	}
-	if !strings.Contains(trimmed, "://") {
-		trimmed = "http://" + trimmed
-	}
-	u, err := url.Parse(trimmed)
-	if err != nil {
-		return "", fmt.Errorf("parse url %q: %w", raw, err)
-	}
-	if u.Host == "" {
-		return "", fmt.Errorf("url %q has no host", raw)
-	}
-	u.Fragment = ""
-	return u.String(), nil
 }

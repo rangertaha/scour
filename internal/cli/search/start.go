@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package search
 
 import (
 	"context"
@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/urfave/cli/v3"
+	ucli "github.com/urfave/cli/v3"
+
+	"github.com/rangertaha/scour/internal/cli"
 
 	"github.com/rangertaha/scour/internal/content"
 	"github.com/rangertaha/scour/internal/crawl"
@@ -35,10 +37,10 @@ type crawlFlags struct {
 	browser     string
 }
 
-func newStartCmd(a *app) *cli.Command {
+func Start(a *cli.App) *ucli.Command {
 	var f crawlFlags
 
-	cmd := &cli.Command{
+	cmd := &ucli.Command{
 		Category:  "SEARCH",
 		Name:      "start",
 		Aliases:   []string{"crawl"},
@@ -53,55 +55,55 @@ func newStartCmd(a *app) *cli.Command {
 		UsageText: "  scour start vehicle --depth 3\n" +
 			"  scour start vehicle --depth 3 --type html --type pdf\n" +
 			"  scour start vehicle --max-pages 200",
-		Flags: []cli.Flag{
-			&cli.IntFlag{
+		Flags: []ucli.Flag{
+			&ucli.IntFlag{
 				Name:        "depth",
 				Usage:       "how many links deep to follow (0 for the configured default)",
 				Destination: &f.depth,
 			},
-			&cli.IntFlag{
+			&ucli.IntFlag{
 				Name:        "max-pages",
 				Usage:       "stop after this many pages (0 for no limit)",
 				Destination: &f.limit,
 			},
-			&cli.DurationFlag{
+			&ucli.DurationFlag{
 				Name:        "max-time",
 				Usage:       "stop after this long, keeping what was fetched (0 for no limit)",
 				Destination: &f.maxTime,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "type",
 				Usage:       "limit this crawl to a content type (repeatable)",
 				Destination: &f.types,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "exclude-type",
 				Usage:       "skip a content type in this crawl (repeatable)",
 				Destination: &f.excludeType,
 			},
-			&cli.BoolFlag{
+			&ucli.BoolFlag{
 				Name:        "reset",
 				Usage:       "discard the existing frontier and start over",
 				Destination: &f.reset,
 			},
-			&cli.BoolFlag{
+			&ucli.BoolFlag{
 				Name:        "debug",
 				Usage:       "log colly's own request trace",
 				Destination: &f.debug,
 			},
-			&cli.BoolFlag{
+			&ucli.BoolFlag{
 				Name:        "bus",
 				Usage:       "route results through the message bus instead of writing them directly",
 				Destination: &f.bus,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "browser",
 				Usage:       "when to render in a browser: never, auto or always (default from config)",
 				Destination: &f.browser,
 			},
 		},
-		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one item name")
+		Action: func(c context.Context, cmd *ucli.Command) error {
+			args, err := cli.Need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -114,7 +116,7 @@ func newStartCmd(a *app) *cli.Command {
 	return cmd
 }
 
-func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
+func runCrawl(c context.Context, a *cli.App, name string, f crawlFlags) error {
 	s, err := a.Store()
 	if err != nil {
 		return err
@@ -148,7 +150,7 @@ func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 		}
 	}
 	if len(allow) == 0 {
-		allow = a.cfg.Crawl.ContentTypes
+		allow = a.Cfg.Crawl.ContentTypes
 	}
 	types, err := content.New(allow, f.excludeType)
 	if err != nil {
@@ -161,7 +163,7 @@ func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 		}
 	}
 
-	scorer, trained, err := train.Scorer(a.cfg, item)
+	scorer, trained, err := train.Scorer(a.Cfg, item)
 	if err != nil {
 		return err
 	}
@@ -177,14 +179,14 @@ func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 	if err != nil {
 		return err
 	}
-	crawler := crawl.New(a.cfg, s, pages)
+	crawler := crawl.New(a.Cfg, s, pages)
 
 	// The bus path publishes results for the store service to write. It is the
 	// same crawl either way; only where the results go differs.
 	var settle func() error
 	if f.bus {
 		var err error
-		crawler, settle, err = a.busCrawler(c, crawler, item.Name)
+		crawler, settle, err = a.BusCrawler(c, crawler, item.Name)
 		if err != nil {
 			return err
 		}
@@ -199,12 +201,12 @@ func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 
 	depth := f.depth
 	if depth <= 0 {
-		depth = a.cfg.Crawl.Depth
+		depth = a.Cfg.Crawl.Depth
 	}
 
 	// Anything printed alongside --json would corrupt the output for whatever
 	// is parsing it, so the progress line is for humans only.
-	if !a.jsonOut {
+	if !a.JSON {
 		scoring := "seeded from aliases and examples"
 		if trained {
 			scoring = "trained model"
@@ -246,12 +248,12 @@ func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 		return err
 	}
 
-	if a.jsonOut {
-		return writeJSON(a.Out(), rows)
+	if a.JSON {
+		return cli.WriteJSON(a.Out(), rows)
 	}
 
 	a.Println()
-	if err := renderFrontier(a, rows, result, a.cfg.Crawl.Rate.String(), a.limit); err != nil {
+	if err := renderFrontier(a, rows, result, a.Cfg.Crawl.Rate.String(), a.Limit); err != nil {
 		return err
 	}
 	stopped := ""
@@ -267,11 +269,11 @@ func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 	}
 	a.Printf("\n%d fetched, %d skipped, %d failed, %s in %s%s\n",
 		result.Fetched, result.Skipped, result.Failed,
-		formatBytes(result.Bytes), result.Elapsed.Round(time.Millisecond), stopped)
+		cli.FormatBytes(result.Bytes), result.Elapsed.Round(time.Millisecond), stopped)
 
 	// Pages on their own are not the point, and the next step is not guessable
 	// from the ones already run.
-	if result.Fetched > 0 && !a.jsonOut {
+	if result.Fetched > 0 && !a.JSON {
 		a.Printf("\nnext: scour train %s\n", item.Name)
 	}
 	return nil
@@ -291,7 +293,7 @@ type subtree struct {
 // renderFrontier prints the crawl table. Rows are URL prefixes rather than
 // single pages, because what a crawl is really reporting is which parts of a
 // site paid off.
-func renderFrontier(a *app, rows []store.URL, result *crawl.Result, rate string, limit int) error {
+func renderFrontier(a *cli.App, rows []store.URL, result *crawl.Result, rate string, limit int) error {
 	trees := rollup(rows)
 	if len(trees) == 0 {
 		a.Println("nothing fetched")
@@ -309,10 +311,10 @@ func renderFrontier(a *app, rows []store.URL, result *crawl.Result, rate string,
 
 	seconds := result.Elapsed.Seconds()
 
-	t := newTable(
+	t := cli.NewTable(
 		[]string{"PROBABILITY", "MATCHES", "SPEED", "LATENCY", "RATE", "200", "300", "400", "500", "URL"},
-		alignRight, alignRight, alignRight, alignRight, alignRight,
-		alignRight, alignRight, alignRight, alignRight, alignLeft,
+		cli.AlignRight, cli.AlignRight, cli.AlignRight, cli.AlignRight, cli.AlignRight,
+		cli.AlignRight, cli.AlignRight, cli.AlignRight, cli.AlignRight, cli.AlignLeft,
 	)
 	for _, s := range trees {
 		total := 0
@@ -327,7 +329,7 @@ func renderFrontier(a *app, rows []store.URL, result *crawl.Result, rate string,
 		if s.fetched > 0 {
 			mean = s.latency / time.Duration(s.fetched)
 		}
-		t.add(
+		t.Add(
 			fmt.Sprintf("%.2f", s.score),
 			fmt.Sprintf("%d", s.matches),
 			speed,
@@ -337,10 +339,10 @@ func renderFrontier(a *app, rows []store.URL, result *crawl.Result, rate string,
 			percent(s.statuses[2], total),
 			percent(s.statuses[3], total),
 			percent(s.statuses[4], total),
-			truncate(s.prefix, 60),
+			cli.Truncate(s.prefix, 60),
 		)
 	}
-	return t.render(a.Out())
+	return t.Render(a.Out())
 }
 
 // rollup aggregates fetched URLs into their directory prefixes, so a page
@@ -413,17 +415,4 @@ func percent(n, total int) string {
 		return "-"
 	}
 	return fmt.Sprintf("%d%%", n*100/total)
-}
-
-func formatBytes(n int64) string {
-	switch {
-	case n >= 1<<30:
-		return fmt.Sprintf("%.1fGB", float64(n)/(1<<30))
-	case n >= 1<<20:
-		return fmt.Sprintf("%.1fMB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%.1fKB", float64(n)/(1<<10))
-	default:
-		return fmt.Sprintf("%dB", n)
-	}
 }

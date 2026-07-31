@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package items
 
 import (
 	"context"
 	"fmt"
 	"strings"
 
-	"github.com/urfave/cli/v3"
+	ucli "github.com/urfave/cli/v3"
+
+	"github.com/rangertaha/scour/internal/cli"
 
 	"github.com/rangertaha/scour/internal/defaults"
 	"github.com/rangertaha/scour/internal/store"
@@ -67,24 +69,24 @@ func applyTemplate(ctx context.Context, s *store.Store, itemID uint, name string
 	return changes, nil
 }
 
-// newTemplatesCmd lists what ships in the binary.
-func newTemplatesCmd(a *app) *cli.Command {
-	return &cli.Command{
+// Templates lists what ships in the binary.
+func Templates(a *cli.App) *ucli.Command {
+	return &ucli.Command{
 		Name:  "templates",
 		Usage: "List the built-in schemas scour ships with",
 		Description: "Templates are starting points, not answers. Each carries the properties,\n" +
 			"aliases, descriptions and example values a kind of record usually has,\n" +
 			"which is what bootstraps labelling before anything has been crawled.",
 		UsageText: "  scour item templates\n  scour item add cars --template vehicle",
-		Action: func(c context.Context, cmd *cli.Command) error {
+		Action: func(c context.Context, cmd *ucli.Command) error {
 			names, err := defaults.Names()
 			if err != nil {
 				return err
 			}
 
-			t := newTable(
+			t := cli.NewTable(
 				[]string{"TEMPLATE", "PROPS", "FIELDS"},
-				alignLeft, alignRight, alignLeft,
+				cli.AlignLeft, cli.AlignRight, cli.AlignLeft,
 			)
 			for _, name := range names {
 				schema, err := defaults.Schema(name)
@@ -97,9 +99,9 @@ func newTemplatesCmd(a *app) *cli.Command {
 				for _, p := range props {
 					shown = append(shown, p.Name)
 				}
-				t.add(name, fmt.Sprintf("%d", len(props)), truncate(strings.Join(shown, ", "), 60))
+				t.Add(name, fmt.Sprintf("%d", len(props)), cli.Truncate(strings.Join(shown, ", "), 60))
 			}
-			return t.render(a.Out())
+			return t.Render(a.Out())
 		},
 	}
 }

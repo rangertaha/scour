@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package urls
 
 import (
 	"bufio"
@@ -12,7 +12,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/urfave/cli/v3"
+	ucli "github.com/urfave/cli/v3"
+
+	"github.com/rangertaha/scour/internal/cli"
 
 	"github.com/rangertaha/scour/internal/store"
 )
@@ -26,10 +28,10 @@ type importFlags struct {
 	depth      int
 }
 
-func newImportCmd(a *app) *cli.Command {
+func Import(a *cli.App) *ucli.Command {
 	var f importFlags
 
-	cmd := &cli.Command{
+	cmd := &ucli.Command{
 		Category:  "URLS",
 		Name:      "import",
 		ArgsUsage: "<name>",
@@ -40,40 +42,40 @@ func newImportCmd(a *app) *cli.Command {
 		UsageText: "  scour import vehicle --urls urls.txt\n" +
 			"  scour import vehicle --domains domains.txt --subdomains\n" +
 			"  scour import vehicle --props props.csv",
-		Flags: []cli.Flag{
-			&cli.StringSliceFlag{
+		Flags: []ucli.Flag{
+			&ucli.StringSliceFlag{
 				Name:        "urls",
 				Usage:       "file of URLs, one per line (repeatable)",
 				Destination: &f.urls,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "domains",
 				Usage:       "file of domains, one per line (repeatable)",
 				Destination: &f.domains,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "props",
 				Usage:       "CSV of properties (repeatable)",
 				Destination: &f.props,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "aliases",
 				Usage:       "file of aliases, one per line (repeatable)",
 				Destination: &f.aliases,
 			},
-			&cli.BoolFlag{
+			&ucli.BoolFlag{
 				Name:        "subdomains",
 				Usage:       "follow subdomains of the imported domains",
 				Destination: &f.subdomains,
 			},
-			&cli.IntFlag{
+			&ucli.IntFlag{
 				Name:        "depth",
 				Usage:       "depth limit for the imported targets (0 for the configured default)",
 				Destination: &f.depth,
 			},
 		},
-		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one item name")
+		Action: func(c context.Context, cmd *ucli.Command) error {
+			args, err := cli.Need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -90,7 +92,7 @@ type importResult struct {
 	skipped int
 }
 
-func runImport(c context.Context, a *app, name string, f importFlags) error {
+func runImport(c context.Context, a *cli.App, name string, f importFlags) error {
 	if len(f.urls) == 0 && len(f.domains) == 0 && len(f.props) == 0 && len(f.aliases) == 0 {
 		return errors.New("nothing to import: pass --urls, --domains, --props or --aliases")
 	}
@@ -108,7 +110,7 @@ func runImport(c context.Context, a *app, name string, f importFlags) error {
 	total := importResult{}
 
 	for _, path := range f.urls {
-		res, err := importTargets(c, s, item.ID, path, store.TargetURL, normaliseURL, f)
+		res, err := importTargets(c, s, item.ID, path, store.TargetURL, cli.NormaliseURL, f)
 		if err != nil {
 			return err
 		}
@@ -117,7 +119,7 @@ func runImport(c context.Context, a *app, name string, f importFlags) error {
 	}
 
 	for _, path := range f.domains {
-		res, err := importTargets(c, s, item.ID, path, store.TargetDomain, normaliseDomain, f)
+		res, err := importTargets(c, s, item.ID, path, store.TargetDomain, cli.NormaliseDomain, f)
 		if err != nil {
 			return err
 		}
@@ -158,7 +160,7 @@ func (r *importResult) add(other importResult) {
 	r.skipped += other.skipped
 }
 
-func report(a *app, path, kind string, res importResult) {
+func report(a *cli.App, path, kind string, res importResult) {
 	a.Printf("%s: %d %s", path, res.added, kind)
 	if res.skipped > 0 {
 		a.Printf(", %d skipped", res.skipped)

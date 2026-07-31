@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package urls
 
 import (
 	"bufio"
@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/urfave/cli/v3"
+	ucli "github.com/urfave/cli/v3"
+
+	"github.com/rangertaha/scour/internal/cli"
 
 	"github.com/rangertaha/scour/internal/store"
 )
@@ -24,16 +26,16 @@ type urlExportFlags struct {
 	toStdout bool
 }
 
-// newExportCmd is the other half of import.
+// Export is the other half of import.
 //
 // What an item is worth keeping outside scour is the list it was built from:
 // the domains and URLs, and the properties and words taught for them. Those
 // arrive by import from a file, and until now there was no way back out, so a
 // list assembled over a long crawl existed only inside one database.
-func newExportCmd(a *app) *cli.Command {
+func Export(a *cli.App) *ucli.Command {
 	var f urlExportFlags
 
-	return &cli.Command{
+	return &ucli.Command{
 		Category:  "URLS",
 		Name:      "export",
 		ArgsUsage: "<name>",
@@ -46,30 +48,30 @@ func newExportCmd(a *app) *cli.Command {
 			"  scour export vehicle --domains domains.txt --urls urls.txt\n" +
 			"  scour export vehicle --props props.csv --aliases aliases.txt\n" +
 			"  scour export vehicle --urls - > urls.txt",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
+		Flags: []ucli.Flag{
+			&ucli.StringFlag{
 				Name:        "urls",
 				Usage:       "write URL targets to this `file`, or - for stdout",
 				Destination: &f.urls,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "domains",
 				Usage:       "write domain targets to this `file`, or - for stdout",
 				Destination: &f.domains,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "props",
 				Usage:       "write properties to this CSV `file`, or - for stdout",
 				Destination: &f.props,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "aliases",
 				Usage:       "write the item's aliases to this `file`, or - for stdout",
 				Destination: &f.aliases,
 			},
 		},
-		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one item name")
+		Action: func(c context.Context, cmd *ucli.Command) error {
+			args, err := cli.Need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -78,7 +80,7 @@ func newExportCmd(a *app) *cli.Command {
 	}
 }
 
-func runURLExport(c context.Context, a *app, name string, f urlExportFlags) error {
+func runURLExport(c context.Context, a *cli.App, name string, f urlExportFlags) error {
 	s, err := a.Store()
 	if err != nil {
 		return err
@@ -160,7 +162,7 @@ func runURLExport(c context.Context, a *app, name string, f urlExportFlags) erro
 }
 
 // writeLines writes one value per line, to a file or to stdout.
-func writeLines(a *app, dest string, lines []string, what string) (int, error) {
+func writeLines(a *cli.App, dest string, lines []string, what string) (int, error) {
 	if len(lines) == 0 {
 		return 0, nil
 	}
@@ -196,7 +198,7 @@ func writeLines(a *app, dest string, lines []string, what string) (int, error) {
 }
 
 // writeProps writes the CSV `scour import --props` reads.
-func writeProps(c context.Context, a *app, s *store.Store, item *store.Item, dest string) (int, error) {
+func writeProps(c context.Context, a *cli.App, s *store.Store, item *store.Item, dest string) (int, error) {
 	props, err := s.PropertiesFor(c, item.ID, "")
 	if err != nil {
 		return 0, err

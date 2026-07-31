@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package cli
 
 import (
 	"io"
@@ -20,7 +20,7 @@ var helpOrder = []string{"URLS", "ITEMS", "TRAIN", "SEARCH", "SERVER"}
 // orderedCategories returns the command groups in helpOrder, with anything not
 // named there after them and the ungrouped commands last.
 //
-// Last rather than first because version and help are what you need least: the
+// Last rather than first because version and help are what you Need least: the
 // default template puts them above everything scour actually does.
 func orderedCategories(cmd *cli.Command) []cli.CommandCategory {
 	found := cmd.VisibleCategories()
@@ -52,9 +52,9 @@ func orderedCategories(cmd *cli.Command) []cli.CommandCategory {
 	return out
 }
 
-// installHelpOrder replaces the command listing with one that respects
+// InstallHelpOrder replaces the command listing with one that respects
 // helpOrder. Everything else about the help is urfave's own.
-func installHelpOrder() {
+func InstallHelpOrder() {
 	cli.RootCommandHelpTemplate = `NAME:
    {{template "helpNameTemplate" .}}
 

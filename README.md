@@ -364,25 +364,22 @@ scour stream vehicle --exclude-type pdf --limit 50
 already belong to one of your own properties, as it does above.
 
 Record 1088 is a false positive: scour read prose off the page as if it were a
-spec table. Mark it wrong and retrain. A wrong record is held out of the next
-training run, so both the scoring model and the extraction rules stop making
-that mistake:
+spec table. A record marked wrong is held out of the next training run, so both
+the scoring model and the extraction rules stop making that mistake, and one
+marked right is what tells `scour train` to fit the field-order chain at all.
+
+Labelling has no command of its own. It is done over the HTTP API or MCP, which
+accept `valid`, `invalid` and `unlabelled`:
 
 ```
-scour invalid vehicle 1088
+curl -X POST http://localhost:8080/v1/items/vehicle/records/1088/label \
+  -H 'Content-Type: application/json' -d '{"label":"invalid"}'
+
 scour train vehicle
 ```
 
-The command line marks records wrong and not right. Marking one right is not
-merely a note: at least one confirmed record is what tells `scour train` to fit
-the field-order chain, so a run with none keeps the induced locators and trains
-nothing else. That verdict is currently reachable only through the HTTP API and
-the MCP server, both of which accept `valid`, `invalid` and `unlabelled`:
-
-```
-curl -X POST http://localhost:8080/v1/items/vehicle/records/1042/label \
-  -H 'Content-Type: application/json' -d '{"label":"valid"}'
-```
+A record keeps its id and its label across retraining, so an id read off one
+listing still names the same record on the next.
 
 Check on a crawl in progress, or on where one left off. Crawls resume from the
 stored frontier:
@@ -447,7 +444,6 @@ output, and `--limit <n>` to cap the rows returned.
 | `scour stream <name> --exclude-type <type>` | Search everything except a content type |
 | `scour stream <name> --follow` | Keep printing records as they are extracted |
 | `scour stream <name> --write csv --to <dir>` | Write records out as CSV, JSON, or to a webhook |
-| `scour invalid <name> <id>...` | Label records as wrong |
 | `scour status` | A line per item: what it has, how far it got, whether it is trained |
 | `scour status <name>` | Everything known about one item |
 | `scour top` | Monitor engine activity, live |

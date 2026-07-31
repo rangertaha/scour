@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package cli
 
 import (
 	"context"
@@ -8,37 +8,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/urfave/cli/v3"
-
 	"github.com/rangertaha/scour/internal/store"
 )
 
-func newListCmd(a *app) *cli.Command {
-	return &cli.Command{
-		Name:      "ls",
-		Aliases:   []string{"list"},
-		ArgsUsage: "[name]",
-		Usage:     "List items, or show everything known about one",
-		Description: "With no name, a line per item: what it has, how far its crawl has got\n" +
-			"and whether it has been trained. With a name, everything known about that\n" +
-			"one.\n\n" +
-			"Crawls resume from the stored frontier, so this is also where you see what a\n" +
-			"restarted crawl will pick up.",
-		UsageText: "  scour item ls                 # a line per item\n" +
-			"  scour item ls vehicle         # everything known about one\n" +
-			"  scour --json item ls vehicle",
-		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := atMost(cmd, 1, "at most one item name")
-			if err != nil {
-				return err
-			}
-			return runList(c, a, args)
-		},
-	}
-}
-
 // runList is shared with the bare `scour item`, so the two cannot drift.
-func runList(c context.Context, a *app, args []string) error {
+func RunList(c context.Context, a *App, args []string) error {
 	s, err := a.Store()
 	if err != nil {
 		return err
@@ -54,13 +28,13 @@ func runList(c context.Context, a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	if a.jsonOut {
-		return writeJSON(a.Out(), st)
+	if a.JSON {
+		return WriteJSON(a.Out(), st)
 	}
 	return renderStatus(c, a, item.Name, st)
 }
 
-func renderStatus(c context.Context, a *app, name string, st *store.Status) error {
+func renderStatus(c context.Context, a *App, name string, st *store.Status) error {
 	out := a.Out()
 
 	line := func(label, value string) {
@@ -77,10 +51,10 @@ func renderStatus(c context.Context, a *app, name string, st *store.Status) erro
 	}
 
 	if len(st.Formats) > 0 {
-		line("formats", joinCounts(st.Formats))
+		line("formats", JoinCounts(st.Formats))
 	}
 	if len(st.Roles) > 0 {
-		line("roles", joinCounts(st.Roles))
+		line("roles", JoinCounts(st.Roles))
 	}
 
 	pages, err := a.Pages()
@@ -91,7 +65,7 @@ func renderStatus(c context.Context, a *app, name string, st *store.Status) erro
 	if err != nil {
 		return err
 	}
-	line("cache", fmt.Sprintf("%d pages, %s", stats.Pages, formatBytes(stats.Bytes)))
+	line("cache", fmt.Sprintf("%d pages, %s", stats.Pages, FormatBytes(stats.Bytes)))
 
 	if st.Rules > 0 {
 		line("rules", fmt.Sprintf("%d", st.Rules))
@@ -116,7 +90,7 @@ func renderStatus(c context.Context, a *app, name string, st *store.Status) erro
 }
 
 // intCounts widens a count map for [joinCounts].
-func intCounts(in map[string]int) map[string]int64 {
+func IntCounts(in map[string]int) map[string]int64 {
 	out := make(map[string]int64, len(in))
 	for k, v := range in {
 		out[k] = int64(v)
@@ -125,7 +99,7 @@ func intCounts(in map[string]int) map[string]int64 {
 }
 
 // joinCounts renders a count map as "html 8402, pdf 401", largest first.
-func joinCounts(counts map[string]int64) string {
+func JoinCounts(counts map[string]int64) string {
 	type kv struct {
 		k string
 		n int64
@@ -153,7 +127,7 @@ func joinCounts(counts map[string]int64) string {
 // A service crawling several items at once needs the shape of the whole
 // fleet more often than the detail of any one of them: which are stalled,
 // which are producing, which have never been trained.
-func runFleetStatus(c context.Context, a *app, s *store.Store) error {
+func runFleetStatus(c context.Context, a *App, s *store.Store) error {
 
 	items, err := s.Items(c)
 	if err != nil {
@@ -199,21 +173,21 @@ func runFleetStatus(c context.Context, a *app, s *store.Store) error {
 		})
 	}
 
-	if a.jsonOut {
-		return writeJSON(a.Out(), rows)
+	if a.JSON {
+		return WriteJSON(a.Out(), rows)
 	}
 
-	t := newTable(
+	t := NewTable(
 		[]string{"NAME", "TARGETS", "QUEUED", "VISITED", "RECORDS", "RULES", "TRAINED", "STATE"},
-		alignLeft, alignRight, alignRight, alignRight, alignRight, alignRight, alignLeft, alignLeft,
+		AlignLeft, AlignRight, AlignRight, AlignRight, AlignRight, AlignRight, AlignLeft, AlignLeft,
 	)
 	for _, r := range rows {
-		t.add(r.Name,
+		t.Add(r.Name,
 			fmt.Sprintf("%d", r.Targets), fmt.Sprintf("%d", r.Queued),
 			fmt.Sprintf("%d", r.Visited), fmt.Sprintf("%d", r.Records),
 			fmt.Sprintf("%d", r.Rules), r.Trained, r.State)
 	}
-	return t.render(a.Out())
+	return t.Render(a.Out())
 }
 
 // itemState says what an item is doing, which the counters alone cannot.

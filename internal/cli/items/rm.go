@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package items
 
 import (
 	"context"
-	"github.com/urfave/cli/v3"
+
+	ucli "github.com/urfave/cli/v3"
+
+	"github.com/rangertaha/scour/internal/cli"
 )
 
 type removeFlags struct {
@@ -15,10 +18,10 @@ type removeFlags struct {
 	force   bool
 }
 
-func newRemoveCmd(a *app) *cli.Command {
+func Remove(a *cli.App) *ucli.Command {
 	var f removeFlags
 
-	cmd := &cli.Command{
+	cmd := &ucli.Command{
 		Name:      "rm",
 		ArgsUsage: "<name>",
 		Aliases:   []string{"remove"},
@@ -30,38 +33,38 @@ func newRemoveCmd(a *app) *cli.Command {
 			"  scour item rm vehicle -p year\n" +
 			"  scour item rm vehicle --rule 5\n" +
 			"  scour item rm vehicle --force",
-		Flags: []cli.Flag{
-			&cli.StringSliceFlag{
+		Flags: []ucli.Flag{
+			&ucli.StringSliceFlag{
 				Name:        "domain",
 				Aliases:     []string{"d"},
 				Usage:       "remove a domain target (repeatable)",
 				Destination: &f.domains,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "url",
 				Aliases:     []string{"u"},
 				Usage:       "remove a URL target (repeatable)",
 				Destination: &f.urls,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "prop",
 				Aliases:     []string{"p"},
 				Usage:       "remove a property (repeatable)",
 				Destination: &f.props,
 			},
-			&cli.UintSliceFlag{
+			&ucli.UintSliceFlag{
 				Name:        "rule",
 				Usage:       "remove an induced rule by id (repeatable)",
 				Destination: &f.rules,
 			},
-			&cli.BoolFlag{
+			&ucli.BoolFlag{
 				Name:        "force",
 				Usage:       "confirm deleting the whole item",
 				Destination: &f.force,
 			},
 		},
-		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one item name")
+		Action: func(c context.Context, cmd *ucli.Command) error {
+			args, err := cli.Need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -72,7 +75,7 @@ func newRemoveCmd(a *app) *cli.Command {
 	return cmd
 }
 
-func runRemove(c context.Context, a *app, name string, f removeFlags) error {
+func runRemove(c context.Context, a *cli.App, name string, f removeFlags) error {
 	s, err := a.Store()
 	if err != nil {
 		return err
@@ -83,7 +86,7 @@ func runRemove(c context.Context, a *app, name string, f removeFlags) error {
 		if !f.force {
 			a.Printf("this deletes item %q and every target, rule and record it owns\n", name)
 			a.Println("re-run with --force to confirm")
-			return errSilent
+			return cli.ErrSilent
 		}
 		if err := s.DeleteItem(c, name); err != nil {
 			return err
@@ -98,7 +101,7 @@ func runRemove(c context.Context, a *app, name string, f removeFlags) error {
 	}
 
 	for _, d := range f.domains {
-		host, err := normaliseDomain(d)
+		host, err := cli.NormaliseDomain(d)
 		if err != nil {
 			return err
 		}
@@ -109,7 +112,7 @@ func runRemove(c context.Context, a *app, name string, f removeFlags) error {
 	}
 
 	for _, u := range f.urls {
-		normalised, err := normaliseURL(u)
+		normalised, err := cli.NormaliseURL(u)
 		if err != nil {
 			return err
 		}

@@ -131,29 +131,6 @@ func TestImportReportsAMissingFile(t *testing.T) {
 	}
 }
 
-func TestHeaderDetection(t *testing.T) {
-	tests := []struct {
-		name   string
-		record []string
-		want   bool
-	}{
-		{"full header", []string{"name", "type", "example"}, true},
-		{"name only", []string{"name"}, true},
-		{"reordered", []string{"example", "name"}, true},
-		{"mixed case", []string{"Name", "Example"}, true},
-		{"data row", []string{"make", "Ford"}, false},
-		{"no name column", []string{"type", "example"}, false},
-		{"empty", []string{}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := headerOf(tt.record) != nil; got != tt.want {
-				t.Errorf("headerOf(%v) detected = %v, want %v", tt.record, got, tt.want)
-			}
-		})
-	}
-}
-
 // export and import are a pair, so what one writes the other has to read back
 // to the same rows. Comparing the printed output is not enough: a marker the
 // importer does not understand comes back as part of the hostname and the two

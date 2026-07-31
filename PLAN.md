@@ -149,7 +149,13 @@ shape before it has settled. The one exception is the module's own tooling
 a test that does not shell out.
 
 ```
-cmd/scour/              urfave/cli commands, one file per verb
+cmd/scour/              main and the root command's wiring
+internal/cli/           what every command needs: App, args, tables, help
+internal/cli/urls/      import, export
+internal/cli/items/     item add|rm|ls|tag|templates, stream
+internal/cli/learn/     rules, train
+internal/cli/search/    status, top, start, stop, pause
+internal/cli/serve/     mcp, server, join
 internal/wom/           the document engine: graph, parse, match, seq, infer, model
 internal/config/        config.toml, env, flag precedence
 internal/bus/           embedded NATS, JetStream setup, subjects, codecs
@@ -408,8 +414,8 @@ than aborting requests: colly marks a request visited *before* the callback that
 would abort it, so aborting burns the URL and makes the stop unresumable.
 
 **M3. wom integration.** *(done)* Parse with wom, `scour train` via
-`w.Model(schema...)`, `scour rules`, `scour stream`, `scour invalid`,
-`model.Train` on labelled items. The README's core loop now works end
+`w.Model(schema...)`, `scour rules`, `scour stream`, and `model.Train` on
+labelled items. Labelling itself now lives on the API rather than the CLI. The README's core loop now works end
 to end.
 
 Two things learned. wom's `SynthesizeURI` dropped the trailing slash from

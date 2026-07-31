@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package search
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/urfave/cli/v3"
+	ucli "github.com/urfave/cli/v3"
+
+	"github.com/rangertaha/scour/internal/cli"
 )
 
 // pause and stop are the two ways a search ends, and they are not the same.
@@ -17,8 +19,8 @@ import (
 //
 // Both are durable state rather than a signal, so they reach a crawl wherever
 // it is running, including crawlers on other machines being fed by a store.
-func newPauseCmd(a *app) *cli.Command {
-	return &cli.Command{
+func Pause(a *cli.App) *ucli.Command {
+	return &ucli.Command{
 		Category:  "SEARCH",
 		Name:      "pause",
 		ArgsUsage: "<name>",
@@ -32,8 +34,8 @@ func newPauseCmd(a *app) *cli.Command {
 			"  scour start news    # carry on from the frontier\n\n" +
 			"To throw the frontier away instead:\n" +
 			"  scour stop news --force",
-		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one item name")
+		Action: func(c context.Context, cmd *ucli.Command) error {
+			args, err := cli.Need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -42,9 +44,9 @@ func newPauseCmd(a *app) *cli.Command {
 	}
 }
 
-func newStopCmd(a *app) *cli.Command {
+func Stop(a *cli.App) *ucli.Command {
 	var force bool
-	return &cli.Command{
+	return &ucli.Command{
 		Category:  "SEARCH",
 		Name:      "stop",
 		ArgsUsage: "<name>",
@@ -57,15 +59,15 @@ func newStopCmd(a *app) *cli.Command {
 			"Use `scour pause` to stop a search and keep that work.",
 		UsageText: "  scour pause news    # the one you probably want\n" +
 			"  scour stop news --force",
-		Flags: []cli.Flag{
-			&cli.BoolFlag{
+		Flags: []ucli.Flag{
+			&ucli.BoolFlag{
 				Name:        "force",
 				Usage:       "confirm discarding a frontier that has something in it",
 				Destination: &force,
 			},
 		},
-		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one item name")
+		Action: func(c context.Context, cmd *ucli.Command) error {
+			args, err := cli.Need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -74,7 +76,7 @@ func newStopCmd(a *app) *cli.Command {
 	}
 }
 
-func runStop(c context.Context, a *app, name string, force bool) error {
+func runStop(c context.Context, a *cli.App, name string, force bool) error {
 	s, err := a.Store()
 	if err != nil {
 		return err
@@ -115,7 +117,7 @@ func runStop(c context.Context, a *app, name string, force bool) error {
 	return nil
 }
 
-func setPaused(c context.Context, a *app, name string, paused bool) error {
+func setPaused(c context.Context, a *cli.App, name string, paused bool) error {
 	s, err := a.Store()
 	if err != nil {
 		return err

@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package serve
 
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"github.com/urfave/cli/v3"
+	ucli "github.com/urfave/cli/v3"
+
+	"github.com/rangertaha/scour/internal/cli"
 
 	"github.com/rangertaha/scour/internal/bus"
 	"github.com/rangertaha/scour/internal/content"
@@ -15,65 +16,10 @@ import (
 	"github.com/rangertaha/scour/internal/service"
 )
 
-// busCrawler puts the bus between the crawler and the database.
-//
-// It starts an embedded broker and the store service in this process, so a
-// single-process run behaves like a distributed one without anything to
-// install. The returned function waits for the writer to catch up, and must be
-// called before reading back what the crawl produced.
-func (a *app) busCrawler(ctx context.Context, crawler *crawl.Crawler, item string) (*crawl.Crawler, func() error, error) {
-	s, err := a.Store()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	b, err := bus.Open(ctx, bus.Options{URL: a.cfg.Bus.URL, Name: "scour-crawl"})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// The store service runs alongside the crawl rather than after it, so
-	// writes happen while pages are still being fetched.
-	serviceCtx, stop := context.WithCancel(ctx)
-	done := make(chan error, 1)
-	go func() {
-		done <- service.New(service.NewStore(b, s)).Run(serviceCtx)
-	}()
-
-	var settled bool
-	settle := func() error {
-		if settled {
-			return nil
-		}
-		settled = true
-
-		defer func() {
-			stop()
-			<-done
-			b.Close()
-		}()
-
-		if err := b.Flush(); err != nil {
-			return err
-		}
-
-		drainCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		if err := b.Drain(drainCtx, bus.StreamCrawl); err != nil {
-			return fmt.Errorf("waiting for the store service: %w", err)
-		}
-		return nil
-	}
-
-	return crawler.
-		WithSink(service.NewBusSink(b, item)).
-		WithMeter(service.NewBusMeter(b, item)), settle, nil
-}
-
-func newJoinCmd(a *app) *cli.Command {
+func Join(a *cli.App) *ucli.Command {
 	var roles, busURL string
 
-	cmd := &cli.Command{
+	cmd := &ucli.Command{
 		Category: "SERVER",
 		Name:     "join",
 		Aliases:  []string{"run"},
@@ -87,23 +33,23 @@ func newJoinCmd(a *app) *cli.Command {
 			"  scour join --role store --bus-url nats://broker:4222\n\n" +
 			"Any number of others fetch it:\n" +
 			"  scour join --role crawl --bus-url nats://broker:4222",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
+		Flags: []ucli.Flag{
+			&ucli.StringFlag{
 				Name:        "role",
 				Usage:       "components to run: store, crawl, or all (default all)",
 				Destination: &roles,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "bus-url",
 				Usage:       "NATS server to use instead of the embedded one (default from [bus] url in the config)",
 				Destination: &busURL,
 			},
 		},
-		Action: func(c context.Context, cmd *cli.Command) error {
+		Action: func(c context.Context, cmd *ucli.Command) error {
 			// The flag was advertised in the help and the examples before it
 			// existed, so the documented command failed with "unknown flag".
 			if busURL != "" {
-				a.cfg.Bus.URL = busURL
+				a.Cfg.Bus.URL = busURL
 			}
 			return runServices(c, a, roles)
 		},
@@ -112,8 +58,8 @@ func newJoinCmd(a *app) *cli.Command {
 	return cmd
 }
 
-func runServices(c context.Context, a *app, spec string) error {
-	logProgress()
+func runServices(c context.Context, a *cli.App, spec string) error {
+	cli.LogProgress()
 	wanted, err := service.ParseRoles(spec)
 	if err != nil {
 		return err
@@ -125,8 +71,8 @@ func runServices(c context.Context, a *app, spec string) error {
 	}
 
 	b, err := bus.Open(c, bus.Options{
-		URL:      a.cfg.Bus.URL,
-		StoreDir: a.cfg.Bus.StoreDir,
+		URL:      a.Cfg.Bus.URL,
+		StoreDir: a.Cfg.Bus.StoreDir,
 		Name:     "scour-run",
 	})
 	if err != nil {
@@ -140,13 +86,13 @@ func runServices(c context.Context, a *app, spec string) error {
 		case service.RoleStore:
 			// This store dispatches: `scour run` starts a crawl role, here or
 			// on another machine, to take the work.
-			services = append(services, service.NewStore(b, s, service.Dispatching(a.cfg.Crawl.Rate.Duration())))
+			services = append(services, service.NewStore(b, s, service.Dispatching(a.Cfg.Crawl.Rate.Duration())))
 		case service.RoleCrawl:
 			// Content types and the browser policy come from this process's
 			// configuration rather than from the item: a crawler does not
 			// read the database, and both describe the machine doing the
 			// fetching rather than the thing being looked for.
-			types, err := content.New(a.cfg.Crawl.ContentTypes, nil)
+			types, err := content.New(a.Cfg.Crawl.ContentTypes, nil)
 			if err != nil {
 				return err
 			}
@@ -154,9 +100,9 @@ func runServices(c context.Context, a *app, spec string) error {
 			if err != nil {
 				return err
 			}
-			crawler := crawl.New(a.cfg, s, pages)
+			crawler := crawl.New(a.Cfg, s, pages)
 			services = append(services,
-				service.NewCrawl(b, crawler, types, a.cfg.Browser.Policy))
+				service.NewCrawl(b, crawler, types, a.Cfg.Browser.Policy))
 		}
 	}
 	if len(services) == 0 {

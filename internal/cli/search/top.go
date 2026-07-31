@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package search
 
 import (
 	"context"
@@ -13,7 +13,9 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/urfave/cli/v3"
+	ucli "github.com/urfave/cli/v3"
+
+	"github.com/rangertaha/scour/internal/cli"
 
 	"github.com/rangertaha/scour/internal/content"
 	"github.com/rangertaha/scour/internal/crawl"
@@ -28,8 +30,8 @@ import (
 // watching a crawl is not itself a load on the database the crawl is writing to.
 const interval = time.Second
 
-func newTopCmd(a *app) *cli.Command {
-	return &cli.Command{
+func Top(a *cli.App) *ucli.Command {
+	return &ucli.Command{
 		Category: "SEARCH",
 		Name:     "top",
 		Usage:    "Monitor engine activity",
@@ -40,7 +42,7 @@ func newTopCmd(a *app) *cli.Command {
 			"stays paused after this exits.",
 		UsageText: "  scour top\n\n" +
 			"Keys: s start   p pause   t train   q quit",
-		Action: func(c context.Context, cmd *cli.Command) error {
+		Action: func(c context.Context, cmd *ucli.Command) error {
 			s, err := a.Store()
 			if err != nil {
 				return err
@@ -50,7 +52,7 @@ func newTopCmd(a *app) *cli.Command {
 	}
 }
 
-func runTop(ctx context.Context, a *app, s *store.Store) error {
+func runTop(ctx context.Context, a *cli.App, s *store.Store) error {
 	// The view owns the terminal for as long as it runs, so nothing else may
 	// write to it. A crawl started from here logs as any crawl does, and those
 	// lines land on top of the table: the screen came out with its bands
@@ -324,13 +326,13 @@ func count(n int64) string {
 // visible here, which is why start also clears the pause: that is the part that
 // works whoever is doing the fetching.
 type runner struct {
-	app  *app
+	app  *cli.App
 	mu   sync.Mutex
 	busy map[string]bool
 	note func(string)
 }
 
-func newRunner(a *app, note func(string)) *runner {
+func newRunner(a *cli.App, note func(string)) *runner {
 	return &runner{app: a, busy: map[string]bool{}, note: note}
 }
 
@@ -378,7 +380,7 @@ func (r *runner) start(ctx context.Context, name string) {
 		r.note("[red]" + err.Error() + "[-]")
 		return
 	}
-	scorer, _, err := train.Scorer(r.app.cfg, item)
+	scorer, _, err := train.Scorer(r.app.Cfg, item)
 	if err != nil {
 		r.note("[red]" + err.Error() + "[-]")
 		return
@@ -394,11 +396,11 @@ func (r *runner) start(ctx context.Context, name string) {
 		return
 	}
 
-	_, err = crawl.New(r.app.cfg, s, pages).Run(ctx, crawl.Options{
+	_, err = crawl.New(r.app.Cfg, s, pages).Run(ctx, crawl.Options{
 		Item:    item,
 		Targets: item.Targets,
 		Types:   types,
-		Depth:   r.app.cfg.Crawl.Depth,
+		Depth:   r.app.Cfg.Crawl.Depth,
 		Scorer:  scorer,
 	})
 	if err != nil {
@@ -430,7 +432,7 @@ func (r *runner) train(ctx context.Context, name string) {
 		r.note("[red]" + err.Error() + "[-]")
 		return
 	}
-	result, err := train.New(r.app.cfg, s, pages).Run(ctx, item, train.Options{})
+	result, err := train.New(r.app.Cfg, s, pages).Run(ctx, item, train.Options{})
 	if err != nil {
 		r.note(fmt.Sprintf("[red]%s: %v[-]", name, err))
 		return

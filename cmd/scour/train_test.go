@@ -110,48 +110,6 @@ func TestTrainThenRulesThenSearch(t *testing.T) {
 	}
 }
 
-func TestLabelThenRetrainKeepsIDs(t *testing.T) {
-	dir, _ := trained(t)
-	runOK(t, dir, "train", "vehicle")
-
-	before := runOK(t, dir, "stream", "vehicle", "--json")
-
-	out := runOK(t, dir, "invalid", "vehicle", "1")
-	if !strings.Contains(out, "marked invalid") {
-		t.Fatalf("labelling did not report success:\n%s", out)
-	}
-
-	runOK(t, dir, "train", "vehicle")
-	after := runOK(t, dir, "stream", "vehicle", "--json")
-
-	if !strings.Contains(after, `"ID": 1`) {
-		t.Errorf("record 1 did not survive retraining:\n%s", after)
-	}
-	if !strings.Contains(after, `"Label": "invalid"`) {
-		t.Errorf("the label was lost by retraining:\n%s", after)
-	}
-	if strings.Count(before, `"ID"`) != strings.Count(after, `"ID"`) {
-		t.Errorf("record count changed across retraining")
-	}
-
-	only := runOK(t, dir, "stream", "vehicle", "--label", "invalid")
-	if !strings.Contains(only, "showing 1 of 1") {
-		t.Errorf("filtering by label did not find the labelled record:\n%s", only)
-	}
-}
-
-func TestLabelUnknownRecord(t *testing.T) {
-	dir, _ := trained(t)
-	runOK(t, dir, "train", "vehicle")
-
-	if _, err := run(t, dir, "invalid", "vehicle", "9999"); err == nil {
-		t.Error("labelling an unknown record must fail rather than report success")
-	}
-	if _, err := run(t, dir, "invalid", "vehicle", "not-a-number"); err == nil {
-		t.Error("a non-numeric id must fail")
-	}
-}
-
 func TestSearchConfidenceFilter(t *testing.T) {
 	dir, _ := trained(t)
 	runOK(t, dir, "train", "vehicle")

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package items
 
 import (
 	"context"
@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/urfave/cli/v3"
+	ucli "github.com/urfave/cli/v3"
+
+	"github.com/rangertaha/scour/internal/cli"
 )
 
 type tagFlags struct {
@@ -19,10 +21,10 @@ type tagFlags struct {
 	update []string
 }
 
-func newTagCmd(a *app) *cli.Command {
+func Tag(a *cli.App) *ucli.Command {
 	var f tagFlags
 
-	return &cli.Command{
+	return &ucli.Command{
 		Name:      "tag",
 		ArgsUsage: "<name>",
 		Usage:     "Edit the words a property might be labelled with on a page",
@@ -39,39 +41,39 @@ func newTagCmd(a *app) *cli.Command {
 			"  scour item tag news -p author --delete by\n" +
 			"  scour item tag news -p author --update byline --update author\n" +
 			"  scour item tag news -p author --on example.com --append 'staff writer'",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
+		Flags: []ucli.Flag{
+			&ucli.StringFlag{
 				Name:        "prop",
 				Aliases:     []string{"p"},
 				Usage:       "the property whose words are being edited",
 				Destination: &f.prop,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "on",
 				Usage:       "scope the edit to one `domain`, the same one scour item add takes",
 				Destination: &f.domain,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "append",
 				Aliases:     []string{"a"},
 				Usage:       "add a word (repeatable)",
 				Destination: &f.append,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "delete",
 				Aliases:     []string{"d"},
 				Usage:       "remove a word (repeatable)",
 				Destination: &f.delete,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "update",
 				Aliases:     []string{"u"},
 				Usage:       "replace the whole set with these words (repeatable)",
 				Destination: &f.update,
 			},
 		},
-		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one item name")
+		Action: func(c context.Context, cmd *ucli.Command) error {
+			args, err := cli.Need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -80,7 +82,7 @@ func newTagCmd(a *app) *cli.Command {
 	}
 }
 
-func runTag(c context.Context, a *app, name string, f tagFlags) error {
+func runTag(c context.Context, a *cli.App, name string, f tagFlags) error {
 	if strings.TrimSpace(f.prop) == "" {
 		return errors.New("tag needs --prop to say which property's words to edit")
 	}
@@ -101,7 +103,7 @@ func runTag(c context.Context, a *app, name string, f tagFlags) error {
 
 	scope := ""
 	if f.domain != "" {
-		if scope, err = normaliseDomain(f.domain); err != nil {
+		if scope, err = cli.NormaliseDomain(f.domain); err != nil {
 			return err
 		}
 	}

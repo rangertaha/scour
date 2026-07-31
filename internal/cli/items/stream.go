@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package items
 
 import (
 	"context"
@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/urfave/cli/v3"
+	ucli "github.com/urfave/cli/v3"
+
+	"github.com/rangertaha/scour/internal/cli"
 
 	"github.com/rangertaha/scour/internal/store"
 )
@@ -29,10 +31,10 @@ type streamFlags struct {
 	out exportFlags
 }
 
-func newStreamCmd(a *app) *cli.Command {
+func Stream(a *cli.App) *ucli.Command {
 	var f streamFlags
 
-	cmd := &cli.Command{
+	cmd := &ucli.Command{
 		Category:  "ITEMS",
 		Name:      "stream",
 		Aliases:   []string{"search"},
@@ -53,56 +55,56 @@ func newStreamCmd(a *app) *cli.Command {
 			"Write them out instead of printing them:\n" +
 			"  scour stream vehicle --write csv --to ./out\n" +
 			"  scour stream vehicle --write webhook --to https://example.com/ingest",
-		Flags: []cli.Flag{
-			&cli.FloatFlag{
+		Flags: []ucli.Flag{
+			&ucli.FloatFlag{
 				Name:        "confidence",
 				Usage:       "only records at or above this confidence, 0 to 1",
 				Destination: &f.confidence,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "type",
 				Usage:       "only records extracted from a content type (repeatable)",
 				Destination: &f.types,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "exclude-type",
 				Usage:       "skip records from a content type (repeatable)",
 				Destination: &f.excludeType,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "label",
 				Usage:       "only records with this label: valid, invalid, unlabelled",
 				Destination: &f.label,
 			},
-			&cli.StringSliceFlag{
+			&ucli.StringSliceFlag{
 				Name:        "format",
 				Usage:       "alias for --type",
 				Destination: &f.types,
 			},
-			&cli.BoolFlag{
+			&ucli.BoolFlag{
 				Name:        "follow",
 				Aliases:     []string{"f"},
 				Usage:       "keep printing records as they are extracted",
 				Destination: &f.follow,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "write",
 				Usage:       "write the records out instead of printing them: " + exportFormats(),
 				Destination: &f.out.format,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "to",
 				Usage:       "`destination` for --write: a directory, or a URL for the webhook format",
 				Destination: &f.out.to,
 			},
-			&cli.StringFlag{
+			&ucli.StringFlag{
 				Name:        "token-env",
 				Usage:       "environment `variable` holding the webhook bearer token",
 				Destination: &f.out.tokenEnv,
 			},
 		},
-		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one item name")
+		Action: func(c context.Context, cmd *ucli.Command) error {
+			args, err := cli.Need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -116,7 +118,7 @@ func newStreamCmd(a *app) *cli.Command {
 	return cmd
 }
 
-func runStream(c context.Context, a *app, name string, f streamFlags) error {
+func runStream(c context.Context, a *cli.App, name string, f streamFlags) error {
 	if f.confidence < 0 || f.confidence > 1 {
 		return fmt.Errorf("--confidence must be between 0 and 1, got %v", f.confidence)
 	}
@@ -137,7 +139,7 @@ func runStream(c context.Context, a *app, name string, f streamFlags) error {
 		if f.follow {
 			return fmt.Errorf("--write and --follow are different jobs: one ends, the other does not")
 		}
-		f.out.confidence, f.out.label, f.out.limit = f.confidence, f.label, a.limit
+		f.out.confidence, f.out.label, f.out.limit = f.confidence, f.label, a.Limit
 		return runExport(c, a, name, f.out)
 	}
 
@@ -151,15 +153,15 @@ func runStream(c context.Context, a *app, name string, f streamFlags) error {
 		Formats:       f.types,
 		ExcludeFormat: f.excludeType,
 		Label:         label,
-		Limit:         a.limit,
+		Limit:         a.Limit,
 	}
 	rows, total, err := s.SearchRecords(c, item.ID, query)
 	if err != nil {
 		return err
 	}
 
-	if a.jsonOut {
-		return writeJSON(a.Out(), rows)
+	if a.JSON {
+		return cli.WriteJSON(a.Out(), rows)
 	}
 	if len(rows) == 0 && !f.follow {
 		filtered := f.confidence > 0 || len(f.types) > 0 || len(f.excludeType) > 0 || label != ""
@@ -184,12 +186,12 @@ func runStream(c context.Context, a *app, name string, f streamFlags) error {
 		return follow(c, a, s, item, query, props, 0)
 	}
 	headers := append([]string{"ID", "CONF", "FORMAT"}, upper(props)...)
-	aligns := []align{alignRight, alignRight, alignLeft}
+	aligns := []cli.Align{cli.AlignRight, cli.AlignRight, cli.AlignLeft}
 	for range props {
-		aligns = append(aligns, alignLeft)
+		aligns = append(aligns, cli.AlignLeft)
 	}
 
-	t := newTable(headers, aligns...)
+	t := cli.NewTable(headers, aligns...)
 	for _, r := range rows {
 		cells := []string{
 			strconv.FormatUint(uint64(r.ID), 10),
@@ -197,11 +199,11 @@ func runStream(c context.Context, a *app, name string, f streamFlags) error {
 			r.Format,
 		}
 		for _, p := range props {
-			cells = append(cells, truncate(r.Values[p], 24))
+			cells = append(cells, cli.Truncate(r.Values[p], 24))
 		}
-		t.add(cells...)
+		t.Add(cells...)
 	}
-	if err := t.render(a.Out()); err != nil {
+	if err := t.Render(a.Out()); err != nil {
 		return err
 	}
 
@@ -232,7 +234,7 @@ const followInterval = time.Second
 // to the database and publishes nothing, so a follower built on the bus would
 // show nothing at all in the ordinary single-process case, which is where it is
 // most likely to be used.
-func follow(c context.Context, a *app, s *store.Store, item *store.Item,
+func follow(c context.Context, a *cli.App, s *store.Store, item *store.Item,
 	query store.RecordQuery, props []string, mark uint,
 ) error {
 	tick := time.NewTicker(followInterval)
@@ -257,7 +259,7 @@ func follow(c context.Context, a *app, s *store.Store, item *store.Item,
 			if r.ID > mark {
 				mark = r.ID
 			}
-			if a.jsonOut {
+			if a.JSON {
 				// One record per line, so the far end of a pipe can read them
 				// as they arrive instead of waiting for a closing bracket.
 				line, err := json.Marshal(r)
@@ -276,7 +278,7 @@ func follow(c context.Context, a *app, s *store.Store, item *store.Item,
 				fmt.Sprintf("%-6s", r.Format),
 			}
 			for _, p := range props {
-				cells = append(cells, fmt.Sprintf("%-24s", truncate(r.Values[p], 24)))
+				cells = append(cells, fmt.Sprintf("%-24s", cli.Truncate(r.Values[p], 24)))
 			}
 			a.Printf("%s\n", strings.TrimRight(strings.Join(cells, "  "), " "))
 		}

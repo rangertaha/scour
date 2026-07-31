@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package items
 
-import "github.com/urfave/cli/v3"
+import (
+	ucli "github.com/urfave/cli/v3"
 
-// newItemCmd groups everything that acts on the definition of an item.
+	"github.com/rangertaha/scour/internal/cli"
+)
+
+// Item groups everything that acts on the definition of an item.
 //
 // These were seven top-level verbs, which put `templates` and `tag` at the same
 // level as `train` and `server` and said nothing about which of them belong
 // together. They are all one subject: what you are looking for, before any
 // crawling happens. Grouping them says that, and leaves the top level to the
 // five things scour actually does.
-func newItemCmd(a *app) *cli.Command {
-	return &cli.Command{
+func Item(a *cli.App) *ucli.Command {
+	return &ucli.Command{
 		Category: "ITEMS",
 		Name:     "item",
 		Usage:    "Define items to find",
@@ -26,12 +30,12 @@ func newItemCmd(a *app) *cli.Command {
 			"Start from a schema instead of naming every property:\n" +
 			"  scour item templates\n" +
 			"  scour item add news --template article",
-		Commands: []*cli.Command{
-			newAddCmd(a),
-			newRemoveCmd(a),
-			newListCmd(a),
-			newTagCmd(a),
-			newTemplatesCmd(a),
+		Commands: []*ucli.Command{
+			Add(a),
+			Remove(a),
+			List(a),
+			Tag(a),
+			Templates(a),
 		},
 	}
 }

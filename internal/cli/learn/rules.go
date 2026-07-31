@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package learn
 
 import (
 	"context"
 	"fmt"
 	"strconv"
 
-	"github.com/urfave/cli/v3"
+	ucli "github.com/urfave/cli/v3"
+
+	"github.com/rangertaha/scour/internal/cli"
 )
 
-func newRulesCmd(a *app) *cli.Command {
-	return &cli.Command{
+func Rules(a *cli.App) *ucli.Command {
+	return &ucli.Command{
 		Category:  "TRAIN",
 		Name:      "rules",
 		ArgsUsage: "<name>",
@@ -27,8 +29,8 @@ func newRulesCmd(a *app) *cli.Command {
 			"Drop one that is wrong, then train again:\n" +
 			"  scour item rm vehicle --rule 5\n" +
 			"  scour train vehicle",
-		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one item name")
+		Action: func(c context.Context, cmd *ucli.Command) error {
+			args, err := cli.Need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -46,38 +48,38 @@ func newRulesCmd(a *app) *cli.Command {
 				return err
 			}
 
-			if a.jsonOut {
-				return writeJSON(a.Out(), rules)
+			if a.JSON {
+				return cli.WriteJSON(a.Out(), rules)
 			}
 			if len(rules) == 0 {
 				a.Printf("no rules yet: scour train %s\n", item.Name)
 				return nil
 			}
-			if a.limit > 0 && len(rules) > a.limit {
-				rules = rules[:a.limit]
+			if a.Limit > 0 && len(rules) > a.Limit {
+				rules = rules[:a.Limit]
 			}
 
-			t := newTable(
+			t := cli.NewTable(
 				[]string{"ID", "PID", "HIT", "PROP", "XPATH", "SELECTOR", "REGEX", "URL"},
-				alignRight, alignRight, alignRight, alignLeft, alignLeft, alignLeft, alignLeft, alignLeft,
+				cli.AlignRight, cli.AlignRight, cli.AlignRight, cli.AlignLeft, cli.AlignLeft, cli.AlignLeft, cli.AlignLeft, cli.AlignLeft,
 			)
 			for _, r := range rules {
 				parent := ""
 				if r.ParentID != nil {
 					parent = strconv.FormatUint(uint64(*r.ParentID), 10)
 				}
-				t.add(
+				t.Add(
 					strconv.FormatUint(uint64(r.ID), 10),
 					parent,
 					fmt.Sprintf("%.2f", r.Probability),
 					r.Prop,
-					truncate(r.XPath, 32),
-					truncate(r.Selector, 24),
-					truncate(r.Regex, 16),
-					truncate(r.URIPattern, 30),
+					cli.Truncate(r.XPath, 32),
+					cli.Truncate(r.Selector, 24),
+					cli.Truncate(r.Regex, 16),
+					cli.Truncate(r.URIPattern, 30),
 				)
 			}
-			return t.render(a.Out())
+			return t.Render(a.Out())
 		},
 	}
 }

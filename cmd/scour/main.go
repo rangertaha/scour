@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/rangertaha/scour/internal/cli"
 )
 
 func main() {
@@ -19,7 +21,7 @@ func main() {
 
 	if err := newRootCmd().Run(ctx, os.Args); err != nil {
 		// urfave has already printed usage errors; anything else is ours.
-		if !errors.Is(err, errSilent) {
+		if !errors.Is(err, cli.ErrSilent) {
 			fmt.Fprintln(os.Stderr, "scour:", err)
 		}
 		os.Exit(1)

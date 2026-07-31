@@ -84,9 +84,9 @@ type Extracted struct {
 // Records are matched by fingerprint and updated in place, so a record that
 // survives a retraining keeps both its id and its label. That matters twice
 // over: labels are the expensive part, since a person produced them, and the
-// ids are what `scour valid` and `scour invalid` are given. Deleting and
-// recreating would renumber every row, so the ids a user just read off a
-// search would label the wrong records, or nothing at all.
+// ids are what a label is given, over the API or MCP. Deleting and recreating
+// would renumber every row, so the ids someone just read off a listing would
+// label the wrong records, or nothing at all.
 //
 // Records whose fingerprint no longer appears are removed, since the model
 // stopped finding them.

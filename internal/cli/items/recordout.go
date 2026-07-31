@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package main
+package items
 
 import (
 	"context"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/rangertaha/scour/internal/cli"
 
 	"github.com/rangertaha/scour/internal/export"
 	"github.com/rangertaha/scour/internal/store"
@@ -24,7 +26,7 @@ type exportFlags struct {
 	stamp      string
 }
 
-func runExport(c context.Context, a *app, name string, f exportFlags) error {
+func runExport(c context.Context, a *cli.App, name string, f exportFlags) error {
 	s, err := a.Store()
 	if err != nil {
 		return err
@@ -65,7 +67,7 @@ func runExport(c context.Context, a *app, name string, f exportFlags) error {
 
 	// --to means a directory for file formats and a URL for the webhook, so
 	// only one of them may take it.
-	dir := a.cfg.ExportsDir()
+	dir := a.Cfg.ExportsDir()
 	if f.format != "webhook" && f.to != "" {
 		dir = f.to
 	}
@@ -95,8 +97,8 @@ func runExport(c context.Context, a *app, name string, f exportFlags) error {
 		return err
 	}
 
-	if a.jsonOut {
-		return writeJSON(a.Out(), result)
+	if a.JSON {
+		return cli.WriteJSON(a.Out(), result)
 	}
 
 	a.Printf("\n%d of %d records exported as %s to %d %s\n",
