@@ -56,6 +56,20 @@ type Prop struct {
 	Description string   `json:"description,omitempty"`
 	Examples    []string `json:"examples,omitempty"`
 	Props       []Prop   `json:"props,omitempty"`
+
+	// Pattern is what a valid value looks like. Text that does not match is
+	// not this field, whatever else about it agrees.
+	//
+	// It validates, it does not transform. Locating a value and cleaning one
+	// are different jobs, and a pattern that rewrites is only ever repairing a
+	// node that should not have been chosen: it leaves the wrong node winning
+	// and hides that it did. A pattern that rejects removes the wrong node from
+	// contention instead, so the right one can win on its own.
+	//
+	// Type already does this for the shapes a type implies, via ShapePrior.
+	// Pattern is the same idea where the knowledge is about a site rather than
+	// a type.
+	Pattern string `json:"pattern,omitempty"`
 }
 
 // Schema is an ordered set of props. It exists so a schema can be declared as

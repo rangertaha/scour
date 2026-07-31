@@ -43,20 +43,18 @@ type Property struct {
 	Name    string `gorm:"uniqueIndex:idx_prop_entity_name;not null"`
 	Type    string
 	Example string
-	// Regex extracts the value from the text at the located node, overriding
-	// the one induction would have synthesized.
+	// Regex says what a valid value looks like. Text that does not match is not
+	// this property, whatever else about it agrees.
 	//
-	// Locating a value and having the right value are different problems, and
-	// the second is not always solvable by locating better. og:title is the
-	// most reliable headline on the web and it reads "Sylva denies pride
-	// parade, festival still a go -", separator included, because the site
-	// appends its own name. No choice of node fixes that; only a transform
-	// does.
+	// It validates, it does not transform. A pattern that rewrites is only ever
+	// repairing a node that should not have been chosen: it leaves the wrong
+	// node winning and hides that it did. A pattern that rejects removes the
+	// wrong node from contention, so the right one can win on its own, which
+	// also means the improvement shows up in the locator rather than only in
+	// the output.
 	//
-	// Capture group one is the value, or the whole match when the pattern has
-	// no group, and text the pattern rejects is not extracted at all. That is
-	// the same contract induction already uses, so a taught pattern and a
-	// synthesized one are interchangeable.
+	// Type already does this for the shapes a type implies. This is the same
+	// idea where the knowledge is about a site rather than a type.
 	Regex string
 	// Description says what the field means, in words a page might also use.
 	// The matcher scores description overlap, so this is not documentation:

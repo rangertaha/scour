@@ -44,7 +44,7 @@ func newAddCmd(a *app) *cobra.Command {
 			"  scour add vehicle -u http://www.example.com/cars/\n" +
 			"  scour add vehicle -p make -e Ford\n" +
 			"  scour add news -d example.com -p author -e 'Hannah McLeod' -a byline\n" +
-			"  scour add news -d example.com -p title --regex '^(.*?) - Example News$'\n" +
+			"  scour add news -d example.com -p author --regex '^[^@]+$'\n" +
 			"  scour add vehicle --type html --type pdf",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -65,7 +65,7 @@ func newAddCmd(a *app) *cobra.Command {
 		"the property's type: string, number, bool, date, url, email (date covers times)")
 	fl.StringVarP(&f.example, "example", "e", "", "an example value for the property")
 	fl.StringVar(&f.regex, "regex", "",
-		"extract the property's value from the located text; capture group one, or the whole match")
+		"what a valid value looks like; text that does not match is not this property")
 	fl.BoolVar(&f.subdomains, "subdomains", false, "follow subdomains of the added domains")
 	fl.IntVar(&f.depth, "depth", 0, "depth limit for the added targets (0 for the configured default)")
 

@@ -130,3 +130,38 @@ func TestNoStopWordNamesAValue(t *testing.T) {
 		}
 	}
 }
+
+// A pattern says what a valid value looks like. It validates rather than
+// transforms: a pattern that rewrote would repair a node that should not have
+// been chosen, leaving the wrong node winning and hiding that it did.
+func TestPatternVetoesInvalidText(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	name := node(t, "author", "Jane Doe")
+	url := node(t, "author", "https://www.facebook.com/RugbyMadsa")
+
+	plain := schema.Prop{Name: "author", Aliases: []string{"byline"}}
+	guarded := schema.Prop{Name: "author", Aliases: []string{"byline"}, Pattern: `^[^:/@]+$`}
+
+	h := DefaultHeuristic()
+	if got := h.Score(ctx, plain, url); got == 0 {
+		t.Fatal("without a pattern the URL should still score, or the test proves nothing")
+	}
+	if got := h.Score(ctx, guarded, url); got != 0 {
+		t.Errorf("a value failing the pattern scored %.3f, want 0", got)
+	}
+	if got := h.Score(ctx, guarded, name); got == 0 {
+		t.Error("a value satisfying the pattern must be unaffected")
+	}
+}
+
+// A pattern that does not compile must not silently empty a field.
+func TestUncompilablePatternValidatesEverything(t *testing.T) {
+	t.Parallel()
+
+	p := schema.Prop{Name: "author", Pattern: "^(unclosed"}
+	if !validates(p, "anything") {
+		t.Error("a broken pattern should let text through, not reject it")
+	}
+}

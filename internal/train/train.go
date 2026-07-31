@@ -284,7 +284,7 @@ func schemaOf(entity *store.Entity) []wom.Prop {
 
 	props := make([]wom.Prop, 0, len(entity.Properties))
 	for _, p := range entity.Properties {
-		prop := wom.Prop{Name: p.Name, Description: p.Description}
+		prop := wom.Prop{Name: p.Name, Description: p.Description, Pattern: p.Regex}
 		if p.Type != "" {
 			prop.Type = wom.Type(p.Type)
 		}

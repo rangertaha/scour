@@ -9,8 +9,10 @@ package match
 import (
 	"context"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -105,6 +107,14 @@ func (h Heuristic) weights() (example, label, typ, desc float64) {
 func (h Heuristic) Score(_ context.Context, p schema.Prop, n *graph.Node) float64 {
 	text := n.Text()
 	if text == "" {
+		return 0
+	}
+	// A declared pattern says what a valid value looks like, so text that fails
+	// it is not this field however well everything else agrees. It is a veto
+	// rather than a weighted signal, for the same reason a type mismatch nearly
+	// is: a value of the wrong shape is not a weaker answer, it is a different
+	// question.
+	if !validates(p, text) {
 		return 0
 	}
 
@@ -304,6 +314,33 @@ func descriptionTokens(p schema.Prop) []string {
 		}
 	}
 	return out
+}
+
+// patternCache compiles each declared pattern once. A schema is small and
+// reused across every node in a graph, so compiling per call would dominate.
+var patternCache sync.Map // string -> *regexp.Regexp
+
+// validates reports whether text satisfies the prop's declared pattern. A prop
+// with no pattern, or one that does not compile, validates everything: a schema
+// mistake must not silently empty a field.
+func validates(p schema.Prop, text string) bool {
+	if p.Pattern == "" {
+		return true
+	}
+	re, ok := patternCache.Load(p.Pattern)
+	if !ok {
+		compiled, err := regexp.Compile(p.Pattern)
+		if err != nil {
+			patternCache.Store(p.Pattern, (*regexp.Regexp)(nil))
+			return true
+		}
+		patternCache.Store(p.Pattern, compiled)
+		re = compiled
+	}
+	if re == nil || re.(*regexp.Regexp) == nil {
+		return true
+	}
+	return re.(*regexp.Regexp).MatchString(strings.TrimSpace(text))
 }
 
 // typeScore reports whether the text parses as the declared type. A clear
