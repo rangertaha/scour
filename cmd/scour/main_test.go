@@ -61,8 +61,12 @@ func TestAddThenList(t *testing.T) {
 	if !strings.Contains(out, "vehicle") {
 		t.Errorf("list did not mention the entity:\n%s", out)
 	}
-	if !strings.Contains(out, "NAME") || !strings.Contains(out, "MATCHES") {
-		t.Errorf("list did not print the table header:\n%s", out)
+	// The listing carries what a crawl is actually judged on, not just a name
+	// and a count: what the entity has, how far it got, whether it is trained.
+	for _, col := range []string{"NAME", "TARGETS", "VISITED", "RECORDS", "TRAINED"} {
+		if !strings.Contains(out, col) {
+			t.Errorf("list did not print the %s column:\n%s", col, out)
+		}
 	}
 }
 
@@ -218,7 +222,7 @@ func TestPropertyTaughtPerDomain(t *testing.T) {
 	}
 
 	// Scoping must not quietly widen the crawl.
-	if shown := runOK(t, dir, "status", "news"); strings.Contains(shown, "targets     1") {
+	if shown := runOK(t, dir, "list", "news"); strings.Contains(shown, "targets     1") {
 		t.Errorf("--domain alongside --prop should not add a target: %s", shown)
 	}
 
@@ -226,7 +230,7 @@ func TestPropertyTaughtPerDomain(t *testing.T) {
 	runOK(t, dir, "add", "news", "-d", "other.test",
 		"-p", "author", "-e", "Jared Wright")
 
-	first := runOK(t, dir, "status", "news")
+	first := runOK(t, dir, "list", "news")
 	if !strings.Contains(first, "Hannah McLeod") && !strings.Contains(first, "example.com") {
 		t.Logf("status = %s", first)
 	}

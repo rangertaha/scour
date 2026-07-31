@@ -357,7 +357,7 @@ Check on a crawl in progress, or on where one left off. Crawls resume from the
 stored frontier:
 
 ```
-scour status vehicle
+scour list vehicle
 
 targets     3
 frontier    1204 queued / 8871 visited
@@ -412,10 +412,9 @@ output, and `--limit <n>` to cap the rows returned.
 | `scour search <name> --exclude-type <type>` | Search everything except a content type |
 | `scour valid <name> <id>...` | Label records as correct |
 | `scour invalid <name> <id>...` | Label records as wrong |
-| `scour status <name>` | Show target, frontier, match and model state |
-| `scour status` | A line per entity, for when several are being crawled |
+| `scour list` | A line per entity: what it has, how far its crawl got, whether it is trained |
+| `scour list <name>` | Everything known about one entity |
 | `scour export <name>` | Write records out as CSV, JSON, or to a webhook |
-| `scour list` | List defined entities and their match counts |
 | `scour remove <name> [-d/-u/-p/--rule]` | Remove an entity, or one of its targets, properties or rules |
 | `scour templates` | List the built-in schemas `--template` accepts |
 | `scour mcp` | Run as an MCP server over stdio |

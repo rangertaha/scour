@@ -320,7 +320,7 @@ of how sites are built, while the fitted transitions for one site are worth
 nothing on another. Same reasoning as wom shipping `DefaultChainPrior` and no
 locators.
 
-`scour status` gains a role breakdown, which is also the debugging view for the
+`scour list` gains a role breakdown, which is also the debugging view for the
 chain:
 
 ```
@@ -369,7 +369,7 @@ Chain       entity_id null, kind(extract|crawl), states, transitions json,
 
 `URL.parent_id` and `URL.role` are what the crawl chain needs: the parent edge
 reconstructs the path for Viterbi, and the role is the decoded state, which is
-also what `scour status` counts. `Chain` holds both chains, with a null
+also what `scour list` counts. `Chain` holds both chains, with a null
 `entity_id` for the shared extraction prior that transfers between entities.
 
 `Rule` is a flattened `schema.Item` tree, which is what makes `scour rules`
@@ -389,7 +389,7 @@ storage layers.
 
 **M2. Crawl, single process, no bus.** *(done)* colly `Collector` with the full
 callback set, colly's own in-memory queue and storage, page cache,
-`scour crawl --depth`, `scour status`. Scoring is `FixedScorer(1)`, named so an
+`scour crawl --depth`, `scour list`. Scoring is `FixedScorer(1)`, named so an
 untrained crawl cannot be mistaken for a trained one. Delivers the frontier
 table from the README, and proved the callback wiring before anything is
 swapped out: two bugs surfaced there that a mocked fetcher would have hidden,
@@ -437,7 +437,7 @@ outweighs the hint as it accumulates.
 induction and stored once with no entity attached, since it transfers, then
 seeded into every later induction. The crawl chain has page-role states, Viterbi
 decoding over the parent path, MAP fitting from crawl outcomes, and a role
-breakdown in `scour status` and `scour train`.
+breakdown in `scour list` and `scour train`.
 
 The gate passed: on a site whose records sit behind a hub sharing no words with
 the entity, the chain fetched 12 pages of which 10 held records; without it the
@@ -676,7 +676,7 @@ keeps what it fetched, says it stopped on the budget rather than on an exhausted
 frontier, and resumes on the next run. Verified: a two second budget fetched one
 page, and the next run picked up the remaining three.
 
-`scour status` with no name gives a line per entity, which is what a service
+`scour list` with no name gives a line per entity, which is what a service
 crawling several at once needs. The most useful column is when each was last
 trained, because an entity that has never been trained is crawling blind.
 

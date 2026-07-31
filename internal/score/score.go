@@ -34,7 +34,7 @@ type Features struct {
 
 // Scorer predicts the probability, in [0,1], that a URL leads to a match.
 type Scorer interface {
-	// Name identifies the implementation, for logs and `scour status`.
+	// Name identifies the implementation, for logs and `scour list`.
 	Name() string
 	// Score returns the probability that this link is worth fetching.
 	Score(f Features) float64

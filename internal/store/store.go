@@ -158,7 +158,7 @@ func (s *Store) settleDomains() error {
 
 	// Whether there is anything to repair is a read, and almost always the
 	// answer is no. Opening a write transaction to find that out made every
-	// command take the write lock, so `scour status` during a crawl failed with
+	// command take the write lock, so `scour list` during a crawl failed with
 	// SQLITE_BUSY: a repair that runs once was costing every open afterwards.
 	var pending int64
 	err := s.db.Raw(`

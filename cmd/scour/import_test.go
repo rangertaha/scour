@@ -42,7 +42,7 @@ func TestImportingTargetsAndProperties(t *testing.T) {
 		t.Errorf("comments or blanks were imported: %s", out)
 	}
 
-	shown := runOK(t, dir, "status", "vehicle")
+	shown := runOK(t, dir, "list", "vehicle")
 	if !strings.Contains(shown, "2 properties") {
 		t.Errorf("status = %s", shown)
 	}
@@ -69,7 +69,7 @@ func TestImportingTwiceAddsNothing(t *testing.T) {
 	runOK(t, dir, "import", "vehicle", "--urls", urls)
 	runOK(t, dir, "import", "vehicle", "--urls", urls)
 
-	shown := runOK(t, dir, "status", "vehicle")
+	shown := runOK(t, dir, "list", "vehicle")
 	if !strings.Contains(shown, "targets     2") {
 		t.Errorf("re-importing duplicated targets: %s", shown)
 	}
@@ -94,7 +94,7 @@ func TestImportingMoreThanOneBatch(t *testing.T) {
 	urls := writeFile(t, dir, "many.txt", b.String())
 	runOK(t, dir, "import", "vehicle", "--urls", urls)
 
-	shown := runOK(t, dir, "status", "vehicle")
+	shown := runOK(t, dir, "list", "vehicle")
 	if !strings.Contains(shown, fmt.Sprintf("targets     %d", lines)) {
 		t.Errorf("status = %s", shown)
 	}

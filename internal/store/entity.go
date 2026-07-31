@@ -65,7 +65,7 @@ func (s *Store) EntityFull(ctx context.Context, name string) (*Entity, error) {
 	return &e, nil
 }
 
-// EntitySummary is one row of `scour list`.
+// EntitySummary is one row of the entity listing the API and MCP serve.
 type EntitySummary struct {
 	Name    string
 	Matches int

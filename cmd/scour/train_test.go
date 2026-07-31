@@ -223,7 +223,7 @@ func TestStatusAfterTraining(t *testing.T) {
 	dir, _ := trained(t)
 	runOK(t, dir, "train", "vehicle")
 
-	out := runOK(t, dir, "status", "vehicle")
+	out := runOK(t, dir, "list", "vehicle")
 	if strings.Contains(out, "not trained yet") {
 		t.Errorf("status still says untrained after training:\n%s", out)
 	}
@@ -316,7 +316,7 @@ func TestTrainingTheScorerChangesWhatIsCrawled(t *testing.T) {
 func TestResetReallyStartsOver(t *testing.T) {
 	dir, _ := trained(t)
 
-	before := runOK(t, dir, "status", "vehicle")
+	before := runOK(t, dir, "list", "vehicle")
 	if !strings.Contains(before, "visited") {
 		t.Fatalf("nothing was crawled:\n%s", before)
 	}

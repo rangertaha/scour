@@ -77,7 +77,7 @@ func TestCrawlThenStatus(t *testing.T) {
 	runOK(t, dir, "add", "vehicle", "-u", srv.URL+"/")
 	runOK(t, dir, "crawl", "vehicle", "--depth", "5")
 
-	out := runOK(t, dir, "status", "vehicle")
+	out := runOK(t, dir, "list", "vehicle")
 	for _, want := range []string{"entity", "targets", "frontier", "visited", "cache", "matches", "model"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status missing %q:\n%s", want, out)
@@ -151,9 +151,9 @@ func TestCrawlResumesAndResets(t *testing.T) {
 	runOK(t, dir, "crawl", "vehicle", "--depth", "5")
 
 	// A second crawl sees the same pages again; the frontier persists.
-	before := runOK(t, dir, "status", "vehicle")
+	before := runOK(t, dir, "list", "vehicle")
 	runOK(t, dir, "crawl", "vehicle", "--depth", "5", "--reset")
-	after := runOK(t, dir, "status", "vehicle")
+	after := runOK(t, dir, "list", "vehicle")
 
 	if !strings.Contains(before, "visited") || !strings.Contains(after, "visited") {
 		t.Errorf("status should report visits before and after:\nbefore:\n%s\nafter:\n%s", before, after)
@@ -162,7 +162,7 @@ func TestCrawlResumesAndResets(t *testing.T) {
 
 func TestStatusOnUnknownEntity(t *testing.T) {
 	dir := crawlDir(t)
-	if _, err := run(t, dir, "status", "absent"); err == nil {
+	if _, err := run(t, dir, "list", "absent"); err == nil {
 		t.Error("status on an unknown entity must fail")
 	}
 }

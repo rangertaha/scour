@@ -189,7 +189,7 @@ func (s *Store) FetchedURLs(ctx context.Context, entityID uint) ([]URL, error) {
 	return out, nil
 }
 
-// Status summarises an entity, and is what `scour status` prints.
+// Status summarises an entity, and is what `scour list` prints.
 type Status struct {
 	Targets    int64
 	Properties int64

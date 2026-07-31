@@ -110,7 +110,6 @@ func newRootCmd() *cobra.Command {
 		newRulesCmd(a),
 		newSearchCmd(a),
 		newServerCmd(a),
-		newStatusCmd(a),
 		newTemplatesCmd(a),
 		newTrainCmd(a),
 		newUnlabelCmd(a),
