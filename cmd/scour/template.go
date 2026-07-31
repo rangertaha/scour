@@ -26,13 +26,13 @@ func fields(schema wom.Schema) []wom.Prop {
 	return schema
 }
 
-// applyTemplate copies a shipped schema onto an entity.
+// applyTemplate copies a shipped schema onto an item.
 //
 // It is the same work `scour add -p ... -e ...` does by hand, once per
 // property. The point is not the keystrokes but the aliases, descriptions and
 // examples: those are what the matcher scores a page's labels against, and
 // they are exactly what a user typing from memory leaves out.
-func applyTemplate(ctx context.Context, s *store.Store, entityID uint, name string) ([]string, error) {
+func applyTemplate(ctx context.Context, s *store.Store, itemID uint, name string) ([]string, error) {
 	schema, err := defaults.Schema(name)
 	if err != nil {
 		return nil, err
@@ -45,12 +45,12 @@ func applyTemplate(ctx context.Context, s *store.Store, entityID uint, name stri
 			example = p.Examples[0]
 		}
 
-		if err := s.AddPropertyDetail(ctx, entityID, store.PropertyDetail{
+		if err := s.AddPropertyDetail(ctx, itemID, store.PropertyDetail{
 			Name: p.Name, Type: string(p.Type), Example: example, Description: p.Description}); err != nil {
 			return nil, err
 		}
 		for _, alias := range p.Aliases {
-			if err := s.AddPropertyAlias(ctx, entityID, "", p.Name, alias); err != nil {
+			if err := s.AddPropertyAlias(ctx, itemID, "", p.Name, alias); err != nil {
 				return nil, err
 			}
 		}

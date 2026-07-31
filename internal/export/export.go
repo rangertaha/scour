@@ -51,9 +51,9 @@ type Result struct {
 type Exporter interface {
 	// Name identifies the format.
 	Name() string
-	// Export writes an entity's records, grouped as the implementation sees
+	// Export writes an item's records, grouped as the implementation sees
 	// fit, and reports where they went.
-	Export(ctx context.Context, entity string, rows []store.RecordRow) (*Result, error)
+	Export(ctx context.Context, item string, rows []store.RecordRow) (*Result, error)
 }
 
 // Factory builds an exporter.

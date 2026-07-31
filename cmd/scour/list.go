@@ -18,8 +18,8 @@ func newListCmd(a *app) *cli.Command {
 		Category:  "Reading the results",
 		Name:      "list",
 		ArgsUsage: "[name]",
-		Usage:     "List entities, or show everything known about one",
-		Description: "With no name, a line per entity: what it has, how far its crawl has got\n" +
+		Usage:     "List items, or show everything known about one",
+		Description: "With no name, a line per item: what it has, how far its crawl has got\n" +
 			"and whether it has been trained. With a name, everything known about that\n" +
 			"one.\n\n" +
 			"Crawls resume from the stored frontier, so this is also where you see what a\n" +
@@ -27,7 +27,7 @@ func newListCmd(a *app) *cli.Command {
 		UsageText: "  scour list\n" +
 			"  scour list vehicle",
 		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := atMost(cmd, 1, "at most one entity name")
+			args, err := atMost(cmd, 1, "at most one item name")
 			if err != nil {
 				return err
 			}
@@ -40,11 +40,11 @@ func newListCmd(a *app) *cli.Command {
 				return runFleetStatus(c, a, s)
 			}
 
-			entity, err := s.Entity(c, args[0])
+			item, err := s.Item(c, args[0])
 			if err != nil {
 				return err
 			}
-			st, err := s.Status(c, entity.ID)
+			st, err := s.Status(c, item.ID)
 			if err != nil {
 				return err
 			}
@@ -52,7 +52,7 @@ func newListCmd(a *app) *cli.Command {
 			if a.jsonOut {
 				return writeJSON(a.Out(), st)
 			}
-			return renderStatus(c, a, entity.Name, st)
+			return renderStatus(c, a, item.Name, st)
 		},
 	}
 }
@@ -64,7 +64,7 @@ func renderStatus(c context.Context, a *app, name string, st *store.Status) erro
 		fmt.Fprintf(out, "%-10s  %s\n", label, value)
 	}
 
-	line("entity", name)
+	line("item", name)
 	line("targets", fmt.Sprintf("%d  (%d aliases, %d properties)", st.Targets, st.Aliases, st.Properties))
 	line("frontier", fmt.Sprintf("%d queued / %d visited", st.Queued, st.Visited))
 
@@ -144,19 +144,19 @@ func joinCounts(counts map[string]int64) string {
 	return strings.Join(parts, ", ")
 }
 
-// runFleetStatus prints one line per entity.
+// runFleetStatus prints one line per item.
 //
-// A service crawling several entities at once needs the shape of the whole
+// A service crawling several items at once needs the shape of the whole
 // fleet more often than the detail of any one of them: which are stalled,
 // which are producing, which have never been trained.
 func runFleetStatus(c context.Context, a *app, s *store.Store) error {
 
-	entities, err := s.Entities(c)
+	items, err := s.Items(c)
 	if err != nil {
 		return err
 	}
-	if len(entities) == 0 {
-		a.Println("no entities yet: scour add <name>")
+	if len(items) == 0 {
+		a.Println("no items yet: scour add <name>")
 		return nil
 	}
 
@@ -170,19 +170,19 @@ func runFleetStatus(c context.Context, a *app, s *store.Store) error {
 		Trained string `json:"trained"`
 	}
 
-	rows := make([]row, 0, len(entities))
-	for _, summary := range entities {
-		entity, err := s.Entity(c, summary.Name)
+	rows := make([]row, 0, len(items))
+	for _, summary := range items {
+		item, err := s.Item(c, summary.Name)
 		if err != nil {
 			return err
 		}
-		st, err := s.Status(c, entity.ID)
+		st, err := s.Status(c, item.ID)
 		if err != nil {
 			return err
 		}
 
 		// A model that was never fitted is the single most useful thing to see
-		// across a fleet, because an untrained entity is crawling blind.
+		// across a fleet, because an untrained item is crawling blind.
 		trained := "never"
 		if st.Model != nil && !st.Model.TrainedAt.IsZero() {
 			trained = st.Model.TrainedAt.Format("2006-01-02")

@@ -11,8 +11,8 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// Subjects are named scour.<entity>.<stage>, so a subscriber can wildcard one
-// entity or all of them.
+// Subjects are named scour.<item>.<stage>, so a subscriber can wildcard one
+// item or all of them.
 const (
 	// SubjectFetched carries the outcome of one fetch.
 	SubjectFetched = "fetched"
@@ -26,17 +26,17 @@ const (
 	SubjectMetric = "metric"
 )
 
-// Subject builds the subject for one entity and stage.
-func Subject(entity, stage string) string {
-	return "scour." + sanitise(entity) + "." + stage
+// Subject builds the subject for one item and stage.
+func Subject(item, stage string) string {
+	return "scour." + sanitise(item) + "." + stage
 }
 
-// AllEntities is the wildcard form, for a component serving every entity.
-func AllEntities(stage string) string { return "scour.*." + stage }
+// AllItems is the wildcard form, for a component serving every item.
+func AllItems(stage string) string { return "scour.*." + stage }
 
-// sanitise removes the characters NATS gives meaning to, so an entity named
+// sanitise removes the characters NATS gives meaning to, so an item named
 // with a dot or a star cannot widen a subscription or split a subject.
-func sanitise(entity string) string {
+func sanitise(item string) string {
 	return strings.Map(func(r rune) rune {
 		switch r {
 		case '.', '*', '>', ' ':
@@ -44,7 +44,7 @@ func sanitise(entity string) string {
 		default:
 			return r
 		}
-	}, entity)
+	}, item)
 }
 
 // Stream names.
@@ -64,9 +64,9 @@ func (b *Bus) createStreams(ctx context.Context) error {
 		{
 			Name: StreamCrawl,
 			Subjects: []string{
-				AllEntities(SubjectFetched),
-				AllEntities(SubjectDiscovered),
-				AllEntities(SubjectWork),
+				AllItems(SubjectFetched),
+				AllItems(SubjectDiscovered),
+				AllItems(SubjectWork),
 			},
 			Retention: jetstream.WorkQueuePolicy,
 			Storage:   jetstream.MemoryStorage,
@@ -79,7 +79,7 @@ func (b *Bus) createStreams(ctx context.Context) error {
 		},
 		{
 			Name:       StreamRecords,
-			Subjects:   []string{AllEntities(SubjectRecord)},
+			Subjects:   []string{AllItems(SubjectRecord)},
 			Retention:  jetstream.WorkQueuePolicy,
 			Storage:    jetstream.MemoryStorage,
 			Discard:    jetstream.DiscardOld,
@@ -97,7 +97,7 @@ func (b *Bus) createStreams(ctx context.Context) error {
 	// can slow it down or fill a disk.
 	streams = append(streams, jetstream.StreamConfig{
 		Name:      StreamMetrics,
-		Subjects:  []string{AllEntities(SubjectMetric)},
+		Subjects:  []string{AllItems(SubjectMetric)},
 		Retention: jetstream.LimitsPolicy,
 		Storage:   jetstream.MemoryStorage,
 		Discard:   jetstream.DiscardOld,

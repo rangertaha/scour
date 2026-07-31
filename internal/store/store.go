@@ -18,7 +18,7 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// ErrNotFound is returned when a named entity, target or property does not
+// ErrNotFound is returned when a named item, target or property does not
 // exist. Callers branch on it with errors.Is.
 var ErrNotFound = errors.New("not found")
 
@@ -50,11 +50,7 @@ func Open(dsn string) (*Store, error) {
 		return nil, fmt.Errorf("open database %s: %w", dsn, err)
 	}
 
-	// Foreign keys are off by default in sqlite, which would let the cascade
-	// constraints in the models silently do nothing.
-	if err := db.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
-	}
+	// Deliberately left off until after the migrations have run; see migrate.
 	// A crawl writes from several goroutines; WAL is what makes that bearable.
 	if err := db.Exec("PRAGMA journal_mode = WAL").Error; err != nil {
 		return nil, fmt.Errorf("enable write-ahead logging: %w", err)
@@ -74,8 +70,45 @@ func Open(dsn string) (*Store, error) {
 	if err := s.migrate(); err != nil {
 		return nil, err
 	}
+	if err := s.enforceForeignKeys(); err != nil {
+		return nil, err
+	}
 	slog.Debug("store opened", "dsn", dsn)
 	return s, nil
+}
+
+// enforceForeignKeys turns on the cascade constraints, after the migrations
+// that must not run under them.
+//
+// sqlite cannot alter a table in place for most changes, so gorm rebuilds it:
+// copy to a temporary table, drop the original, rename. With foreign keys
+// enforced, dropping the original fires every ON DELETE CASCADE pointing at it,
+// and the children are gone before the rename puts the parent back. Renaming
+// properties.entity_id took every one of 154 property_aliases rows with it,
+// silently, because the rebuild itself succeeded.
+//
+// Disabling enforcement for the schema change is what sqlite's own
+// documentation prescribes. The check afterwards is the other half of it: it is
+// the only thing standing between a migration that quietly broke a reference
+// and a database that looks fine until something reads it.
+func (s *Store) enforceForeignKeys() error {
+	if err := s.db.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
+		return fmt.Errorf("enable foreign keys: %w", err)
+	}
+	var broken []struct {
+		Table  string `gorm:"column:table"`
+		RowID  int64  `gorm:"column:rowid"`
+		Parent string `gorm:"column:parent"`
+		FKID   int64  `gorm:"column:fkid"`
+	}
+	if err := s.db.Raw("PRAGMA foreign_key_check").Scan(&broken).Error; err != nil {
+		return fmt.Errorf("check foreign keys: %w", err)
+	}
+	if len(broken) > 0 {
+		return fmt.Errorf("migrate: %d rows reference something that is not there, first is %s -> %s",
+			len(broken), broken[0].Table, broken[0].Parent)
+	}
+	return nil
 }
 
 // limitPool pins the store to a single connection.
@@ -113,17 +146,24 @@ func OpenMemory() (*Store, error) {
 	if err := s.migrate(); err != nil {
 		return nil, err
 	}
+	if err := s.enforceForeignKeys(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
 func (s *Store) migrate() error {
+	// First, because every migration after it names the new column.
+	if err := s.renameItemColumns(); err != nil {
+		return err
+	}
 	// AutoMigrate adds a column but will not rebuild a unique index whose
 	// definition changed. A database created before `domain` joined
-	// (entity_id, name) therefore keeps the old two-column index, and every
+	// (item_id, name) therefore keeps the old two-column index, and every
 	// property upsert fails with "ON CONFLICT clause does not match any
 	// PRIMARY KEY or UNIQUE constraint" because the conflict target no longer
 	// exists. Dropping the stale one first lets AutoMigrate rebuild it.
-	if err := s.dropStaleIndex("properties", "idx_prop_entity_name", "domain"); err != nil {
+	if err := s.dropStaleIndex("properties", "idx_prop_item_name", "domain"); err != nil {
 		return err
 	}
 	// Before AutoMigrate, because it repairs rows the new constraints would
@@ -135,6 +175,103 @@ func (s *Store) migrate() error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	return nil
+}
+
+// itemScoped are the tables that carry a reference to the item they belong to.
+// Listed rather than discovered, so a table added later is a deliberate choice
+// here and not a silent omission.
+var itemScoped = []string{
+	"aliases", "chains", "content_types", "cookies", "model_meta", "page_roles",
+	"properties", "queue_items", "records", "rules", "targets", "urls", "visits",
+}
+
+// renameItemColumns moves a database written when an item was called an entity.
+//
+// The rename is the whole of it: no data changes, and every row keeps the id it
+// had, so a crawl's frontier and a trained model's records survive it. sqlite
+// rewrites index and foreign key definitions to follow a renamed column, which
+// is why the indexes only need their names brought into line afterwards.
+//
+// Each step checks first and is skipped when it has already happened, so this
+// costs one query per table on a database that has already moved and can be run
+// again safely if it is interrupted part way.
+func (s *Store) renameItemColumns() error {
+	// Read on s.db, before any transaction is opened. The pool is capped at a
+	// single connection, so a query issued through s.db while a transaction
+	// holds that connection waits for a connection the transaction will not
+	// release until it returns: a deadlock with no timeout, because it is the
+	// pool being waited on and not the database lock. Everything inside the
+	// transaction below therefore goes through tx.
+	tables, err := s.tableNames(s.db)
+	if err != nil {
+		return err
+	}
+	// Nothing to do for a database created since the rename, or one that has
+	// not been created yet.
+	if !tables["entities"] {
+		return nil
+	}
+	if tables["items"] {
+		return fmt.Errorf("migrate: both entities and items exist, refusing to guess which is current")
+	}
+
+	slog.Info("migrating: entity is now item")
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("ALTER TABLE entities RENAME TO items").Error; err != nil {
+			return fmt.Errorf("rename entities table: %w", err)
+		}
+		renamed := 0
+		for _, table := range itemScoped {
+			if !tables[table] {
+				continue
+			}
+			var n int64
+			if err := tx.Raw(
+				"SELECT count(*) FROM pragma_table_info(?) WHERE name = 'entity_id'", table,
+			).Scan(&n).Error; err != nil {
+				return fmt.Errorf("inspect %s: %w", table, err)
+			}
+			if n == 0 {
+				continue
+			}
+			stmt := fmt.Sprintf("ALTER TABLE %q RENAME COLUMN entity_id TO item_id", table)
+			if err := tx.Exec(stmt).Error; err != nil {
+				return fmt.Errorf("rename entity_id on %s: %w", table, err)
+			}
+			renamed++
+		}
+
+		// The indexes still work, since sqlite rewrote their definitions to
+		// follow the renamed column, but they still carry the old word in their
+		// names. Dropped rather than renamed so AutoMigrate rebuilds them from
+		// the model, which is the one place their shape is written down.
+		var stale []string
+		if err := tx.Raw(
+			"SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE '%entity%'",
+		).Scan(&stale).Error; err != nil {
+			return fmt.Errorf("list stale indexes: %w", err)
+		}
+		for _, idx := range stale {
+			if err := tx.Exec("DROP INDEX IF EXISTS " + idx).Error; err != nil {
+				return fmt.Errorf("drop stale index %s: %w", idx, err)
+			}
+		}
+		slog.Info("migrated: entity is now item", "tables", renamed, "indexes", len(stale))
+		return nil
+	})
+}
+
+// tableNames returns the tables that exist, as a set.
+func (s *Store) tableNames(db *gorm.DB) (map[string]bool, error) {
+	var names []string
+	if err := db.Raw("SELECT name FROM sqlite_master WHERE type = 'table'").Scan(&names).Error; err != nil {
+		return nil, fmt.Errorf("list tables: %w", err)
+	}
+	out := make(map[string]bool, len(names))
+	for _, n := range names {
+		out[n] = true
+	}
+	return out, nil
 }
 
 // settleDomains repairs property rows written before Domain existed.
@@ -165,7 +302,7 @@ func (s *Store) settleDomains() error {
 		SELECT COUNT(*) FROM properties WHERE domain IS NULL
 		   OR id IN (
 		      SELECT MAX(id) FROM properties
-		      GROUP BY entity_id, name, COALESCE(domain, '')
+		      GROUP BY item_id, name, COALESCE(domain, '')
 		      HAVING COUNT(*) > 1)`).Scan(&pending).Error
 	if err != nil {
 		return fmt.Errorf("check for property domains to settle: %w", err)
@@ -184,7 +321,7 @@ func (s *Store) settleDomains() error {
 		err := tx.Raw(`
 			SELECT MIN(id) AS keeper, MAX(id) AS extra, name
 			FROM properties
-			GROUP BY entity_id, name, COALESCE(domain, '')
+			GROUP BY item_id, name, COALESCE(domain, '')
 			HAVING COUNT(*) > 1`).Scan(&dups).Error
 		if err != nil {
 			return fmt.Errorf("find duplicate properties: %w", err)

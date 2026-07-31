@@ -18,16 +18,16 @@ import (
 	"github.com/rangertaha/scour/internal/store"
 )
 
-// Storage is a colly queue backed by the database, scoped to one entity.
+// Storage is a colly queue backed by the database, scoped to one item.
 //
 // Requests are popped highest score first, so once a model exists the crawler
 // spends its budget on the promising part of a site. Until then every score is
 // equal and the tie-break on insertion order gives the same breadth-first walk
 // colly would have done on its own.
 type Storage struct {
-	ctx      context.Context
-	store    *store.Store
-	entityID uint
+	ctx    context.Context
+	store  *store.Store
+	itemID uint
 
 	// scoreOf is consulted when a request is added, to decide its priority.
 	// It is set by the crawler, which is the only part that knows how to
@@ -59,9 +59,9 @@ type Storage struct {
 	frozen atomic.Bool
 }
 
-// New returns a queue storage for one entity.
-func New(ctx context.Context, s *store.Store, entityID uint) *Storage {
-	return &Storage{ctx: ctx, store: s, entityID: entityID}
+// New returns a queue storage for one item.
+func New(ctx context.Context, s *store.Store, itemID uint) *Storage {
+	return &Storage{ctx: ctx, store: s, itemID: itemID}
 }
 
 // SetScorer installs the function that assigns a priority to a serialised
@@ -131,7 +131,7 @@ func (s *Storage) AddRequest(data []byte) error {
 	if f != nil {
 		score = f(data)
 	}
-	return s.store.PushQueue(s.ctx, s.entityID, score, s.hashOf(data), data)
+	return s.store.PushQueue(s.ctx, s.itemID, score, s.hashOf(data), data)
 }
 
 // hashOf recovers the URL from a serialised request and keys it the way the
@@ -143,7 +143,7 @@ func (s *Storage) hashOf(data []byte) string {
 	if err := json.Unmarshal(data, &req); err != nil || req.URL == "" {
 		return ""
 	}
-	return store.URLHash(s.entityID, req.URL)
+	return store.URLHash(s.itemID, req.URL)
 }
 
 // GetRequest implements colly's queue.Storage.
@@ -169,10 +169,10 @@ func (s *Storage) GetRequest() ([]byte, error) {
 		return nil, store.ErrQueueEmpty
 	}
 
-	data, err := s.store.LeaseQueue(s.ctx, s.entityID, 0)
+	data, err := s.store.LeaseQueue(s.ctx, s.itemID, 0)
 	if errors.Is(err, store.ErrQueueEmpty) && s.topUp() > 0 {
 		// Empty only meant the next batch of seeds had not been queued yet.
-		data, err = s.store.LeaseQueue(s.ctx, s.entityID, 0)
+		data, err = s.store.LeaseQueue(s.ctx, s.itemID, 0)
 	}
 	if err != nil {
 		return nil, err
@@ -186,14 +186,14 @@ func (s *Storage) QueueSize() (int, error) {
 	if s.frozen.Load() {
 		return 0, nil
 	}
-	n, err := s.store.QueueSize(s.ctx, s.entityID)
+	n, err := s.store.QueueSize(s.ctx, s.itemID)
 	if err != nil || n > 0 {
 		return n, err
 	}
 	// colly stops its loop when the queue reports empty, so an empty queue with
 	// seeds still unqueued has to top up here too, not only on the read.
 	if s.topUp() > 0 {
-		return s.store.QueueSize(s.ctx, s.entityID)
+		return s.store.QueueSize(s.ctx, s.itemID)
 	}
 	return 0, nil
 }

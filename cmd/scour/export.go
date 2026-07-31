@@ -31,7 +31,7 @@ func newExportCmd(a *app) *cli.Command {
 		Category:  "Reading the results",
 		Name:      "export",
 		ArgsUsage: "<name>",
-		Usage:     "Write an entity's extracted records out as CSV, JSON or to a webhook",
+		Usage:     "Write an item's extracted records out as CSV, JSON or to a webhook",
 		Description: "Records are grouped by the domain they came from, one file per site, so an\n" +
 			"export is diffable and a site that changed shows up as a changed file.\n\n" +
 			"Files land under <data>/exports/<name>/<domain>/<date>.<ext>, and re-running\n" +
@@ -78,7 +78,7 @@ func newExportCmd(a *app) *cli.Command {
 			},
 		},
 		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one entity name")
+			args, err := need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -95,7 +95,7 @@ func runExport(c context.Context, a *app, name string, f exportFlags) error {
 		return err
 	}
 
-	entity, err := s.Entity(c, name)
+	item, err := s.Item(c, name)
 	if err != nil {
 		return err
 	}
@@ -108,7 +108,7 @@ func runExport(c context.Context, a *app, name string, f exportFlags) error {
 		}
 	}
 
-	rows, total, err := s.SearchRecords(c, entity.ID, store.RecordQuery{
+	rows, total, err := s.SearchRecords(c, item.ID, store.RecordQuery{
 		MinConfidence: f.confidence,
 		Label:         store.Label(f.label),
 		Limit:         f.limit,
@@ -119,7 +119,7 @@ func runExport(c context.Context, a *app, name string, f exportFlags) error {
 	if len(rows) == 0 {
 		// Not an error: a filter that matches nothing is a legitimate answer,
 		// and writing an empty file would be worse than saying so.
-		a.Printf("no records to export for %s\n", entity.Name)
+		a.Printf("no records to export for %s\n", item.Name)
 		return nil
 	}
 
@@ -148,7 +148,7 @@ func runExport(c context.Context, a *app, name string, f exportFlags) error {
 		return err
 	}
 
-	result, err := exporter.Export(c, entity.Name, rows)
+	result, err := exporter.Export(c, item.Name, rows)
 	if result != nil && len(result.Destinations) > 0 {
 		// Print what did go out even when the export failed part way, so a
 		// retry does not silently duplicate what was already delivered.

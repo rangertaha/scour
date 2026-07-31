@@ -33,7 +33,7 @@ func newImportCmd(a *app) *cli.Command {
 		Category:  "Defining what to look for",
 		Name:      "import",
 		ArgsUsage: "<name>",
-		Usage:     "Load targets, properties and aliases into an entity from files",
+		Usage:     "Load targets, properties and aliases into an item from files",
 		Description: "The same additions `scour add` makes one at a time, from a file. Every form\n" +
 			"is idempotent, so re-importing a file that has grown only adds what is new.\n\n" +
 			"Blank lines and lines starting with # are ignored, so a list can carry notes.",
@@ -73,7 +73,7 @@ func newImportCmd(a *app) *cli.Command {
 			},
 		},
 		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one entity name")
+			args, err := need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -100,7 +100,7 @@ func runImport(c context.Context, a *app, name string, f importFlags) error {
 		return err
 	}
 
-	entity, err := s.CreateEntity(c, name)
+	item, err := s.CreateItem(c, name)
 	if err != nil {
 		return err
 	}
@@ -108,7 +108,7 @@ func runImport(c context.Context, a *app, name string, f importFlags) error {
 	total := importResult{}
 
 	for _, path := range f.urls {
-		res, err := importTargets(c, s, entity.ID, path, store.TargetURL, normaliseURL, f)
+		res, err := importTargets(c, s, item.ID, path, store.TargetURL, normaliseURL, f)
 		if err != nil {
 			return err
 		}
@@ -117,7 +117,7 @@ func runImport(c context.Context, a *app, name string, f importFlags) error {
 	}
 
 	for _, path := range f.domains {
-		res, err := importTargets(c, s, entity.ID, path, store.TargetDomain, normaliseDomain, f)
+		res, err := importTargets(c, s, item.ID, path, store.TargetDomain, normaliseDomain, f)
 		if err != nil {
 			return err
 		}
@@ -127,7 +127,7 @@ func runImport(c context.Context, a *app, name string, f importFlags) error {
 
 	for _, path := range f.aliases {
 		res, err := eachLine(path, func(line string) error {
-			return s.AddAlias(c, entity.ID, line)
+			return s.AddAlias(c, item.ID, line)
 		})
 		if err != nil {
 			return err
@@ -137,7 +137,7 @@ func runImport(c context.Context, a *app, name string, f importFlags) error {
 	}
 
 	for _, path := range f.props {
-		res, err := importProps(c, s, entity.ID, path)
+		res, err := importProps(c, s, item.ID, path)
 		if err != nil {
 			return err
 		}
@@ -145,7 +145,7 @@ func runImport(c context.Context, a *app, name string, f importFlags) error {
 		total.add(res)
 	}
 
-	a.Printf("\n%s: %d imported", entity.Name, total.added)
+	a.Printf("\n%s: %d imported", item.Name, total.added)
 	if total.skipped > 0 {
 		a.Printf(", %d skipped", total.skipped)
 	}
@@ -175,7 +175,7 @@ func report(a *app, path, kind string, res importResult) {
 func importTargets(
 	ctx context.Context,
 	s *store.Store,
-	entityID uint,
+	itemID uint,
 	path string,
 	kind store.TargetKind,
 	normalise func(string) (string, error),
@@ -188,7 +188,7 @@ func importTargets(
 		if len(batch) == 0 {
 			return nil
 		}
-		n, err := s.AddTargets(ctx, entityID, kind, batch, f.subdomains, f.depth)
+		n, err := s.AddTargets(ctx, itemID, kind, batch, f.subdomains, f.depth)
 		if err != nil {
 			return err
 		}
@@ -262,7 +262,7 @@ func eachLine(path string, fn func(string) error) (importResult, error) {
 // file is edited by people and remembering positional order is exactly the kind
 // of thing that goes wrong quietly. A file with no header is read as
 // name,example, which is the shape someone writes by hand.
-func importProps(ctx context.Context, s *store.Store, entityID uint, path string) (importResult, error) {
+func importProps(ctx context.Context, s *store.Store, itemID uint, path string) (importResult, error) {
 	f, err := os.Open(path) //nolint:gosec // the path is given on the command line
 	if err != nil {
 		return importResult{}, fmt.Errorf("open %s: %w", path, err)
@@ -305,7 +305,7 @@ func importProps(ctx context.Context, s *store.Store, entityID uint, path string
 			continue
 		}
 
-		err = s.AddPropertyDetail(ctx, entityID, store.PropertyDetail{
+		err = s.AddPropertyDetail(ctx, itemID, store.PropertyDetail{
 			Name:        prop,
 			Type:        field(record, cols, "type"),
 			Example:     field(record, cols, "example"),
@@ -323,7 +323,7 @@ func importProps(ctx context.Context, s *store.Store, entityID uint, path string
 		// survive intact.
 		for _, alias := range strings.Split(field(record, cols, "aliases"), ";") {
 			if alias = strings.TrimSpace(alias); alias != "" {
-				if err := s.AddPropertyAlias(ctx, entityID, "", prop, alias); err != nil {
+				if err := s.AddPropertyAlias(ctx, itemID, "", prop, alias); err != nil {
 					fmt.Fprintf(os.Stderr, "%s:%d: %v\n", path, line, err)
 				}
 			}

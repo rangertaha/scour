@@ -121,7 +121,7 @@ type Cache struct {
 	Options map[string]string `toml:"options"`
 }
 
-// Store configures the database backing every entity.
+// Store configures the database backing every item.
 type Store struct {
 	Driver string `toml:"driver"`
 	DSN    string `toml:"dsn"`

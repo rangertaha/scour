@@ -15,7 +15,7 @@ import (
 )
 
 // addExamples is shown both in --help and by runAdd when a bare "scour add
-// <name>" leaves the entity with nothing to crawl, so the two never drift.
+// <name>" leaves the item with nothing to crawl, so the two never drift.
 const addExamples = "  scour add vehicle --alias car --alias 'pickup truck'\n" +
 	"  scour add vehicle -d example.com --subdomains\n" +
 	"  scour add vehicle -u http://www.example.com/cars/\n" +
@@ -47,11 +47,11 @@ func newAddCmd(a *app) *cli.Command {
 		Category:  "Defining what to look for",
 		Name:      "add",
 		ArgsUsage: "<name>",
-		Usage:     "Define an entity, or add targets, properties and aliases to one",
-		Description: "Creates the entity if it does not exist, then applies whatever else is given.\n" +
+		Usage:     "Define an item, or add targets, properties and aliases to one",
+		Description: "Creates the item if it does not exist, then applies whatever else is given.\n" +
 			"Every form is idempotent, so repeating a command is never an error.\n\n" +
 			"--prop names the subject. With it, --example, --alias, --label and --regex\n" +
-			"describe the property; without it --alias describes the entity. --domain adds a crawl\n" +
+			"describe the property; without it --alias describes the item. --domain adds a crawl\n" +
 			"target on its own, and scopes the teaching when --prop is given, so what one\n" +
 			"site calls a byline does not overwrite what the next one calls it.",
 		UsageText: addExamples,
@@ -59,7 +59,7 @@ func newAddCmd(a *app) *cli.Command {
 			&cli.StringSliceFlag{
 				Name:        "alias",
 				Aliases:     []string{"a"},
-				Usage:       "another word a page might use; for the property when --prop is given, else for the entity (repeatable)",
+				Usage:       "another word a page might use; for the property when --prop is given, else for the item (repeatable)",
 				Destination: &f.aliases,
 			},
 			&cli.StringSliceFlag{
@@ -123,7 +123,7 @@ func newAddCmd(a *app) *cli.Command {
 			},
 		},
 		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one entity name")
+			args, err := need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -155,7 +155,7 @@ func runAdd(c context.Context, a *app, name string, f addFlags) error {
 		return err
 	}
 
-	entity, err := s.CreateEntity(c, name)
+	item, err := s.CreateItem(c, name)
 	if err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func runAdd(c context.Context, a *app, name string, f addFlags) error {
 			if alias == "" {
 				continue
 			}
-			if err := s.AddAlias(c, entity.ID, alias); err != nil {
+			if err := s.AddAlias(c, item.ID, alias); err != nil {
 				return err
 			}
 			changes = append(changes, "alias "+alias)
@@ -191,7 +191,7 @@ func runAdd(c context.Context, a *app, name string, f addFlags) error {
 			if err != nil {
 				return err
 			}
-			if err := s.AddTarget(c, entity.ID, store.TargetDomain, host, f.subdomains, f.depth); err != nil {
+			if err := s.AddTarget(c, item.ID, store.TargetDomain, host, f.subdomains, f.depth); err != nil {
 				return err
 			}
 			changes = append(changes, "domain "+host)
@@ -203,14 +203,14 @@ func runAdd(c context.Context, a *app, name string, f addFlags) error {
 		if err != nil {
 			return err
 		}
-		if err := s.AddTarget(c, entity.ID, store.TargetURL, normalised, f.subdomains, f.depth); err != nil {
+		if err := s.AddTarget(c, item.ID, store.TargetURL, normalised, f.subdomains, f.depth); err != nil {
 			return err
 		}
 		changes = append(changes, "url "+normalised)
 	}
 
 	if f.template != "" {
-		added, err := applyTemplate(c, s, entity.ID, f.template)
+		added, err := applyTemplate(c, s, item.ID, f.template)
 		if err != nil {
 			return err
 		}
@@ -218,7 +218,7 @@ func runAdd(c context.Context, a *app, name string, f addFlags) error {
 	}
 
 	if f.prop != "" {
-		if err := s.AddPropertyDetail(c, entity.ID, store.PropertyDetail{
+		if err := s.AddPropertyDetail(c, item.ID, store.PropertyDetail{
 			Domain: scope, Name: f.prop, Type: f.propType,
 			Example: f.example, Regex: f.regex, Label: f.label}); err != nil {
 			return err
@@ -234,7 +234,7 @@ func runAdd(c context.Context, a *app, name string, f addFlags) error {
 			if alias == "" {
 				continue
 			}
-			if err := s.AddPropertyAlias(c, entity.ID, scope, f.prop, alias); err != nil {
+			if err := s.AddPropertyAlias(c, item.ID, scope, f.prop, alias); err != nil {
 				return err
 			}
 			changes = append(changes, "alias "+alias+" for "+f.prop+where)
@@ -242,24 +242,24 @@ func runAdd(c context.Context, a *app, name string, f addFlags) error {
 	}
 
 	for _, t := range f.types {
-		if err := s.AddContentType(c, entity.ID, strings.ToLower(t)); err != nil {
+		if err := s.AddContentType(c, item.ID, strings.ToLower(t)); err != nil {
 			return err
 		}
 		changes = append(changes, "type "+t)
 	}
 
 	if len(changes) == 0 {
-		// The entity exists now, which is worth saying, but on its own it can
+		// The item exists now, which is worth saying, but on its own it can
 		// do nothing: it has no targets to crawl and no properties to look for.
 		// Naming it and stopping tells someone their command worked when what
 		// it did was leave them exactly where they were.
-		a.Printf("entity %s: nothing added yet, so there is nothing to crawl\n\n", entity.Name)
+		a.Printf("item %s: nothing added yet, so there is nothing to crawl\n\n", item.Name)
 		a.Printf("Add what to look for, and where to look:\n%s\n\n", addExamples)
-		a.Printf("Then: scour crawl %s\nSee also: scour add --help\n", entity.Name)
+		a.Printf("Then: scour crawl %s\nSee also: scour add --help\n", item.Name)
 		return nil
 	}
 	for _, change := range changes {
-		a.Printf("%s: %s\n", entity.Name, change)
+		a.Printf("%s: %s\n", item.Name, change)
 	}
 	return nil
 }

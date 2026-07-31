@@ -13,7 +13,7 @@ import (
 // tunnelSite is the case the crawl chain exists for.
 //
 // The pages holding records sit behind hubs whose own URLs share no words with
-// the entity: /listing/ and /p/N/ look nothing like "vehicle" or "car", and
+// the item: /listing/ and /p/N/ look nothing like "vehicle" or "car", and
 // the hubs hold no records themselves. A scorer that judges a URL on its own
 // tokens therefore rates them no higher than the noise, and a crawl that
 // believes it never reaches the records at all.

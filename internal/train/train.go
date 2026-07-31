@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package train induces an entity's extraction rules from its cached pages,
+// Package train induces an item's extraction rules from its cached pages,
 // and applies them.
 //
 // Induction is expensive and happens once; extraction is cheap and happens per
-// page. wom draws that line for us, and this package is where scour's entities
+// page. wom draws that line for us, and this package is where scour's items
 // and labels meet it.
 package train
 
@@ -25,8 +25,8 @@ import (
 	"github.com/rangertaha/scour/internal/wom"
 )
 
-// ErrNoProperties is returned when an entity has nothing to look for.
-var ErrNoProperties = errors.New("entity has no properties")
+// ErrNoProperties is returned when an item has nothing to look for.
+var ErrNoProperties = errors.New("item has no properties")
 
 // Trainer induces and applies models.
 type Trainer struct {
@@ -99,22 +99,22 @@ type Options struct {
 	NoChain bool
 }
 
-// Run induces an entity's model from its cached pages, saves it, stores the
+// Run induces an item's model from its cached pages, saves it, stores the
 // rules it produced, and extracts records with it.
 //
 // Induction and extraction happen together because a model nobody has applied
 // tells you nothing about whether it works. The records it produces are what
 // `scour search` then shows and what labelling corrects.
-func (t *Trainer) Run(ctx context.Context, entity *store.Entity, opts Options) (*Result, error) {
+func (t *Trainer) Run(ctx context.Context, item *store.Item, opts Options) (*Result, error) {
 	start := time.Now()
 
-	props := schemaOf(entity)
+	props := schemaOf(item)
 	if len(props) == 0 {
-		return nil, fmt.Errorf("%w: scour add %s -p <prop> -e <example>", ErrNoProperties, entity.Name)
+		return nil, fmt.Errorf("%w: scour add %s -p <prop> -e <example>", ErrNoProperties, item.Name)
 	}
 
 	// The field-order chain describes how people write records rather than how
-	// one site marks them up, so it transfers: every entity's induction is
+	// one site marks them up, so it transfers: every item's induction is
 	// seeded with what every previous one learned.
 	prior, err := t.loadFieldChain(ctx)
 	if err != nil {
@@ -136,7 +136,7 @@ func (t *Trainer) Run(ctx context.Context, entity *store.Entity, opts Options) (
 		womOpts = append(womOpts, wom.WithMatcher(m))
 	}
 
-	loaded, err := parse.Load(ctx, t.store, t.cache, entity.ID, parse.Options{
+	loaded, err := parse.Load(ctx, t.store, t.cache, item.ID, parse.Options{
 		Limit: opts.Limit,
 		Types: opts.Types,
 		WOM:   womOpts,
@@ -147,7 +147,7 @@ func (t *Trainer) Run(ctx context.Context, entity *store.Entity, opts Options) (
 
 	model, err := loaded.Graph.Model(props...)
 	if err != nil {
-		return nil, fmt.Errorf("induce model for %s: %w", entity.Name, err)
+		return nil, fmt.Errorf("induce model for %s: %w", item.Name, err)
 	}
 
 	// A taught pattern is authoritative over the synthesized one. Induction
@@ -162,22 +162,22 @@ func (t *Trainer) Run(ctx context.Context, entity *store.Entity, opts Options) (
 	// Corrections are authoritative in wom, so labelled records feed straight
 	// back into the chain. Without labels there is nothing to correct and the
 	// prior stands.
-	corrected, err := t.applyLabels(ctx, entity, model, loaded.Graph)
+	corrected, err := t.applyLabels(ctx, item, model, loaded.Graph)
 	if err != nil {
 		return nil, err
 	}
 
-	path, err := t.saveModel(entity, model)
+	path, err := t.saveModel(item, model)
 	if err != nil {
 		return nil, err
 	}
 
 	rules := flatten(model.Items)
-	if err := t.store.ReplaceRules(ctx, entity.ID, rules); err != nil {
+	if err := t.store.ReplaceRules(ctx, item.ID, rules); err != nil {
 		return nil, err
 	}
 
-	records, err := t.extract(ctx, entity, model, loaded)
+	records, err := t.extract(ctx, item, model, loaded)
 	if err != nil {
 		return nil, err
 	}
@@ -186,13 +186,13 @@ func (t *Trainer) Run(ctx context.Context, entity *store.Entity, opts Options) (
 	// the site, and the records are what those beliefs actually produced. A
 	// rule count that holds while records fall is the shape of a site changing
 	// under a model that has not noticed.
-	labels := map[string]string{"entity": entity.Name}
+	labels := map[string]string{"item": item.Name}
 	t.measure(ctx, bus.MetricRules, float64(len(rules)), labels)
 	t.measure(ctx, bus.MetricRecords, float64(records), labels)
 
 	// The scorer is trained last, because it learns from which pages produced
 	// records, which is only known once extraction has run.
-	scoring, err := t.trainScorer(ctx, entity)
+	scoring, err := t.trainScorer(ctx, item)
 	if err != nil {
 		return nil, err
 	}
@@ -201,13 +201,13 @@ func (t *Trainer) Run(ctx context.Context, entity *store.Entity, opts Options) (
 	// which is what lets it credit a page for where it leads.
 	var chain *ChainResult
 	if !opts.NoChain {
-		if chain, err = t.trainChain(ctx, entity); err != nil {
+		if chain, err = t.trainChain(ctx, item); err != nil {
 			return nil, err
 		}
 	}
 
 	meta := store.ModelMeta{
-		EntityID:     entity.ID,
+		ItemID:       item.ID,
 		Path:         scoring.Path,
 		Algorithm:    t.cfg.Model.Scorer,
 		Accuracy:     scoring.Accuracy,
@@ -239,8 +239,8 @@ func (t *Trainer) Run(ctx context.Context, entity *store.Entity, opts Options) (
 
 // applyLabels feeds corrections back into the model's chain. A record marked
 // invalid is not evidence of where a field lives, so only valid ones are kept.
-func (t *Trainer) applyLabels(ctx context.Context, entity *store.Entity, model *wom.Model, graph *wom.WOM) (int, error) {
-	_, total, err := t.store.SearchRecords(ctx, entity.ID, store.RecordQuery{Label: store.Valid})
+func (t *Trainer) applyLabels(ctx context.Context, item *store.Item, model *wom.Model, graph *wom.WOM) (int, error) {
+	_, total, err := t.store.SearchRecords(ctx, item.ID, store.RecordQuery{Label: store.Valid})
 	if err != nil {
 		return 0, err
 	}
@@ -259,12 +259,12 @@ func (t *Trainer) applyLabels(ctx context.Context, entity *store.Entity, model *
 	return int(total), nil
 }
 
-func (t *Trainer) saveModel(entity *store.Entity, model *wom.Model) (string, error) {
+func (t *Trainer) saveModel(item *store.Item, model *wom.Model) (string, error) {
 	dir := t.cfg.ModelsDir()
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", fmt.Errorf("create models directory: %w", err)
 	}
-	path := t.cfg.ExtractModelPath(entity.Name)
+	path := t.cfg.ExtractModelPath(item.Name)
 	if err := model.Save(path); err != nil {
 		return "", fmt.Errorf("save model: %w", err)
 	}
@@ -272,7 +272,7 @@ func (t *Trainer) saveModel(entity *store.Entity, model *wom.Model) (string, err
 }
 
 // extract applies the model and stores what it finds.
-func (t *Trainer) extract(ctx context.Context, entity *store.Entity, model *wom.Model, loaded *parse.Result) (int, error) {
+func (t *Trainer) extract(ctx context.Context, item *store.Item, model *wom.Model, loaded *parse.Result) (int, error) {
 	found := model.Extract(loaded.Graph)
 	if len(found) == 0 {
 		return 0, nil
@@ -299,30 +299,30 @@ func (t *Trainer) extract(ctx context.Context, entity *store.Entity, model *wom.
 		}
 	}
 
-	saved, err := t.store.SaveRecords(ctx, entity.ID, records)
+	saved, err := t.store.SaveRecords(ctx, item.ID, records)
 	if err != nil {
 		return 0, err
 	}
-	if err := t.store.SetURLMatches(ctx, entity.ID, counts); err != nil {
+	if err := t.store.SetURLMatches(ctx, item.ID, counts); err != nil {
 		return 0, err
 	}
 	return saved, nil
 }
 
-// schemaOf turns an entity into the wom schema that describes it: one record
-// prop named after the entity, carrying its aliases, with a child per property.
-func schemaOf(entity *store.Entity) []wom.Prop {
-	if len(entity.Properties) == 0 {
+// schemaOf turns an item into the wom schema that describes it: one record
+// prop named after the item, carrying its aliases, with a child per property.
+func schemaOf(item *store.Item) []wom.Prop {
+	if len(item.Properties) == 0 {
 		return nil
 	}
 
-	aliases := make([]string, 0, len(entity.Aliases))
-	for _, a := range entity.Aliases {
+	aliases := make([]string, 0, len(item.Aliases))
+	for _, a := range item.Aliases {
 		aliases = append(aliases, a.Word)
 	}
 
-	props := make([]wom.Prop, 0, len(entity.Properties))
-	for _, p := range entity.Properties {
+	props := make([]wom.Prop, 0, len(item.Properties))
+	for _, p := range item.Properties {
 		prop := wom.Prop{Name: p.Name, Description: p.Description, Pattern: p.Regex, Label: p.Label}
 		if p.Type != "" {
 			prop.Type = wom.Type(p.Type)
@@ -341,7 +341,7 @@ func schemaOf(entity *store.Entity) []wom.Prop {
 	}
 
 	return []wom.Prop{{
-		Name:    entity.Name,
+		Name:    item.Name,
 		Aliases: aliases,
 		Props:   props,
 	}}

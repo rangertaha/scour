@@ -26,7 +26,7 @@ func newTrainCmd(a *app) *cli.Command {
 		Category:  "Learning where the data is",
 		Name:      "train",
 		ArgsUsage: "<name>",
-		Usage:     "Learn where an entity's properties live, from the pages already crawled",
+		Usage:     "Learn where an item's properties live, from the pages already crawled",
 		Description: "Reads the cached pages, works out an extraction rule per property, saves the\n" +
 			"model, and applies it. Records you have labelled valid feed back in, so each\n" +
 			"round of labelling sharpens the next model.",
@@ -50,7 +50,7 @@ func newTrainCmd(a *app) *cli.Command {
 			},
 		},
 		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one entity name")
+			args, err := need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -67,7 +67,7 @@ func runTrain(c context.Context, a *app, name string, f trainFlags) error {
 		return err
 	}
 
-	entity, err := s.EntityFull(c, name)
+	item, err := s.ItemFull(c, name)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func runTrain(c context.Context, a *app, name string, f trainFlags) error {
 		return err
 	}
 	trainer := train.New(a.cfg, s, pages)
-	result, err := trainer.Run(c, entity, train.Options{
+	result, err := trainer.Run(c, item, train.Options{
 		Limit:   f.limit,
 		Types:   types,
 		NoChain: f.noChain,

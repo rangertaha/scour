@@ -67,7 +67,7 @@ func (w *Work) Init() error { return nil }
 // AddRequest implements colly's queue.Storage, and deliberately drops.
 //
 // Links a crawler finds are published as discovered and judged by the store,
-// which is the only component holding the entity's scope. Queueing them here
+// which is the only component holding the item's scope. Queueing them here
 // as well would fetch them without that check, and without the scoring that
 // decides what is worth fetching next.
 func (w *Work) AddRequest([]byte) error { return nil }

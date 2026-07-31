@@ -81,17 +81,17 @@ func TestHealthNeedsNothing(t *testing.T) {
 	}
 }
 
-func TestEntityLifecycle(t *testing.T) {
+func TestItemLifecycle(t *testing.T) {
 	srv := newServer(t, nil)
 
-	w := do(t, srv, http.MethodPost, "/v1/entities",
+	w := do(t, srv, http.MethodPost, "/v1/items",
 		`{"name":"vehicle","aliases":["car"],"urls":["http://example.com/cars/"],
 		  "properties":[{"name":"make","example":"Ford","aliases":["manufacturer"]}]}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("create = %d: %s", w.Code, w.Body)
 	}
 
-	w = do(t, srv, http.MethodGet, "/v1/entities/vehicle", "")
+	w = do(t, srv, http.MethodGet, "/v1/items/vehicle", "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("get = %d: %s", w.Code, w.Body)
 	}
@@ -101,50 +101,50 @@ func TestEntityLifecycle(t *testing.T) {
 		t.Errorf("property aliases were lost: %s", w.Body)
 	}
 
-	w = do(t, srv, http.MethodGet, "/v1/entities", "")
+	w = do(t, srv, http.MethodGet, "/v1/items", "")
 	if !strings.Contains(w.Body.String(), "vehicle") {
 		t.Errorf("list = %s", w.Body)
 	}
 
-	if w := do(t, srv, http.MethodDelete, "/v1/entities/vehicle", ""); w.Code != http.StatusNoContent {
+	if w := do(t, srv, http.MethodDelete, "/v1/items/vehicle", ""); w.Code != http.StatusNoContent {
 		t.Errorf("delete = %d: %s", w.Code, w.Body)
 	}
-	if w := do(t, srv, http.MethodGet, "/v1/entities/vehicle", ""); w.Code != http.StatusNotFound {
+	if w := do(t, srv, http.MethodGet, "/v1/items/vehicle", ""); w.Code != http.StatusNotFound {
 		t.Errorf("get after delete = %d", w.Code)
 	}
 }
 
-// Creating the same entity twice must be safe, because the API mirrors a CLI
+// Creating the same item twice must be safe, because the API mirrors a CLI
 // whose every form is idempotent.
 func TestCreatingTwiceIsSafe(t *testing.T) {
 	srv := newServer(t, nil)
 	body := `{"name":"vehicle","aliases":["car"],"urls":["http://example.com/"]}`
 
 	for i := range 2 {
-		if w := do(t, srv, http.MethodPost, "/v1/entities", body); w.Code != http.StatusOK {
+		if w := do(t, srv, http.MethodPost, "/v1/items", body); w.Code != http.StatusOK {
 			t.Fatalf("create %d = %d: %s", i, w.Code, w.Body)
 		}
 	}
 
-	w := do(t, srv, http.MethodGet, "/v1/entities/vehicle", "")
-	var entity store.Entity
-	if err := json.Unmarshal(w.Body.Bytes(), &entity); err != nil {
+	w := do(t, srv, http.MethodGet, "/v1/items/vehicle", "")
+	var item store.Item
+	if err := json.Unmarshal(w.Body.Bytes(), &item); err != nil {
 		t.Fatal(err)
 	}
-	if len(entity.Aliases) != 1 || len(entity.Targets) != 1 {
+	if len(item.Aliases) != 1 || len(item.Targets) != 1 {
 		t.Errorf("repeating the request duplicated things: %d aliases, %d targets",
-			len(entity.Aliases), len(entity.Targets))
+			len(item.Aliases), len(item.Targets))
 	}
 }
 
-func TestMissingEntityIsNotFound(t *testing.T) {
+func TestMissingItemIsNotFound(t *testing.T) {
 	srv := newServer(t, nil)
 
 	for _, path := range []string{
-		"/v1/entities/nope",
-		"/v1/entities/nope/frontier",
-		"/v1/entities/nope/rules",
-		"/v1/entities/nope/records",
+		"/v1/items/nope",
+		"/v1/items/nope/frontier",
+		"/v1/items/nope/rules",
+		"/v1/items/nope/records",
 	} {
 		if w := do(t, srv, http.MethodGet, path, ""); w.Code != http.StatusNotFound {
 			t.Errorf("%s = %d, want 404", path, w.Code)
@@ -156,9 +156,9 @@ func TestBadRequests(t *testing.T) {
 	srv := newServer(t, nil)
 
 	tests := []struct{ name, method, path, body string }{
-		{"no name", http.MethodPost, "/v1/entities", `{"aliases":["car"]}`},
-		{"malformed json", http.MethodPost, "/v1/entities", `{"name":`},
-		{"unknown field", http.MethodPost, "/v1/entities", `{"name":"x","nonsense":1}`},
+		{"no name", http.MethodPost, "/v1/items", `{"aliases":["car"]}`},
+		{"malformed json", http.MethodPost, "/v1/items", `{"name":`},
+		{"unknown field", http.MethodPost, "/v1/items", `{"name":"x","nonsense":1}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -169,16 +169,16 @@ func TestBadRequests(t *testing.T) {
 	}
 }
 
-// An entity with no targets cannot be crawled, and saying so on the request
+// An item with no targets cannot be crawled, and saying so on the request
 // beats a job that fails a minute later somewhere else.
 func TestCrawlingWithoutTargetsFailsImmediately(t *testing.T) {
 	srv := newServer(t, nil)
 
-	if w := do(t, srv, http.MethodPost, "/v1/entities", `{"name":"vehicle"}`); w.Code != http.StatusOK {
+	if w := do(t, srv, http.MethodPost, "/v1/items", `{"name":"vehicle"}`); w.Code != http.StatusOK {
 		t.Fatal(w.Body.String())
 	}
 
-	w := do(t, srv, http.MethodPost, "/v1/entities/vehicle/crawl", `{}`)
+	w := do(t, srv, http.MethodPost, "/v1/items/vehicle/crawl", `{}`)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400: %s", w.Code, w.Body)
 	}
@@ -190,7 +190,7 @@ func TestCrawlingWithoutTargetsFailsImmediately(t *testing.T) {
 func TestUnknownTemplateIsRejected(t *testing.T) {
 	srv := newServer(t, nil)
 
-	w := do(t, srv, http.MethodPost, "/v1/entities", `{"name":"x","template":"nonexistent"}`)
+	w := do(t, srv, http.MethodPost, "/v1/items", `{"name":"x","template":"nonexistent"}`)
 	if w.Code != http.StatusBadRequest && w.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d", w.Code)
 	}
@@ -202,17 +202,17 @@ func TestUnknownTemplateIsRejected(t *testing.T) {
 func TestTemplateFillsProperties(t *testing.T) {
 	srv := newServer(t, nil)
 
-	w := do(t, srv, http.MethodPost, "/v1/entities", `{"name":"cars","template":"vehicle"}`)
+	w := do(t, srv, http.MethodPost, "/v1/items", `{"name":"cars","template":"vehicle"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body)
 	}
 
-	var entity store.Entity
-	if err := json.Unmarshal(w.Body.Bytes(), &entity); err != nil {
+	var item store.Item
+	if err := json.Unmarshal(w.Body.Bytes(), &item); err != nil {
 		t.Fatal(err)
 	}
-	if len(entity.Properties) < 5 {
-		t.Errorf("template gave %d properties", len(entity.Properties))
+	if len(item.Properties) < 5 {
+		t.Errorf("template gave %d properties", len(item.Properties))
 	}
 }
 
@@ -231,7 +231,7 @@ func TestMetricsAreServed(t *testing.T) {
 	srv := newServer(t, nil)
 
 	do(t, srv, http.MethodGet, "/healthz", "")
-	do(t, srv, http.MethodGet, "/v1/entities/nope", "")
+	do(t, srv, http.MethodGet, "/v1/items/nope", "")
 
 	w := do(t, srv, http.MethodGet, "/metrics", "")
 	if w.Code != http.StatusOK {
@@ -290,7 +290,7 @@ func TestAuth(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w := do(t, srv, http.MethodGet, "/v1/entities", "", "Authorization", tt.header)
+			w := do(t, srv, http.MethodGet, "/v1/items", "", "Authorization", tt.header)
 			if w.Code != tt.want {
 				t.Errorf("status = %d, want %d", w.Code, tt.want)
 			}
@@ -318,7 +318,7 @@ func TestUnauthorizedAdvertisesTheScheme(t *testing.T) {
 	path := tokenFile(t, "s3cret")
 	srv := newServer(t, func(c *config.Config) { c.Server.TokenFile = path })
 
-	w := do(t, srv, http.MethodGet, "/v1/entities", "")
+	w := do(t, srv, http.MethodGet, "/v1/items", "")
 	if got := w.Header().Get("WWW-Authenticate"); !strings.Contains(got, "Bearer") {
 		t.Errorf("WWW-Authenticate = %q", got)
 	}
@@ -349,7 +349,7 @@ func TestNoTokenFileMeansNoAuth(t *testing.T) {
 	if srv.auth.Enabled() {
 		t.Error("auth should be off when no token file is configured")
 	}
-	if w := do(t, srv, http.MethodGet, "/v1/entities", ""); w.Code != http.StatusOK {
+	if w := do(t, srv, http.MethodGet, "/v1/items", ""); w.Code != http.StatusOK {
 		t.Errorf("status = %d", w.Code)
 	}
 }

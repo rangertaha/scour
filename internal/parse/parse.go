@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package parse turns an entity's cached pages into a wom graph.
+// Package parse turns an item's cached pages into a wom graph.
 //
 // Everything downstream of the fetch works on that graph: induction reads it to
 // locate fields, extraction applies a model to it. Building it from the cache
@@ -21,7 +21,7 @@ import (
 	"github.com/rangertaha/scour/internal/wom"
 )
 
-// ErrNoPages is returned when an entity has nothing cached to work from.
+// ErrNoPages is returned when an item has nothing cached to work from.
 var ErrNoPages = errors.New("no cached pages: run scour crawl first")
 
 // Result is a built graph and what went into it.
@@ -47,13 +47,13 @@ type Options struct {
 	WOM []wom.Option
 }
 
-// Load reads an entity's cached pages into a graph.
+// Load reads an item's cached pages into a graph.
 //
 // A page whose body has fallen out of the cache is skipped rather than fatal:
 // the cache is disposable by design, so a partial corpus is a smaller corpus,
 // not a failure.
-func Load(ctx context.Context, s *store.Store, pages cache.Store, entityID uint, opts Options) (*Result, error) {
-	rows, err := s.FetchedURLs(ctx, entityID)
+func Load(ctx context.Context, s *store.Store, pages cache.Store, itemID uint, opts Options) (*Result, error) {
+	rows, err := s.FetchedURLs(ctx, itemID)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func Load(ctx context.Context, s *store.Store, pages cache.Store, entityID uint,
 	}
 
 	if res.Pages == 0 {
-		return nil, fmt.Errorf("entity has %d fetched pages, none of them parseable: %w", len(rows), ErrNoPages)
+		return nil, fmt.Errorf("item has %d fetched pages, none of them parseable: %w", len(rows), ErrNoPages)
 	}
 	return res, nil
 }

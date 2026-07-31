@@ -28,7 +28,7 @@ func newSearchCmd(a *app) *cli.Command {
 		Category:  "Reading the results",
 		Name:      "search",
 		ArgsUsage: "<name>",
-		Usage:     "Search the records extracted for an entity",
+		Usage:     "Search the records extracted for an item",
 		Description: "One row per match, one column per property you defined. FORMAT is the content\n" +
 			"type the record came from, which is how you tell whether one source is\n" +
 			"dragging the results down.",
@@ -63,7 +63,7 @@ func newSearchCmd(a *app) *cli.Command {
 			},
 		},
 		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one entity name")
+			args, err := need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -91,12 +91,12 @@ func runSearch(c context.Context, a *app, name string, f searchFlags) error {
 		return err
 	}
 
-	entity, err := s.EntityFull(c, name)
+	item, err := s.ItemFull(c, name)
 	if err != nil {
 		return err
 	}
 
-	rows, total, err := s.SearchRecords(c, entity.ID, store.RecordQuery{
+	rows, total, err := s.SearchRecords(c, item.ID, store.RecordQuery{
 		MinConfidence: f.confidence,
 		Formats:       f.types,
 		ExcludeFormat: f.excludeType,
@@ -114,20 +114,20 @@ func runSearch(c context.Context, a *app, name string, f searchFlags) error {
 		filtered := f.confidence > 0 || len(f.types) > 0 || len(f.excludeType) > 0 || label != ""
 		if filtered {
 			// total is already filtered, so it says nothing about whether the
-			// entity has records at all. Ask again without the filters rather
+			// item has records at all. Ask again without the filters rather
 			// than telling someone to train a model they have already trained.
-			_, all, err := s.SearchRecords(c, entity.ID, store.RecordQuery{})
+			_, all, err := s.SearchRecords(c, item.ID, store.RecordQuery{})
 			if err != nil {
 				return err
 			}
 			a.Printf("no records matched, out of %d\n", all)
 			return nil
 		}
-		a.Printf("no records yet: scour train %s\n", entity.Name)
+		a.Printf("no records yet: scour train %s\n", item.Name)
 		return nil
 	}
 
-	props := propOrder(entity, rows)
+	props := propOrder(item, rows)
 	headers := append([]string{"ID", "CONF", "FORMAT"}, upper(props)...)
 	aligns := []align{alignRight, alignRight, alignLeft}
 	for range props {
@@ -154,13 +154,13 @@ func runSearch(c context.Context, a *app, name string, f searchFlags) error {
 	return nil
 }
 
-// propOrder lists the columns to print: the entity's own properties in the
+// propOrder lists the columns to print: the item's own properties in the
 // order they were defined, then anything extraction found that is not one of
 // them, so a surprise field is visible rather than silently dropped.
-func propOrder(entity *store.Entity, rows []store.RecordRow) []string {
+func propOrder(item *store.Item, rows []store.RecordRow) []string {
 	seen := map[string]bool{}
-	props := make([]string, 0, len(entity.Properties))
-	for _, p := range entity.Properties {
+	props := make([]string, 0, len(item.Properties))
+	for _, p := range item.Properties {
 		props = append(props, p.Name)
 		seen[p.Name] = true
 	}

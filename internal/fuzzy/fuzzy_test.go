@@ -38,7 +38,7 @@ func TestNearest(t *testing.T) {
 		{"Search", "search", commands},
 		{"VEHICLE", "vehicle", []string{"vehicle", "news"}},
 
-		// Hyphens and the names people actually give entities.
+		// Hyphens and the names people actually give items.
 		{"newshtml", "news-html", []string{"news-html", "news-feeds", "vehicle"}},
 		{"news-feed", "news-feeds", []string{"news-html", "news-feeds", "vehicle"}},
 

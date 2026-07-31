@@ -192,7 +192,7 @@ func TestRecordsWithUnparseableURLsAreKept(t *testing.T) {
 	}
 }
 
-// An entity name reaches this from user input, so a separator in it must not
+// An item name reaches this from user input, so a separator in it must not
 // write outside the export directory.
 func TestNamesCannotEscapeTheDirectory(t *testing.T) {
 	// The property that matters is that the result stays inside the export
@@ -282,7 +282,7 @@ func TestWebhookPostsRecords(t *testing.T) {
 		t.Fatalf("got %d requests, want one per domain", len(got))
 	}
 	for _, body := range got {
-		if body.Entity != "vehicle" || body.Domain == "" || body.Batches < 1 {
+		if body.Item != "vehicle" || body.Domain == "" || body.Batches < 1 {
 			t.Errorf("payload = %+v", body)
 		}
 	}

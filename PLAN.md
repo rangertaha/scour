@@ -17,7 +17,7 @@ argument for using it:
 
 | README | wom |
 | --- | --- |
-| entity, aliases, properties, examples | `wom.Prop{Name, Aliases, Examples, Props}` |
+| item, aliases, properties, examples | `wom.Prop{Name, Aliases, Examples, Props}` |
 | `scour train` | `w.Model(schema...)`, plus `model.Train` from corrected items |
 | `scour rules` output (ID, PID, HIT, XPATH, SELECTOR, REGEX, URL) | `schema.Item` and `schema.Locator`, nested, each with `p=` |
 | `models/<name>.json` | `model.Save(path)` |
@@ -81,10 +81,10 @@ config, and `scour run --role crawl` starts a subset.
   (`w.AddBody(url, contentType, body)`), publishes `doc.parsed` carrying
   discovered links, extracted text and the graph handle.
 - **scorer** consumes `doc.parsed`, scores every discovered link against the
-  entity's model, publishes `url.scored` which the queue consumes. Also
+  item's model, publishes `url.scored` which the queue consumes. Also
   scores the page itself, which is what fills the `MATCHES` and `PROBABILITY`
   columns.
-- **extractor** consumes `doc.parsed`, applies the entity's saved wom model,
+- **extractor** consumes `doc.parsed`, applies the item's saved wom model,
   publishes `record.new`.
 - **trainer** consumes `train.req`, replays cached pages into a wom graph, runs
   induction plus `model.Train` over labelled items, writes the model, publishes
@@ -95,7 +95,7 @@ config, and `scour run --role crawl` starts a subset.
 
 ### 2.2 Subjects and streams
 
-Subjects are `scour.<entity>.<stage>` so a subscriber can wildcard one entity or
+Subjects are `scour.<item>.<stage>` so a subscriber can wildcard one item or
 all of them. JetStream carries the work queues so a restart resumes rather than
 losing the frontier.
 
@@ -117,7 +117,7 @@ integration:
 
 | Callback | What scour does there |
 | --- | --- |
-| `OnRequest` | Attach entity, depth and trace id to `r.Ctx`; abort if the extension clearly disagrees with the allowed content types, which is the pre-request half of the type filter |
+| `OnRequest` | Attach item, depth and trace id to `r.Ctx`; abort if the extension clearly disagrees with the allowed content types, which is the pre-request half of the type filter |
 | `OnResponseHeaders` | Check the real `Content-Type` and `Content-Length`; `r.Request.Abort()` on mismatch or oversize, so an unwanted body is never downloaded |
 | `OnResponse` | Write the body to the page cache, publish `fetch.res` |
 | `OnHTML("a[href]")` | Collect links, score them, and `e.Request.Visit` only those above the cutoff. Scoring happens here, so colly's own depth and domain rules still apply on top |
@@ -271,7 +271,7 @@ on two different axes.
 properly rather than reimplement it: enable it during induction, persist the
 fitted chain, and reuse it. Because a chain describes how people write records
 rather than how one site marks them up, it transfers across sites and across
-entities, so it is stored once at `models/chain.json` and seeded into every
+items, so it is stored once at `models/chain.json` and seeded into every
 induction:
 
 ```go
@@ -350,27 +350,27 @@ machines and leave the rest of the pipeline light.
 ## 7. Data model (gorm)
 
 ```
-Entity      id, name, created_at
-Alias       entity_id, word
-Property    entity_id, name, type, example
-Target      entity_id, kind(domain|url), value, subdomains, depth
+Item      id, name, created_at
+Alias       item_id, word
+Property    item_id, name, type, example
+Target      item_id, kind(domain|url), value, subdomains, depth
 Host        host, rate, concurrency, robots, transport   -- learned or configured
-URL         entity_id, hash unique, url, parent_id, depth, score, role,
+URL         item_id, hash unique, url, parent_id, depth, score, role,
             status, content_type, size, latency, fetched_at, next_at
 Response    url_id, status, headers, cache_key, fetched_at
-Rule        entity_id, parent_id, prop, xpath, selector, path, regex,
+Rule        item_id, parent_id, prop, xpath, selector, path, regex,
             uri_pattern, probability, support
-Record      entity_id, url_id, fingerprint unique, confidence, format, label
+Record      item_id, url_id, fingerprint unique, confidence, format, label
 Value       record_id, prop, text
-ModelMeta   entity_id, path, algorithm, accuracy, trained_at, observations
-Chain       entity_id null, kind(extract|crawl), states, transitions json,
+ModelMeta   item_id, path, algorithm, accuracy, trained_at, observations
+Chain       item_id null, kind(extract|crawl), states, transitions json,
             observations, fitted_at
 ```
 
 `URL.parent_id` and `URL.role` are what the crawl chain needs: the parent edge
 reconstructs the path for Viterbi, and the role is the decoded state, which is
 also what `scour list` counts. `Chain` holds both chains, with a null
-`entity_id` for the shared extraction prior that transfers between entities.
+`item_id` for the shared extraction prior that transfers between items.
 
 `Rule` is a flattened `schema.Item` tree, which is what makes `scour rules`
 a plain select. `Record.label` is the enum the README's CSV export column
@@ -420,7 +420,7 @@ fingerprint rather than replaced, because labelling is given ids a user
 read off a search: renumbering them on every retrain would label the wrong rows.
 
 **M4. Real scoring.** *(done)* Naive bayes over URL, anchor and depth tokens,
-trained from crawl outcomes and labels, persisted per entity at
+trained from crawl outcomes and labels, persisted per item at
 `models/<name>.score.json`. The queue pops in score order, which is the moment
 scour becomes a focused crawler rather than a crawler.
 
@@ -428,19 +428,19 @@ Measured on a site with 20 pages holding records among 65 that do not: a cold
 crawl fetched all 85, of which 23% paid off; after one training round the same
 crawl fetched 22 pages, 21 of them in the section holding the records.
 
-The cold start is a seeded model rather than a separate code path: the entity's
+The cold start is a seeded model rather than a separate code path: the item's
 name, aliases and property examples enter as pseudo-counts worth three
 observations each, so a first crawl already has a direction and real evidence
 outweighs the hint as it accumulates.
 
 **M4.5. Sequence models.** *(done)* wom's field-order chain is fitted during
-induction and stored once with no entity attached, since it transfers, then
+induction and stored once with no item attached, since it transfers, then
 seeded into every later induction. The crawl chain has page-role states, Viterbi
 decoding over the parent path, MAP fitting from crawl outcomes, and a role
 breakdown in `scour list` and `scour train`.
 
 The gate passed: on a site whose records sit behind a hub sharing no words with
-the entity, the chain fetched 12 pages of which 10 held records; without it the
+the item, the chain fetched 12 pages of which 10 held records; without it the
 crawl fetched a single page and found none, because the scorer had learned that
 the hub itself was worthless. `scour train --no-chain` keeps that comparison
 runnable.
@@ -608,14 +608,14 @@ more confidence, but it is no longer annihilated. On the demo site the same
 nine-field template went from 0 records to 3, one per vehicle.
 
 **M8. Server.** *(done)* `internal/server` serves the same scour the command
-line drives: one database, one set of models, one cache. An entity created over
-the API is the entity the CLI sees, because both go through the store rather
+line drives: one database, one set of models, one cache. An item created over
+the API is the item the CLI sees, because both go through the store rather
 than through each other.
 
 Reads answer immediately; crawling and training return a job id. An HTTP request
 that blocks for the minutes a crawl takes is one that times out somewhere in
 the middle, leaving the caller unable to find out what happened. Jobs are also
-where the concurrency guard lives: the same entity cannot be crawled twice at
+where the concurrency guard lives: the same item cannot be crawled twice at
 once, since two crawls would race on the frontier and double the load on
 somebody else's server. A second request gets 409 with the id of the run that
 is already going, which is the useful answer rather than an error. The work is
@@ -661,7 +661,7 @@ changed file rather than as a diff across everything ever crawled. CSV takes the
 union of every record's fields rather than the first record's, because
 extraction is per page and a column appearing only in row 500 would otherwise be
 dropped silently. The webhook posts in batches, and reports what it delivered
-before a failure so a retry does not double-deliver. Entity names and domains
+before a failure so a retry does not double-deliver. Item names and domains
 both reach the path from user input, so they are reduced to a single safe
 segment; the test asserts the result cannot escape the export directory rather
 than asserting a string, which is the property that actually matters.
@@ -676,9 +676,9 @@ keeps what it fetched, says it stopped on the budget rather than on an exhausted
 frontier, and resumes on the next run. Verified: a two second budget fetched one
 page, and the next run picked up the remaining three.
 
-`scour list` with no name gives a line per entity, which is what a service
+`scour list` with no name gives a line per item, which is what a service
 crawling several at once needs. The most useful column is when each was last
-trained, because an entity that has never been trained is crawling blind.
+trained, because an item that has never been trained is crawling blind.
 
 **M10. Page classification.** *(done, off by default)* `internal/classify`
 reads a fetched page and says what it is about, which breaks a circularity in
@@ -700,9 +700,9 @@ a page *is about* is recognition, and a model this size can do the second and
 not the first. Rewritten as subject matter, the same model on the same pages
 went from 1 of 5 to 5 of 5.
 
-Then the entity's name turned out to carry the whole question:
+Then the item's name turned out to carry the whole question:
 
-| Entity name | name alone | name plus aliases |
+| Item name | name alone | name plus aliases |
 | --- | --- | --- |
 | `vehicle`, a real word | **9/10**, no false positives | 7/10, three false positives |
 | `api-cars`, coined | 2/10 | 7/10, three false positives |
@@ -712,12 +712,12 @@ Two things follow. Offering the aliases as extra ways to say "yes" looks
 obviously helpful and is not: it lifts a coined name from 2 to 7 and drops a
 real one from 9 to 7, always by inventing the same three false positives. That
 is the assent bias again in a different hat, and it is why the classifier asks
-about the entity's name alone. And a false positive is the expensive error here:
+about the item's name alone. And a false positive is the expensive error here:
 without a classifier an off-topic page is correctly negative because it yielded
 no records, so a classifier that calls it relevant is strictly worse than none.
 
 Hence the default is off, and the benchmark is the tool for deciding whether to
-turn it on for a given model and a given entity. Named after what it actually
+turn it on for a given model and a given item. Named after what it actually
 collects, the classifier removes false negatives at no cost; named `proj7`, it
 should stay off.
 
@@ -889,7 +889,7 @@ Mirrors what `wom` already does, so the two repos feel like one codebase.
 - `log/slog` with structured attributes, no `fmt.Println` and no third-party
   logger. Levels: `error` for lost work, `warn` for degraded, `info` for
   lifecycle, `debug` for per-URL detail.
-- One request-scoped logger carrying `entity`, `url` and `host`, passed on the
+- One request-scoped logger carrying `item`, `url` and `host`, passed on the
   context.
 - Prometheus metrics from the start: fetch count by status class, fetch
   duration, queue depth, records extracted, model accuracy. These are the same
@@ -967,6 +967,6 @@ Same files as wom, same targets, so muscle memory carries over:
    induction testable against fixed documents. The open question is where the
    line moves as the matchers get richer: an LLM matcher wants a cache and a
    budget, and neither is a document concern.
-4. **Per-entity versus global frontier.** Two entities crawling the same host
+4. **Per-item versus global frontier.** Two items crawling the same host
    should share politeness state but not queues. The `Host` table is shared, the
-   `URL` table is per entity, which resolves it, but the accounting needs care.
+   `URL` table is per item, which resolves it, but the accounting needs care.

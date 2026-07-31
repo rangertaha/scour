@@ -37,39 +37,39 @@ func TestOpenCreatesMissingDirectories(t *testing.T) {
 	}
 	defer s.Close()
 
-	if _, err := s.CreateEntity(context.Background(), "vehicle"); err != nil {
-		t.Fatalf("CreateEntity: %v", err)
+	if _, err := s.CreateItem(context.Background(), "vehicle"); err != nil {
+		t.Fatalf("CreateItem: %v", err)
 	}
 }
 
-func TestCreateEntityIsIdempotent(t *testing.T) {
+func TestCreateItemIsIdempotent(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
 
-	first, err := s.CreateEntity(ctx, "vehicle")
+	first, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
-		t.Fatalf("CreateEntity: %v", err)
+		t.Fatalf("CreateItem: %v", err)
 	}
-	second, err := s.CreateEntity(ctx, "vehicle")
+	second, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
-		t.Fatalf("CreateEntity again: %v", err)
+		t.Fatalf("CreateItem again: %v", err)
 	}
 	if first.ID != second.ID {
-		t.Errorf("ids %d and %d differ; adding to an entity twice must not fork it", first.ID, second.ID)
+		t.Errorf("ids %d and %d differ; adding to an item twice must not fork it", first.ID, second.ID)
 	}
 
-	rows, err := s.Entities(ctx)
+	rows, err := s.Items(ctx)
 	if err != nil {
-		t.Fatalf("Entities: %v", err)
+		t.Fatalf("Items: %v", err)
 	}
 	if len(rows) != 1 {
-		t.Fatalf("got %d entities, want 1", len(rows))
+		t.Fatalf("got %d items, want 1", len(rows))
 	}
 }
 
-func TestEntityNotFound(t *testing.T) {
+func TestItemNotFound(t *testing.T) {
 	s := open(t)
-	_, err := s.Entity(context.Background(), "absent")
+	_, err := s.Item(context.Background(), "absent")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
@@ -79,7 +79,7 @@ func TestAddIsIdempotentThroughout(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
 
-	e, err := s.CreateEntity(ctx, "vehicle")
+	e, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestAddIsIdempotentThroughout(t *testing.T) {
 		}
 	}
 
-	full, err := s.EntityFull(ctx, "vehicle")
+	full, err := s.ItemFull(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestAddPropertyUpdatesTheExample(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
 
-	e, err := s.CreateEntity(ctx, "vehicle")
+	e, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestAddPropertyUpdatesTheExample(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	full, err := s.EntityFull(ctx, "vehicle")
+	full, err := s.ItemFull(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestAddTargetUpdatesDepthAndSubdomains(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
 
-	e, err := s.CreateEntity(ctx, "vehicle")
+	e, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestAddTargetUpdatesDepthAndSubdomains(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	full, err := s.EntityFull(ctx, "vehicle")
+	full, err := s.ItemFull(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,10 +172,10 @@ func TestEmptyNamesAreRejected(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
 
-	if _, err := s.CreateEntity(ctx, "  "); err == nil {
-		t.Error("an empty entity name must be rejected")
+	if _, err := s.CreateItem(ctx, "  "); err == nil {
+		t.Error("an empty item name must be rejected")
 	}
-	e, err := s.CreateEntity(ctx, "vehicle")
+	e, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,11 +190,11 @@ func TestEmptyNamesAreRejected(t *testing.T) {
 	}
 }
 
-func TestDeleteEntityRemovesEverythingBelowIt(t *testing.T) {
+func TestDeleteItemRemovesEverythingBelowIt(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
 
-	e, err := s.CreateEntity(ctx, "vehicle")
+	e, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestDeleteEntityRemovesEverythingBelowIt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec := Record{EntityID: e.ID, Fingerprint: "abc", Label: Unlabelled}
+	rec := Record{ItemID: e.ID, Fingerprint: "abc", Label: Unlabelled}
 	if err := s.DB().Create(&rec).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -216,8 +216,8 @@ func TestDeleteEntityRemovesEverythingBelowIt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.DeleteEntity(ctx, "vehicle"); err != nil {
-		t.Fatalf("DeleteEntity: %v", err)
+	if err := s.DeleteItem(ctx, "vehicle"); err != nil {
+		t.Fatalf("DeleteItem: %v", err)
 	}
 
 	for _, tc := range []struct {
@@ -230,7 +230,7 @@ func TestDeleteEntityRemovesEverythingBelowIt(t *testing.T) {
 		{"records", &Record{}},
 	} {
 		var n int64
-		if err := s.DB().Model(tc.model).Where("entity_id = ?", e.ID).Count(&n).Error; err != nil {
+		if err := s.DB().Model(tc.model).Where("item_id = ?", e.ID).Count(&n).Error; err != nil {
 			t.Fatal(err)
 		}
 		if n != 0 {
@@ -251,7 +251,7 @@ func TestDeleteMissingThingsReportNotFound(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
 
-	e, err := s.CreateEntity(ctx, "vehicle")
+	e, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,30 +265,30 @@ func TestDeleteMissingThingsReportNotFound(t *testing.T) {
 	if err := s.DeleteRule(ctx, e.ID, 999); !errors.Is(err, ErrNotFound) {
 		t.Errorf("DeleteRule err = %v, want ErrNotFound", err)
 	}
-	if err := s.DeleteEntity(ctx, "absent"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("DeleteEntity err = %v, want ErrNotFound", err)
+	if err := s.DeleteItem(ctx, "absent"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("DeleteItem err = %v, want ErrNotFound", err)
 	}
 }
 
-func TestEntitiesCountsMatches(t *testing.T) {
+func TestItemsCountsMatches(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
 
-	vehicle, err := s.CreateEntity(ctx, "vehicle")
+	vehicle, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateEntity(ctx, "article"); err != nil {
+	if _, err := s.CreateItem(ctx, "article"); err != nil {
 		t.Fatal(err)
 	}
 
 	for _, fp := range []string{"a", "b", "c"} {
-		if err := s.DB().Create(&Record{EntityID: vehicle.ID, Fingerprint: fp, Label: Unlabelled}).Error; err != nil {
+		if err := s.DB().Create(&Record{ItemID: vehicle.ID, Fingerprint: fp, Label: Unlabelled}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	rows, err := s.Entities(ctx)
+	rows, err := s.Items(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,12 +308,12 @@ func TestEntitiesCountsMatches(t *testing.T) {
 // changes what the field means there and nowhere else.
 func TestPropertiesForResolvesPerDomain(t *testing.T) {
 	s, ctx := open(t), context.Background()
-	e, err := s.CreateEntity(ctx, "news")
+	e, err := s.CreateItem(ctx, "news")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// The entity's default schema.
+	// The item's default schema.
 	if err := s.AddPropertyDetail(ctx, e.ID, PropertyDetail{
 		Name: "author", Type: "string", Example: "Jane Doe", Description: "who wrote it"}); err != nil {
 		t.Fatal(err)
@@ -354,7 +354,7 @@ func TestPropertiesForResolvesPerDomain(t *testing.T) {
 		t.Errorf("author regex = %q, want the taught one", got)
 	}
 	if got := byName["title"].Example; got != "A headline" {
-		t.Errorf("title example = %q, want the entity default", got)
+		t.Errorf("title example = %q, want the item default", got)
 	}
 
 	// An untaught site keeps the defaults untouched.
@@ -390,7 +390,7 @@ func TestNormaliseDomain(t *testing.T) {
 // A pattern that does not compile must be refused when it is taught.
 func TestTaughtRegexIsValidated(t *testing.T) {
 	s, ctx := open(t), context.Background()
-	e, err := s.CreateEntity(ctx, "news")
+	e, err := s.CreateItem(ctx, "news")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestTaughtRegexIsValidated(t *testing.T) {
 
 // AutoMigrate adds a column but will not rebuild a unique index whose
 // definition changed, so a database created before `domain` joined
-// (entity_id, name) kept the two-column index and every property upsert failed
+// (item_id, name) kept the two-column index and every property upsert failed
 // with "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE
 // constraint". Opening it again has to repair that.
 func TestOpeningRepairsAStaleUniqueIndex(t *testing.T) {
@@ -413,11 +413,11 @@ func TestOpeningRepairsAStaleUniqueIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Put the pre-domain index back, which is what an older database holds.
-	if err := s.db.Exec("DROP INDEX IF EXISTS idx_prop_entity_name").Error; err != nil {
+	if err := s.db.Exec("DROP INDEX IF EXISTS idx_prop_item_name").Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := s.db.Exec(
-		"CREATE UNIQUE INDEX idx_prop_entity_name ON properties(entity_id, name)").Error; err != nil {
+		"CREATE UNIQUE INDEX idx_prop_item_name ON properties(item_id, name)").Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -429,7 +429,7 @@ func TestOpeningRepairsAStaleUniqueIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	e, err := reopened.CreateEntity(ctx, "news")
+	e, err := reopened.CreateItem(ctx, "news")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +465,7 @@ func TestOpeningSettlesDomainsAddedToExistingRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	e, err := s.CreateEntity(ctx, "news")
+	e, err := s.CreateItem(ctx, "news")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +484,7 @@ func TestOpeningSettlesDomainsAddedToExistingRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.db.Exec(
-		"INSERT INTO properties (entity_id, domain, name, example) VALUES (?, '', 'link', '')",
+		"INSERT INTO properties (item_id, domain, name, example) VALUES (?, '', 'link', '')",
 		e.ID).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +518,7 @@ func TestOpeningSettlesDomainsAddedToExistingRows(t *testing.T) {
 func TestALeasedItemComesBackIfNothingReportsIt(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
-	e, err := s.CreateEntity(ctx, "news")
+	e, err := s.CreateItem(ctx, "news")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,7 +562,7 @@ func TestALeasedItemComesBackIfNothingReportsIt(t *testing.T) {
 func TestRecordingAFetchReleasesTheFrontierItem(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
-	e, err := s.CreateEntity(ctx, "news")
+	e, err := s.CreateItem(ctx, "news")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,7 +577,7 @@ func TestRecordingAFetchReleasesTheFrontierItem(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := s.RecordFetch(ctx, Fetched{
-			EntityID: e.ID, URL: raw, Status: status, StatusCode: 200,
+			ItemID: e.ID, URL: raw, Status: status, StatusCode: 200,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -598,7 +598,7 @@ func TestRecordingAFetchReleasesTheFrontierItem(t *testing.T) {
 func TestAnItemNothingReportsIsEventuallyAbandoned(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
-	e, err := s.CreateEntity(ctx, "news")
+	e, err := s.CreateItem(ctx, "news")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,7 +633,7 @@ func TestAnItemNothingReportsIsEventuallyAbandoned(t *testing.T) {
 func TestLeasingSkipsHostsAskedTooRecently(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
-	e, err := s.CreateEntity(ctx, "news")
+	e, err := s.CreateItem(ctx, "news")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -691,47 +691,47 @@ func TestLeasingSkipsHostsAskedTooRecently(t *testing.T) {
 
 // Pausing keeps everything: the frontier, its order and its leases. It stops
 // work being handed out, and nothing else.
-func TestPausingHidesAnEntityFromTheDispatcher(t *testing.T) {
+func TestPausingHidesAnItemFromTheDispatcher(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
-	busy, err := s.CreateEntity(ctx, "busy")
+	busy, err := s.CreateItem(ctx, "busy")
 	if err != nil {
 		t.Fatal(err)
 	}
-	quiet, err := s.CreateEntity(ctx, "quiet")
+	quiet, err := s.CreateItem(ctx, "quiet")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	for _, e := range []*Entity{busy, quiet} {
+	for _, e := range []*Item{busy, quiet} {
 		raw := "http://example.com/" + e.Name
 		if err := s.PushQueue(ctx, e.ID, 1, URLHash(e.ID, raw), []byte(`{"URL":"`+raw+`"}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	ids, err := s.QueuedEntities(ctx)
+	ids, err := s.QueuedItems(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(ids) != 2 {
-		t.Fatalf("got %d entities with work, want 2", len(ids))
+		t.Fatalf("got %d items with work, want 2", len(ids))
 	}
 
 	if err := s.SetPaused(ctx, quiet.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	ids, err = s.QueuedEntities(ctx)
+	ids, err = s.QueuedItems(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(ids) != 1 || ids[0] != busy.ID {
-		t.Errorf("got %v, want only the entity that is not paused", ids)
+		t.Errorf("got %v, want only the item that is not paused", ids)
 	}
 
 	// The frontier is untouched, so resuming carries on rather than restarting.
 	var queued int64
-	if err := s.DB().Model(&QueueItem{}).Where("entity_id = ?", quiet.ID).
+	if err := s.DB().Model(&QueueItem{}).Where("item_id = ?", quiet.ID).
 		Count(&queued).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -742,8 +742,8 @@ func TestPausingHidesAnEntityFromTheDispatcher(t *testing.T) {
 	if err := s.SetPaused(ctx, quiet.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	if ids, err = s.QueuedEntities(ctx); err != nil || len(ids) != 2 {
-		t.Errorf("resuming did not bring the entity back: %v %v", ids, err)
+	if ids, err = s.QueuedItems(ctx); err != nil || len(ids) != 2 {
+		t.Errorf("resuming did not bring the item back: %v %v", ids, err)
 	}
 }
 
@@ -752,7 +752,7 @@ func TestPausingHidesAnEntityFromTheDispatcher(t *testing.T) {
 func TestFetchRateComesFromTheDatabase(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
-	e, err := s.CreateEntity(ctx, "news")
+	e, err := s.CreateItem(ctx, "news")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -764,7 +764,7 @@ func TestFetchRateComesFromTheDatabase(t *testing.T) {
 	for i := range 20 {
 		raw := fmt.Sprintf("http://example.com/%d", i)
 		if err := s.RecordFetch(ctx, Fetched{
-			EntityID: e.ID, URL: raw, Status: URLFetched, StatusCode: 200,
+			ItemID: e.ID, URL: raw, Status: URLFetched, StatusCode: 200,
 		}); err != nil {
 			t.Fatal(err)
 		}

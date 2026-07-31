@@ -47,10 +47,10 @@ func TestMaxPagesIsNotExceeded(t *testing.T) {
 	for _, limit := range []int{1, 2, 3, 5, 8, 13} {
 		srv := wideSite(t, 60, 30*time.Millisecond)
 		c, s, _ := harness(t)
-		e, targets := entity(t, s, srv.URL)
+		e, targets := item(t, s, srv.URL)
 
 		result, err := c.Run(context.Background(), Options{
-			Entity: e, Targets: targets, Types: types(t, "html"), Depth: 5, Limit: limit,
+			Item: e, Targets: targets, Types: types(t, "html"), Depth: 5, Limit: limit,
 		})
 		if err != nil {
 			t.Fatalf("Run: %v", err)
@@ -71,10 +71,10 @@ func TestMaxPagesHoldsUnderConcurrency(t *testing.T) {
 	_, s, cfg := harness(t)
 	cfg.Crawl.Concurrency = 16
 	c := New(cfg, s, cache.Local(cfg.PagesDir()))
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 
 	result, err := c.Run(context.Background(), Options{
-		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 5, Limit: 10,
+		Item: e, Targets: targets, Types: types(t, "html"), Depth: 5, Limit: 10,
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -90,11 +90,11 @@ func TestMaxPagesHoldsUnderConcurrency(t *testing.T) {
 func TestBudgetedCrawlResumes(t *testing.T) {
 	srv := wideSite(t, 60, 5*time.Millisecond)
 	c, s, _ := harness(t)
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 	ctx := context.Background()
 
 	first, err := c.Run(ctx, Options{
-		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 5, Limit: 5,
+		Item: e, Targets: targets, Types: types(t, "html"), Depth: 5, Limit: 5,
 	})
 	if err != nil {
 		t.Fatalf("first run: %v", err)
@@ -113,7 +113,7 @@ func TestBudgetedCrawlResumes(t *testing.T) {
 	}
 
 	second, err := c.Run(ctx, Options{
-		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 5, Limit: 5,
+		Item: e, Targets: targets, Types: types(t, "html"), Depth: 5, Limit: 5,
 	})
 	if err != nil {
 		t.Fatalf("second run: %v", err)

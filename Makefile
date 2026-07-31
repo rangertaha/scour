@@ -103,8 +103,8 @@ NEWS_DIR      ?= $(HOME)/Downloads/NEWS
 FEED_LIST     ?= $(NEWS_DIR)/FEED.lst
 SITE_LIST     ?= $(NEWS_DIR)/URLS.lst
 
-FEED_ENTITY   ?= news-feeds
-SITE_ENTITY   ?= news-sites
+FEED_ITEM   ?= news-feeds
+SITE_ITEM   ?= news-sites
 
 # Budgets. A crawl that hits one stops cleanly and leaves the frontier where it
 # is, so the next run resumes rather than starting over.
@@ -123,22 +123,22 @@ news-feeds: news-feeds-import news-feeds-crawl news-feeds-train news-feeds-expor
 .PHONY: news-feeds-import
 news-feeds-import: build ## Load the feed list and give it an article schema
 	@test -f '$(FEED_LIST)' || { echo "no feed list at $(FEED_LIST); set FEED_LIST="; exit 1; }
-	$(SCOUR) add $(FEED_ENTITY) --template article
-	$(SCOUR) add $(FEED_ENTITY) --type feed --type xml
-	$(SCOUR) import $(FEED_ENTITY) --urls '$(FEED_LIST)'
+	$(SCOUR) add $(FEED_ITEM) --template article
+	$(SCOUR) add $(FEED_ITEM) --type feed --type xml
+	$(SCOUR) import $(FEED_ITEM) --urls '$(FEED_LIST)'
 
 .PHONY: news-feeds-crawl
 news-feeds-crawl: build ## Fetch the feeds, one level deep
-	$(SCOUR) crawl $(FEED_ENTITY) --depth 1 \
+	$(SCOUR) crawl $(FEED_ITEM) --depth 1 \
 		--max-pages $(FEED_PAGES) --max-time $(FEED_TIME)
 
 .PHONY: news-feeds-train
 news-feeds-train: build ## Learn where an article's fields live inside a feed
-	$(SCOUR) train $(FEED_ENTITY)
+	$(SCOUR) train $(FEED_ITEM)
 
 .PHONY: news-feeds-export
 news-feeds-export: build ## Write the articles out, one file per domain
-	$(SCOUR) export $(FEED_ENTITY) --format $(EXPORT_FORMAT)
+	$(SCOUR) export $(FEED_ITEM) --format $(EXPORT_FORMAT)
 
 .PHONY: news-articles
 news-articles: news-articles-import news-articles-crawl news-articles-train news-articles-export ## Import, crawl, train and export the news sites
@@ -146,31 +146,31 @@ news-articles: news-articles-import news-articles-crawl news-articles-train news
 .PHONY: news-articles-import
 news-articles-import: build ## Load the site list and give it an article schema
 	@test -f '$(SITE_LIST)' || { echo "no site list at $(SITE_LIST); set SITE_LIST="; exit 1; }
-	$(SCOUR) add $(SITE_ENTITY) --template article
-	$(SCOUR) add $(SITE_ENTITY) --type html
-	$(SCOUR) import $(SITE_ENTITY) --urls '$(SITE_LIST)'
+	$(SCOUR) add $(SITE_ITEM) --template article
+	$(SCOUR) add $(SITE_ITEM) --type html
+	$(SCOUR) import $(SITE_ITEM) --urls '$(SITE_LIST)'
 
 .PHONY: news-articles-crawl
 news-articles-crawl: build ## Crawl the news sites, bounded by pages and time
-	$(SCOUR) crawl $(SITE_ENTITY) --depth $(SITE_DEPTH) \
+	$(SCOUR) crawl $(SITE_ITEM) --depth $(SITE_DEPTH) \
 		--max-pages $(SITE_PAGES) --max-time $(SITE_TIME)
 
 .PHONY: news-articles-train
 news-articles-train: build ## Learn where an article's fields live on a page
-	$(SCOUR) train $(SITE_ENTITY)
+	$(SCOUR) train $(SITE_ITEM)
 
 .PHONY: news-articles-export
 news-articles-export: build ## Write the articles out, one file per domain
-	$(SCOUR) export $(SITE_ENTITY) --format $(EXPORT_FORMAT)
+	$(SCOUR) export $(SITE_ITEM) --format $(EXPORT_FORMAT)
 
 # Microdata is the third shape, and the easiest one. A page carrying schema.org
 # attributes or OpenGraph tags has already declared what it is, so extraction
 # is reading a label rather than inferring one. It is worth running over the
-# same sites as a separate entity: what a page says about itself and what its
+# same sites as a separate item: what a page says about itself and what its
 # markup implies are different claims, and comparing them is how you find out
 # which to trust.
 
-MICRO_ENTITY  ?= news-microdata
+MICRO_ITEM  ?= news-microdata
 MICRO_PAGES   ?= 1000
 MICRO_TIME    ?= 20m
 MICRO_DEPTH   ?= 2
@@ -181,32 +181,32 @@ news-microdata: news-microdata-import news-microdata-crawl news-microdata-train 
 .PHONY: news-microdata-import
 news-microdata-import: build ## Load the site list with a schema.org and OpenGraph schema
 	@test -f '$(SITE_LIST)' || { echo "no site list at $(SITE_LIST); set SITE_LIST="; exit 1; }
-	$(SCOUR) add $(MICRO_ENTITY) --template microdata
-	$(SCOUR) add $(MICRO_ENTITY) --type html
-	$(SCOUR) import $(MICRO_ENTITY) --urls '$(SITE_LIST)'
+	$(SCOUR) add $(MICRO_ITEM) --template microdata
+	$(SCOUR) add $(MICRO_ITEM) --type html
+	$(SCOUR) import $(MICRO_ITEM) --urls '$(SITE_LIST)'
 
 .PHONY: news-microdata-crawl
 news-microdata-crawl: build ## Crawl for pages that declare their own structure
-	$(SCOUR) crawl $(MICRO_ENTITY) --depth $(MICRO_DEPTH) \
+	$(SCOUR) crawl $(MICRO_ITEM) --depth $(MICRO_DEPTH) \
 		--max-pages $(MICRO_PAGES) --max-time $(MICRO_TIME)
 
 .PHONY: news-microdata-train
 news-microdata-train: build ## Learn where the declared fields live
-	$(SCOUR) train $(MICRO_ENTITY)
+	$(SCOUR) train $(MICRO_ITEM)
 
 .PHONY: news-microdata-export
 news-microdata-export: build ## Write the declared data out, one file per domain
-	$(SCOUR) export $(MICRO_ENTITY) --format $(EXPORT_FORMAT)
+	$(SCOUR) export $(MICRO_ITEM) --format $(EXPORT_FORMAT)
 
 .PHONY: news-status
 news-status: build ## Show both corpora side by side
 	$(SCOUR) status
 
 .PHONY: news-clean
-news-clean: build ## Delete the news entities and everything crawled for them
-	-$(SCOUR) remove $(FEED_ENTITY)
-	-$(SCOUR) remove $(SITE_ENTITY)
-	-$(SCOUR) remove $(MICRO_ENTITY)
+news-clean: build ## Delete the news items and everything crawled for them
+	-$(SCOUR) remove $(FEED_ITEM)
+	-$(SCOUR) remove $(SITE_ITEM)
+	-$(SCOUR) remove $(MICRO_ITEM)
 
 .PHONY: news
 news: news-feeds news-articles news-microdata ## Run all three news pipelines end to end

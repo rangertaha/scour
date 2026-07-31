@@ -29,7 +29,7 @@ func labelCmd(a *app, use string, label store.Label, short, long string) *cli.Co
 		Description: long,
 		UsageText:   "  scour " + use + " vehicle 1042 1043",
 		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := atLeast(cmd, 2, "an entity name and at least one record id")
+			args, err := atLeast(cmd, 2, "an item name and at least one record id")
 			if err != nil {
 				return err
 			}
@@ -38,7 +38,7 @@ func labelCmd(a *app, use string, label store.Label, short, long string) *cli.Co
 				return err
 			}
 
-			entity, err := s.Entity(c, args[0])
+			item, err := s.Item(c, args[0])
 			if err != nil {
 				return err
 			}
@@ -52,7 +52,7 @@ func labelCmd(a *app, use string, label store.Label, short, long string) *cli.Co
 				ids = append(ids, uint(id))
 			}
 
-			n, err := s.LabelRecords(c, entity.ID, ids, label)
+			n, err := s.LabelRecords(c, item.ID, ids, label)
 			if err != nil {
 				return err
 			}
@@ -61,13 +61,13 @@ func labelCmd(a *app, use string, label store.Label, short, long string) *cli.Co
 			}
 			if int(n) < len(ids) {
 				a.Printf("%s: labelled %d of %d, the rest are not %s's records\n",
-					entity.Name, n, len(ids), entity.Name)
+					item.Name, n, len(ids), item.Name)
 				return nil
 			}
 
-			a.Printf("%s: %d records marked %s\n", entity.Name, n, label)
+			a.Printf("%s: %d records marked %s\n", item.Name, n, label)
 			if label != store.Unlabelled {
-				a.Printf("run `scour train %s` to fold that back into the model\n", entity.Name)
+				a.Printf("run `scour train %s` to fold that back into the model\n", item.Name)
 			}
 			return nil
 		},

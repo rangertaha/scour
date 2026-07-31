@@ -96,23 +96,23 @@ func userDataDir() (string, error) {
 	return filepath.Join(home, ".local", "share", "scour"), nil
 }
 
-// ModelsDir is where per-entity models are written.
+// ModelsDir is where per-item models are written.
 func (c Config) ModelsDir() string { return filepath.Join(c.Paths.Data, "models") }
 
-// ScoreModelPath is where an entity's URL scoring model lives. It decides what
+// ScoreModelPath is where an item's URL scoring model lives. It decides what
 // to crawl next.
-func (c Config) ScoreModelPath(entity string) string {
-	return filepath.Join(c.ModelsDir(), entity+".score.json")
+func (c Config) ScoreModelPath(item string) string {
+	return filepath.Join(c.ModelsDir(), item+".score.json")
 }
 
-// ExtractModelPath is where an entity's extraction model lives. It decides
+// ExtractModelPath is where an item's extraction model lives. It decides
 // what to pull out of a page once crawled.
 //
 // The two are separate files because they are separate models with different
 // lifetimes: scoring is retrained from crawl outcomes, extraction is induced
 // from page structure, and either can be discarded without the other.
-func (c Config) ExtractModelPath(entity string) string {
-	return filepath.Join(c.ModelsDir(), entity+".extract.json")
+func (c Config) ExtractModelPath(item string) string {
+	return filepath.Join(c.ModelsDir(), item+".extract.json")
 }
 
 // PagesDir is where fetched page bodies are cached.

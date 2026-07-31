@@ -21,7 +21,7 @@ func harness(t *testing.T) (*Storage, *store.Store, uint) {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	e, err := s.CreateEntity(context.Background(), "vehicle")
+	e, err := s.CreateItem(context.Background(), "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestVisitedSurvivesReopening(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e, err := s.CreateEntity(ctx, "vehicle")
+	e, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,11 +169,11 @@ func TestVisitedSurvivesReopening(t *testing.T) {
 	}
 }
 
-func TestEntitiesHaveSeparateVisitedSets(t *testing.T) {
+func TestItemsHaveSeparateVisitedSets(t *testing.T) {
 	st, s, _ := harness(t)
 	ctx := context.Background()
 
-	other, err := s.CreateEntity(ctx, "article")
+	other, err := s.CreateItem(ctx, "article")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,6 +187,6 @@ func TestEntitiesHaveSeparateVisitedSets(t *testing.T) {
 		t.Fatal(err)
 	}
 	if visited {
-		t.Error("one entity's crawl must not mask another's")
+		t.Error("one item's crawl must not mask another's")
 	}
 }

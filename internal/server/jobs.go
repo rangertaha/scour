@@ -30,7 +30,7 @@ const (
 type Job struct {
 	ID       string    `json:"id"`
 	Kind     string    `json:"kind"`
-	Entity   string    `json:"entity"`
+	Item     string    `json:"item"`
 	State    State     `json:"state"`
 	Started  time.Time `json:"started"`
 	Finished time.Time `json:"finished,omitzero"`
@@ -56,7 +56,7 @@ type Jobs struct {
 	next    int
 	running sync.WaitGroup
 
-	// active is one entry per entity and kind, so the same entity cannot be
+	// active is one entry per item and kind, so the same item cannot be
 	// crawled twice at once. Two crawls of one site would race on the frontier
 	// and double the load on someone else's server.
 	active map[string]string
@@ -69,11 +69,11 @@ func NewJobs() *Jobs {
 
 // ErrBusy is returned when the same work is already running.
 type ErrBusy struct {
-	Kind, Entity, ID string
+	Kind, Item, ID string
 }
 
 func (e ErrBusy) Error() string {
-	return fmt.Sprintf("%s of %s is already running as job %s", e.Kind, e.Entity, e.ID)
+	return fmt.Sprintf("%s of %s is already running as job %s", e.Kind, e.Item, e.ID)
 }
 
 // Start runs work in the background and returns the job watching it.
@@ -82,20 +82,20 @@ func (e ErrBusy) Error() string {
 // crawl and hangs up has still started a crawl, and cancelling it because they
 // stopped listening would make the API unusable from anything that does not
 // hold the connection open.
-func (j *Jobs) Start(kind, entity string, work func(context.Context) (any, error)) (*Job, error) {
-	key := kind + ":" + entity
+func (j *Jobs) Start(kind, item string, work func(context.Context) (any, error)) (*Job, error) {
+	key := kind + ":" + item
 
 	j.mu.Lock()
 	if id, busy := j.active[key]; busy {
 		j.mu.Unlock()
-		return nil, ErrBusy{Kind: kind, Entity: entity, ID: id}
+		return nil, ErrBusy{Kind: kind, Item: item, ID: id}
 	}
 
 	j.next++
 	job := &Job{
 		ID:      fmt.Sprintf("%s-%d", kind, j.next),
 		Kind:    kind,
-		Entity:  entity,
+		Item:    item,
 		State:   Running,
 		Started: time.Now().UTC(),
 	}

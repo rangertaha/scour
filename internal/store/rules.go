@@ -15,18 +15,18 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// ReplaceRules swaps an entity's induced rules for a new set.
+// ReplaceRules swaps an item's induced rules for a new set.
 //
 // Training produces the whole set at once, so this is a replace rather than a
 // merge: a rule that induction no longer believes in should disappear, not
 // linger as a stale locator that still matches something.
-func (s *Store) ReplaceRules(ctx context.Context, entityID uint, rules []Rule) error {
+func (s *Store) ReplaceRules(ctx context.Context, itemID uint, rules []Rule) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("entity_id = ?", entityID).Delete(&Rule{}).Error; err != nil {
+		if err := tx.Where("item_id = ?", itemID).Delete(&Rule{}).Error; err != nil {
 			return fmt.Errorf("clear rules: %w", err)
 		}
 		for i := range rules {
-			rules[i].EntityID = entityID
+			rules[i].ItemID = itemID
 			// A child rule carries its parent's position in the slice, which
 			// only becomes a database id once the parent is written.
 			if p := rules[i].ParentID; p != nil {
@@ -41,11 +41,11 @@ func (s *Store) ReplaceRules(ctx context.Context, entityID uint, rules []Rule) e
 	})
 }
 
-// Rules lists an entity's induced rules, parents before their children.
-func (s *Store) Rules(ctx context.Context, entityID uint) ([]Rule, error) {
+// Rules lists an item's induced rules, parents before their children.
+func (s *Store) Rules(ctx context.Context, itemID uint) ([]Rule, error) {
 	var out []Rule
 	err := s.db.WithContext(ctx).
-		Where("entity_id = ?", entityID).
+		Where("item_id = ?", itemID).
 		Order("id ASC").
 		Find(&out).Error
 	if err != nil {
@@ -56,7 +56,7 @@ func (s *Store) Rules(ctx context.Context, entityID uint) ([]Rule, error) {
 
 // Fingerprint identifies a record by what it holds rather than where it was
 // found, so re-extracting the same values is an update and not a duplicate.
-func Fingerprint(entityID uint, values map[string]string) string {
+func Fingerprint(itemID uint, values map[string]string) string {
 	keys := make([]string, 0, len(values))
 	for k := range values {
 		keys = append(keys, k)
@@ -64,7 +64,7 @@ func Fingerprint(entityID uint, values map[string]string) string {
 	sort.Strings(keys)
 
 	h := sha256.New()
-	fmt.Fprintf(h, "%d", entityID)
+	fmt.Fprintf(h, "%d", itemID)
 	for _, k := range keys {
 		fmt.Fprintf(h, "\x00%s\x00%s", k, strings.TrimSpace(values[k]))
 	}
@@ -79,7 +79,7 @@ type Extracted struct {
 	Values     map[string]string
 }
 
-// SaveRecords reconciles an entity's records with a freshly extracted set.
+// SaveRecords reconciles an item's records with a freshly extracted set.
 //
 // Records are matched by fingerprint and updated in place, so a record that
 // survives a retraining keeps both its id and its label. That matters twice
@@ -90,10 +90,10 @@ type Extracted struct {
 //
 // Records whose fingerprint no longer appears are removed, since the model
 // stopped finding them.
-func (s *Store) SaveRecords(ctx context.Context, entityID uint, records []Extracted) (int, error) {
+func (s *Store) SaveRecords(ctx context.Context, itemID uint, records []Extracted) (int, error) {
 	saved := 0
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		existing, err := existingRecords(tx, entityID)
+		existing, err := existingRecords(tx, itemID)
 		if err != nil {
 			return err
 		}
@@ -102,7 +102,7 @@ func (s *Store) SaveRecords(ctx context.Context, entityID uint, records []Extrac
 		done := make(map[string]bool, len(records))
 
 		for _, rec := range records {
-			fp := Fingerprint(entityID, rec.Values)
+			fp := Fingerprint(itemID, rec.Values)
 
 			// Identical values are the same record by definition, however many
 			// pages they were found on. Without this, a site that repeats a
@@ -115,13 +115,13 @@ func (s *Store) SaveRecords(ctx context.Context, entityID uint, records []Extrac
 
 			row, found := existing[fp]
 			if !found {
-				row = Record{EntityID: entityID, Fingerprint: fp, Label: Unlabelled}
+				row = Record{ItemID: itemID, Fingerprint: fp, Label: Unlabelled}
 			}
 			row.Confidence = rec.Confidence
 			row.Format = rec.Format
 			if rec.URL != "" {
 				var u URL
-				if err := tx.Select("id").Where("hash = ?", URLHash(entityID, rec.URL)).First(&u).Error; err == nil {
+				if err := tx.Select("id").Where("hash = ?", URLHash(itemID, rec.URL)).First(&u).Error; err == nil {
 					row.URLID = u.ID
 				}
 			}
@@ -164,9 +164,9 @@ func (s *Store) SaveRecords(ctx context.Context, entityID uint, records []Extrac
 	return saved, nil
 }
 
-func existingRecords(tx *gorm.DB, entityID uint) (map[string]Record, error) {
+func existingRecords(tx *gorm.DB, itemID uint) (map[string]Record, error) {
 	var rows []Record
-	if err := tx.Where("entity_id = ?", entityID).Find(&rows).Error; err != nil {
+	if err := tx.Where("item_id = ?", itemID).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("read records: %w", err)
 	}
 	out := make(map[string]Record, len(rows))
@@ -193,8 +193,8 @@ type RecordRow struct {
 }
 
 // SearchRecords returns extracted records, highest confidence first.
-func (s *Store) SearchRecords(ctx context.Context, entityID uint, q RecordQuery) ([]RecordRow, int64, error) {
-	base := s.db.WithContext(ctx).Model(&Record{}).Where("entity_id = ?", entityID)
+func (s *Store) SearchRecords(ctx context.Context, itemID uint, q RecordQuery) ([]RecordRow, int64, error) {
+	base := s.db.WithContext(ctx).Model(&Record{}).Where("item_id = ?", itemID)
 	if q.MinConfidence > 0 {
 		base = base.Where("confidence >= ?", q.MinConfidence)
 	}
@@ -257,10 +257,10 @@ func (s *Store) SearchRecords(ctx context.Context, entityID uint, q RecordQuery)
 
 // LabelRecords marks records valid or invalid. Unknown ids are reported rather
 // than ignored, since a mistyped id would otherwise look like success.
-func (s *Store) LabelRecords(ctx context.Context, entityID uint, ids []uint, label Label) (int64, error) {
+func (s *Store) LabelRecords(ctx context.Context, itemID uint, ids []uint, label Label) (int64, error) {
 	res := s.db.WithContext(ctx).
 		Model(&Record{}).
-		Where("entity_id = ? AND id IN ?", entityID, ids).
+		Where("item_id = ? AND id IN ?", itemID, ids).
 		Updates(map[string]any{"label": label, "updated_at": time.Now().UTC()})
 	if res.Error != nil {
 		return 0, fmt.Errorf("label records: %w", res.Error)
@@ -268,11 +268,11 @@ func (s *Store) LabelRecords(ctx context.Context, entityID uint, ids []uint, lab
 	return res.RowsAffected, nil
 }
 
-// SaveModelMeta records where an entity's model lives and how it scored.
+// SaveModelMeta records where an item's model lives and how it scored.
 func (s *Store) SaveModelMeta(ctx context.Context, meta ModelMeta) error {
 	err := s.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "entity_id"}},
+			Columns: []clause.Column{{Name: "item_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"path", "algorithm", "accuracy", "observations", "trained_at",
 			}),
@@ -286,17 +286,17 @@ func (s *Store) SaveModelMeta(ctx context.Context, meta ModelMeta) error {
 
 // SetURLMatches records how many records came out of each URL, which is the
 // MATCHES column of the crawl summary.
-func (s *Store) SetURLMatches(ctx context.Context, entityID uint, counts map[string]int) error {
+func (s *Store) SetURLMatches(ctx context.Context, itemID uint, counts map[string]int) error {
 	if len(counts) == 0 {
 		return nil
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&URL{}).Where("entity_id = ?", entityID).Update("matches", 0).Error; err != nil {
+		if err := tx.Model(&URL{}).Where("item_id = ?", itemID).Update("matches", 0).Error; err != nil {
 			return fmt.Errorf("reset matches: %w", err)
 		}
 		for rawURL, n := range counts {
 			err := tx.Model(&URL{}).
-				Where("hash = ?", URLHash(entityID, rawURL)).
+				Where("hash = ?", URLHash(itemID, rawURL)).
 				Update("matches", n).Error
 			if err != nil {
 				return fmt.Errorf("set matches for %s: %w", rawURL, err)

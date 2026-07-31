@@ -15,13 +15,13 @@ import (
 // direct path does, with a broker in the middle. The crawler cannot tell which
 // it has.
 type BusSink struct {
-	bus    *bus.Bus
-	entity string
+	bus  *bus.Bus
+	item string
 }
 
-// NewBusSink returns a sink publishing for one entity.
-func NewBusSink(b *bus.Bus, entity string) *BusSink {
-	return &BusSink{bus: b, entity: entity}
+// NewBusSink returns a sink publishing for one item.
+func NewBusSink(b *bus.Bus, item string) *BusSink {
+	return &BusSink{bus: b, item: item}
 }
 
 // Fetched implements crawl.Sink.
@@ -30,11 +30,11 @@ func NewBusSink(b *bus.Bus, entity string) *BusSink {
 // duplicate window collapses to one message rather than one write per attempt.
 func (s *BusSink) Fetched(ctx context.Context, f store.Fetched) error {
 	return s.bus.Publish(ctx,
-		bus.Subject(s.entity, bus.SubjectFetched),
-		"fetched:"+store.URLHash(f.EntityID, f.URL)+":"+string(f.Status),
+		bus.Subject(s.item, bus.SubjectFetched),
+		"fetched:"+store.URLHash(f.ItemID, f.URL)+":"+string(f.Status),
 		bus.Fetched{
-			Entity:      s.entity,
-			EntityID:    f.EntityID,
+			Item:        s.item,
+			ItemID:      f.ItemID,
 			URL:         f.URL,
 			ParentURL:   f.ParentURL,
 			Depth:       f.Depth,
@@ -49,13 +49,13 @@ func (s *BusSink) Fetched(ctx context.Context, f store.Fetched) error {
 }
 
 // Discovered implements crawl.Sink.
-func (s *BusSink) Discovered(ctx context.Context, entityID uint, rawURL, parentURL string, depth int, score float64) error {
+func (s *BusSink) Discovered(ctx context.Context, itemID uint, rawURL, parentURL string, depth int, score float64) error {
 	return s.bus.Publish(ctx,
-		bus.Subject(s.entity, bus.SubjectDiscovered),
-		"discovered:"+store.URLHash(entityID, rawURL),
+		bus.Subject(s.item, bus.SubjectDiscovered),
+		"discovered:"+store.URLHash(itemID, rawURL),
 		bus.Discovered{
-			Entity:    s.entity,
-			EntityID:  entityID,
+			Item:      s.item,
+			ItemID:    itemID,
 			URL:       rawURL,
 			ParentURL: parentURL,
 			Depth:     depth,

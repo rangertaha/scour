@@ -125,9 +125,9 @@ func waitFor(t *testing.T, cond func() bool, what string) {
 
 // The single-process crawler checks the scope before queueing, but the bus path
 // never did: a link to anywhere at all was recorded as discovered for the
-// entity. Deciding it here is also what lets a crawler stay stateless, since a
+// item. Deciding it here is also what lets a crawler stay stateless, since a
 // scope built from a million targets cannot be handed to one.
-func TestTheStoreOnlyRecordsDiscoveriesInsideTheEntity(t *testing.T) {
+func TestTheStoreOnlyRecordsDiscoveriesInsideTheItem(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "scour.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +135,7 @@ func TestTheStoreOnlyRecordsDiscoveriesInsideTheEntity(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	e, err := db.CreateEntity(ctx, "news")
+	e, err := db.CreateItem(ctx, "news")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,8 +146,8 @@ func TestTheStoreOnlyRecordsDiscoveriesInsideTheEntity(t *testing.T) {
 	// handleDiscovered never touches the broker, so the store service can be
 	// exercised without one.
 	svc := NewStore(nil, db)
-	inside := bus.Discovered{EntityID: e.ID, URL: "http://example.com/a", Depth: 1, Score: 1}
-	outside := bus.Discovered{EntityID: e.ID, URL: "http://elsewhere.test/a", Depth: 1, Score: 1}
+	inside := bus.Discovered{ItemID: e.ID, URL: "http://example.com/a", Depth: 1, Score: 1}
+	outside := bus.Discovered{ItemID: e.ID, URL: "http://elsewhere.test/a", Depth: 1, Score: 1}
 
 	for _, ev := range []bus.Discovered{inside, outside} {
 		body, err := json.Marshal(ev)
@@ -160,11 +160,11 @@ func TestTheStoreOnlyRecordsDiscoveriesInsideTheEntity(t *testing.T) {
 	}
 
 	var urls []store.URL
-	if err := db.DB().Where("entity_id = ?", e.ID).Find(&urls).Error; err != nil {
+	if err := db.DB().Where("item_id = ?", e.ID).Find(&urls).Error; err != nil {
 		t.Fatal(err)
 	}
 	if len(urls) != 1 {
-		t.Fatalf("recorded %d urls, want only the one inside the entity: %+v", len(urls), urls)
+		t.Fatalf("recorded %d urls, want only the one inside the item: %+v", len(urls), urls)
 	}
 	if urls[0].URL != inside.URL {
 		t.Errorf("recorded %q, want %q", urls[0].URL, inside.URL)

@@ -60,10 +60,10 @@ func TestAddThenList(t *testing.T) {
 
 	out := runOK(t, dir, "list")
 	if !strings.Contains(out, "vehicle") {
-		t.Errorf("list did not mention the entity:\n%s", out)
+		t.Errorf("list did not mention the item:\n%s", out)
 	}
 	// The listing carries what a crawl is actually judged on, not just a name
-	// and a count: what the entity has, how far it got, whether it is trained.
+	// and a count: what the item has, how far it got, whether it is trained.
 	for _, col := range []string{"NAME", "TARGETS", "VISITED", "RECORDS", "TRAINED"} {
 		if !strings.Contains(out, col) {
 			t.Errorf("list did not print the %s column:\n%s", col, out)
@@ -91,7 +91,7 @@ func TestAddIsIdempotent(t *testing.T) {
 
 	out := runOK(t, dir, "list", "--json")
 	if strings.Count(out, `"name": "vehicle"`) != 1 {
-		t.Errorf("the entity was created more than once:\n%s", out)
+		t.Errorf("the item was created more than once:\n%s", out)
 	}
 }
 
@@ -99,7 +99,7 @@ func TestListIsEmptyToStart(t *testing.T) {
 	dir := t.TempDir()
 
 	out := runOK(t, dir, "list")
-	if !strings.Contains(out, "no entities yet") {
+	if !strings.Contains(out, "no items yet") {
 		t.Errorf("an empty database should say so:\n%s", out)
 	}
 }
@@ -129,26 +129,26 @@ func TestDomainsAreNormalised(t *testing.T) {
 	}
 }
 
-func TestRemoveWholeEntityNeedsForce(t *testing.T) {
+func TestRemoveWholeItemNeedsForce(t *testing.T) {
 	dir := t.TempDir()
 	runOK(t, dir, "add", "vehicle")
 
 	out, err := run(t, dir, "remove", "vehicle")
 	if err == nil {
-		t.Fatal("removing an entity without --force must fail")
+		t.Fatal("removing an item without --force must fail")
 	}
 	if !strings.Contains(out, "--force") {
 		t.Errorf("the refusal should say what to do:\n%s", out)
 	}
 
-	// The entity is still there.
+	// The item is still there.
 	if out := runOK(t, dir, "list"); !strings.Contains(out, "vehicle") {
-		t.Errorf("entity was removed despite the refusal:\n%s", out)
+		t.Errorf("item was removed despite the refusal:\n%s", out)
 	}
 
 	runOK(t, dir, "remove", "vehicle", "--force")
 	if out := runOK(t, dir, "list"); strings.Contains(out, "vehicle") {
-		t.Errorf("entity survived --force:\n%s", out)
+		t.Errorf("item survived --force:\n%s", out)
 	}
 }
 
@@ -169,9 +169,9 @@ func TestRemoveParts(t *testing.T) {
 		t.Errorf("unexpected output:\n%s", out)
 	}
 
-	// The entity itself survives having its parts removed.
+	// The item itself survives having its parts removed.
 	if out := runOK(t, dir, "list"); !strings.Contains(out, "vehicle") {
-		t.Errorf("removing a target should not remove the entity:\n%s", out)
+		t.Errorf("removing a target should not remove the item:\n%s", out)
 	}
 }
 
@@ -183,7 +183,7 @@ func TestRemoveReportsMissingThings(t *testing.T) {
 		t.Error("removing an absent target must fail")
 	}
 	if _, err := run(t, dir, "remove", "absent", "--force"); err == nil {
-		t.Error("removing an absent entity must fail")
+		t.Error("removing an absent item must fail")
 	}
 }
 
@@ -221,7 +221,7 @@ func TestPropertyTaughtPerDomain(t *testing.T) {
 		t.Errorf("output = %s", out)
 	}
 	if !strings.Contains(out, "alias byline for author on example.com") {
-		t.Errorf("alias should attach to the property, not the entity: %s", out)
+		t.Errorf("alias should attach to the property, not the item: %s", out)
 	}
 
 	// Scoping must not quietly widen the crawl.
@@ -251,7 +251,7 @@ func TestTaughtRegexMustCompile(t *testing.T) {
 	}
 }
 
-// An entity with nothing in it can do nothing: no targets to crawl, no
+// An item with nothing in it can do nothing: no targets to crawl, no
 // properties to look for. Naming it and stopping told someone their command had
 // worked when what it did was leave them where they were.
 func TestAddingNothingSaysWhatToAdd(t *testing.T) {
@@ -278,10 +278,10 @@ func TestAddingNothingSaysWhatToAdd(t *testing.T) {
 	}
 }
 
-// A stopped entity used to be crawled anyway: the pause is checked once a
+// A stopped item used to be crawled anyway: the pause is checked once a
 // second, so it fetched a handful of pages and then stopped saying "paused",
 // which explains neither why nor what to do about it.
-func TestCrawlingAStoppedEntityExplainsItself(t *testing.T) {
+func TestCrawlingAStoppedItemExplainsItself(t *testing.T) {
 	dir := t.TempDir()
 	runOK(t, dir, "add", "news", "-d", "example.com")
 
@@ -292,7 +292,7 @@ func TestCrawlingAStoppedEntityExplainsItself(t *testing.T) {
 
 	_, err := run(t, dir, "crawl", "news")
 	if err == nil {
-		t.Fatal("crawling a stopped entity should refuse")
+		t.Fatal("crawling a stopped item should refuse")
 	}
 	if !strings.Contains(err.Error(), "scour start news") {
 		t.Errorf("the refusal does not say how to fix it: %v", err)
@@ -311,7 +311,7 @@ func TestACrawlThatCannotRunSaysNothingFirst(t *testing.T) {
 
 	out, err := run(t, dir, "crawl", "solo")
 	if err == nil {
-		t.Fatal("crawling an entity with no targets should refuse")
+		t.Fatal("crawling an item with no targets should refuse")
 	}
 	if strings.Contains(out, "crawling solo") {
 		t.Errorf("it announced a crawl it could not run:\n%s", out)
@@ -320,7 +320,7 @@ func TestACrawlThatCannotRunSaysNothingFirst(t *testing.T) {
 
 // A name that is not there is nearly always a typo, so the error names the
 // closest one rather than leaving someone to re-read the listing.
-func TestUnknownEntitySuggestsTheNearestName(t *testing.T) {
+func TestUnknownItemSuggestsTheNearestName(t *testing.T) {
 	dir := t.TempDir()
 	runOK(t, dir, "add", "vehicle")
 	runOK(t, dir, "add", "news-html")
@@ -343,7 +343,7 @@ func TestUnknownEntitySuggestsTheNearestName(t *testing.T) {
 	// somewhere unrelated is read as "this is what you meant".
 	_, err := run(t, dir, "list", "zzzzzzzz")
 	if err == nil {
-		t.Fatal("an absent entity must fail")
+		t.Fatal("an absent item must fail")
 	}
 	if strings.Contains(err.Error(), "did you mean") {
 		t.Errorf("a distant name should not be suggested: %v", err)
@@ -351,7 +351,7 @@ func TestUnknownEntitySuggestsTheNearestName(t *testing.T) {
 }
 
 // The suggestion has to reach every command, not only the one it was added to.
-func TestUnknownEntitySuggestsAcrossCommands(t *testing.T) {
+func TestUnknownItemSuggestsAcrossCommands(t *testing.T) {
 	dir := t.TempDir()
 	runOK(t, dir, "add", "vehicle", "-p", "make", "-e", "Ford")
 

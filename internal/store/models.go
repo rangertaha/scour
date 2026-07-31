@@ -4,14 +4,14 @@ package store
 
 import "time"
 
-// Entity is the kind of thing a crawl is looking for. Everything else in the
+// Item is the kind of thing a crawl is looking for. Everything else in the
 // schema hangs off one.
-type Entity struct {
+type Item struct {
 	ID        uint   `gorm:"primaryKey"`
 	Name      string `gorm:"uniqueIndex;not null"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	// Paused stops work being handed out for this entity, without discarding
+	// Paused stops work being handed out for this item, without discarding
 	// anything it has.
 	//
 	// Durable state rather than a message, because a crawl has to stay paused
@@ -27,29 +27,29 @@ type Entity struct {
 	ContentTypes []ContentType `gorm:"constraint:OnDelete:CASCADE"`
 }
 
-// Alias is another word a page might use for an entity, so a page that never
-// uses the entity's own name can still match.
+// Alias is another word a page might use for an item, so a page that never
+// uses the item's own name can still match.
 type Alias struct {
-	ID       uint   `gorm:"primaryKey"`
-	EntityID uint   `gorm:"uniqueIndex:idx_alias_entity_word;not null"`
-	Word     string `gorm:"uniqueIndex:idx_alias_entity_word;not null"`
+	ID     uint   `gorm:"primaryKey"`
+	ItemID uint   `gorm:"uniqueIndex:idx_alias_item_word;not null"`
+	Word   string `gorm:"uniqueIndex:idx_alias_item_word;not null"`
 }
 
-// Property is an attribute an entity should have. Example is a sample value,
+// Property is an attribute an item should have. Example is a sample value,
 // which is what lets induction recognise other values of the same kind.
 type Property struct {
-	ID       uint `gorm:"primaryKey"`
-	EntityID uint `gorm:"uniqueIndex:idx_prop_entity_name;not null"`
-	// Domain scopes the property to one site. Empty is the entity's default,
+	ID     uint `gorm:"primaryKey"`
+	ItemID uint `gorm:"uniqueIndex:idx_prop_item_name;not null"`
+	// Domain scopes the property to one site. Empty is the item's default,
 	// which every site starts from.
 	//
 	// A schema describes what is wanted; a site describes how it says it. Those
 	// are not the same thing, and one example cannot serve both: teaching that
 	// the byline on one paper reads "Hannah McLeod" says nothing about the next
-	// paper, and stored entity-wide it would overwrite what the last site
+	// paper, and stored item-wide it would overwrite what the last site
 	// taught. So a taught example belongs to the site it was taught on.
-	Domain  string `gorm:"uniqueIndex:idx_prop_entity_name;default:''"`
-	Name    string `gorm:"uniqueIndex:idx_prop_entity_name;not null"`
+	Domain  string `gorm:"uniqueIndex:idx_prop_item_name;default:''"`
+	Name    string `gorm:"uniqueIndex:idx_prop_item_name;not null"`
 	Type    string
 	Example string
 	// Regex says what an acceptable value looks like, and optionally where in it
@@ -110,23 +110,23 @@ const (
 // Target is where a crawl starts.
 type Target struct {
 	ID         uint       `gorm:"primaryKey"`
-	EntityID   uint       `gorm:"uniqueIndex:idx_target_entity_value;not null"`
-	Kind       TargetKind `gorm:"uniqueIndex:idx_target_entity_value;not null"`
-	Value      string     `gorm:"uniqueIndex:idx_target_entity_value;not null"`
+	ItemID     uint       `gorm:"uniqueIndex:idx_target_item_value;not null"`
+	Kind       TargetKind `gorm:"uniqueIndex:idx_target_item_value;not null"`
+	Value      string     `gorm:"uniqueIndex:idx_target_item_value;not null"`
 	Subdomains bool
 	Depth      int
 }
 
-// ContentType restricts an entity's crawls to particular formats. An entity
+// ContentType restricts an item's crawls to particular formats. An item
 // with none configured uses the crawl defaults.
 type ContentType struct {
-	ID       uint   `gorm:"primaryKey"`
-	EntityID uint   `gorm:"uniqueIndex:idx_ctype_entity_type;not null"`
-	Type     string `gorm:"uniqueIndex:idx_ctype_entity_type;not null"`
+	ID     uint   `gorm:"primaryKey"`
+	ItemID uint   `gorm:"uniqueIndex:idx_ctype_item_type;not null"`
+	Type   string `gorm:"uniqueIndex:idx_ctype_item_type;not null"`
 }
 
 // Host carries per-host crawl policy, either configured or learned. It is
-// shared across entities, because politeness is owed to the server rather than
+// shared across items, because politeness is owed to the server rather than
 // to any one crawl.
 type Host struct {
 	ID          uint   `gorm:"primaryKey"`
@@ -155,7 +155,7 @@ const (
 // reconstructs the path for decoding, and the role is the decoded state.
 type URL struct {
 	ID          uint   `gorm:"primaryKey"`
-	EntityID    uint   `gorm:"index;not null"`
+	ItemID      uint   `gorm:"index;not null"`
 	Hash        string `gorm:"uniqueIndex;not null"`
 	URL         string `gorm:"not null"`
 	ParentID    *uint  `gorm:"index"`
@@ -190,7 +190,7 @@ type Response struct {
 // relative to.
 type Rule struct {
 	ID          uint  `gorm:"primaryKey"`
-	EntityID    uint  `gorm:"index;not null"`
+	ItemID      uint  `gorm:"index;not null"`
 	ParentID    *uint `gorm:"index"`
 	Prop        string
 	XPath       string
@@ -213,12 +213,12 @@ const (
 	Invalid    Label = "invalid"
 )
 
-// Record is one extracted entity instance. Fingerprint is derived from the
+// Record is one extracted item instance. Fingerprint is derived from the
 // values, so re-extracting the same record from the same page is an upsert
 // rather than a duplicate.
 type Record struct {
 	ID          uint   `gorm:"primaryKey"`
-	EntityID    uint   `gorm:"index;not null"`
+	ItemID      uint   `gorm:"index;not null"`
 	URLID       uint   `gorm:"index"`
 	Fingerprint string `gorm:"uniqueIndex;not null"`
 	Confidence  float64
@@ -238,10 +238,10 @@ type Value struct {
 	Text     string
 }
 
-// ModelMeta describes the scoring model on disk for one entity.
+// ModelMeta describes the scoring model on disk for one item.
 type ModelMeta struct {
 	ID           uint `gorm:"primaryKey"`
-	EntityID     uint `gorm:"uniqueIndex;not null"`
+	ItemID       uint `gorm:"uniqueIndex;not null"`
 	Path         string
 	Algorithm    string
 	Accuracy     float64
@@ -255,9 +255,9 @@ type ChainKind string
 // The chains scour fits.
 const (
 	// ChainExtract orders fields within a record. It transfers between sites
-	// and entities, so it is stored with a null EntityID.
+	// and items, so it is stored with a null ItemID.
 	ChainExtract ChainKind = "extract"
-	// ChainCrawl orders page roles along a crawl path. It is per entity.
+	// ChainCrawl orders page roles along a crawl path. It is per item.
 	ChainCrawl ChainKind = "crawl"
 )
 
@@ -265,7 +265,7 @@ const (
 // belongs to the model rather than to the database.
 type Chain struct {
 	ID           uint      `gorm:"primaryKey"`
-	EntityID     *uint     `gorm:"index"`
+	ItemID       *uint     `gorm:"index"`
 	Kind         ChainKind `gorm:"index;not null"`
 	States       string
 	Transitions  string
@@ -273,7 +273,7 @@ type Chain struct {
 	FittedAt     time.Time
 }
 
-// Visit is colly's visited set, kept per entity so two entities crawling the
+// Visit is colly's visited set, kept per item so two items crawling the
 // same site do not mask each other's work. RequestID is colly's own URL hash,
 // which is what its revisit check looks up.
 //
@@ -285,8 +285,8 @@ type Chain struct {
 // so reinterpreting the bits is lossless.
 type Visit struct {
 	ID        uint  `gorm:"primaryKey"`
-	EntityID  uint  `gorm:"uniqueIndex:idx_visit_entity_request;not null"`
-	RequestID int64 `gorm:"uniqueIndex:idx_visit_entity_request;not null"`
+	ItemID    uint  `gorm:"uniqueIndex:idx_visit_item_request;not null"`
+	RequestID int64 `gorm:"uniqueIndex:idx_visit_item_request;not null"`
 	VisitedAt time.Time
 }
 
@@ -294,8 +294,8 @@ type Visit struct {
 // restart rather than making the crawler log in again.
 type Cookie struct {
 	ID        uint   `gorm:"primaryKey"`
-	EntityID  uint   `gorm:"uniqueIndex:idx_cookie_entity_host;not null"`
-	Host      string `gorm:"uniqueIndex:idx_cookie_entity_host;not null"`
+	ItemID    uint   `gorm:"uniqueIndex:idx_cookie_item_host;not null"`
+	Host      string `gorm:"uniqueIndex:idx_cookie_item_host;not null"`
 	Value     string
 	UpdatedAt time.Time
 }
@@ -307,9 +307,9 @@ type Cookie struct {
 // every score is equal, so the tie-break on ID keeps the order the crawl would
 // have had anyway.
 type QueueItem struct {
-	ID       uint    `gorm:"primaryKey"`
-	EntityID uint    `gorm:"index:idx_queue_entity_score;not null"`
-	Score    float64 `gorm:"index:idx_queue_entity_score"`
+	ID     uint    `gorm:"primaryKey"`
+	ItemID uint    `gorm:"index:idx_queue_item_score;not null"`
+	Score  float64 `gorm:"index:idx_queue_item_score"`
 	// Hash identifies the URL, so the item can be released when the fetch is
 	// recorded without the releaser having to know the queue's row ids.
 	Hash string `gorm:"index"`
@@ -343,8 +343,8 @@ type QueueItem struct {
 // its shape is. Keeping them on the URL row would delete them with it.
 type PageRole struct {
 	ID        uint   `gorm:"primaryKey"`
-	EntityID  uint   `gorm:"uniqueIndex:idx_role_entity_hash;not null"`
-	Hash      string `gorm:"uniqueIndex:idx_role_entity_hash;not null"`
+	ItemID    uint   `gorm:"uniqueIndex:idx_role_item_hash;not null"`
+	Hash      string `gorm:"uniqueIndex:idx_role_item_hash;not null"`
 	URL       string `gorm:"not null"`
 	Role      string `gorm:"index"`
 	DecodedAt time.Time
@@ -353,8 +353,8 @@ type PageRole struct {
 // Judgement is one model's verdict on one question, kept so it is paid for
 // once.
 //
-// It is keyed by a hash of the question rather than by any page or entity,
-// because the same question recurs across pages, across entities and across
+// It is keyed by a hash of the question rather than by any page or item,
+// because the same question recurs across pages, across items and across
 // retrains. It is a cache: deleting the table costs money, not correctness.
 type Judgement struct {
 	ID    uint    `gorm:"primaryKey"`
@@ -374,7 +374,7 @@ type Judgement struct {
 // tables lists every model, in dependency order, for migration.
 func tables() []any {
 	return []any{
-		&Entity{}, &Alias{}, &Property{}, &PropertyAlias{}, &Target{}, &ContentType{},
+		&Item{}, &Alias{}, &Property{}, &PropertyAlias{}, &Target{}, &ContentType{},
 		&Host{}, &URL{}, &Response{},
 		&Rule{}, &Record{}, &Value{},
 		&ModelMeta{}, &Chain{}, &Judgement{},

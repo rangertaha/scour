@@ -78,7 +78,7 @@ func TestCrawlThenStatus(t *testing.T) {
 	runOK(t, dir, "crawl", "vehicle", "--depth", "5")
 
 	out := runOK(t, dir, "list", "vehicle")
-	for _, want := range []string{"entity", "targets", "frontier", "visited", "cache", "matches", "model"} {
+	for _, want := range []string{"item", "targets", "frontier", "visited", "cache", "matches", "model"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status missing %q:\n%s", want, out)
 		}
@@ -136,7 +136,7 @@ func TestCrawlWithoutTargetsExplainsItself(t *testing.T) {
 
 	out, err := run(t, dir, "crawl", "vehicle")
 	if err == nil {
-		t.Fatal("crawling an entity with no targets must fail")
+		t.Fatal("crawling an item with no targets must fail")
 	}
 	if !strings.Contains(err.Error()+out, "scour add") {
 		t.Errorf("the error should say how to add a target: %v\n%s", err, out)
@@ -160,9 +160,9 @@ func TestCrawlResumesAndResets(t *testing.T) {
 	}
 }
 
-func TestStatusOnUnknownEntity(t *testing.T) {
+func TestStatusOnUnknownItem(t *testing.T) {
 	dir := crawlDir(t)
 	if _, err := run(t, dir, "list", "absent"); err == nil {
-		t.Error("status on an unknown entity must fail")
+		t.Error("status on an unknown item must fail")
 	}
 }

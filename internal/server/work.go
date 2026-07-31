@@ -45,17 +45,17 @@ func invalid(format string, args ...any) error {
 // request comes back on the call that made it rather than as a job that fails
 // a minute later somewhere the caller has to go looking.
 func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*Job, error) {
-	entity, err := s.store.EntityFull(ctx, name)
+	item, err := s.store.ItemFull(ctx, name)
 	if err != nil {
 		return nil, err
 	}
-	if len(entity.Targets) == 0 {
-		return nil, invalid("entity %s has no targets: add a domain or url first", name)
+	if len(item.Targets) == 0 {
+		return nil, invalid("item %s has no targets: add a domain or url first", name)
 	}
 
 	allow := req.Types
 	if len(allow) == 0 {
-		for _, t := range entity.ContentTypes {
+		for _, t := range item.ContentTypes {
 			allow = append(allow, t.Type)
 		}
 	}
@@ -67,17 +67,17 @@ func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*
 		return nil, ErrInvalid{msg: err.Error()}
 	}
 
-	scorer, _, err := train.Scorer(s.cfg, entity)
+	scorer, _, err := train.Scorer(s.cfg, item)
 	if err != nil {
 		return nil, ErrInvalid{msg: err.Error()}
 	}
-	scorer, _, err = train.ChainScorer(ctx, s.store, entity, scorer)
+	scorer, _, err = train.ChainScorer(ctx, s.store, item, scorer)
 	if err != nil {
 		return nil, err
 	}
 
 	if req.Reset {
-		if err := s.store.ResetFrontier(ctx, entity.ID); err != nil {
+		if err := s.store.ResetFrontier(ctx, item.ID); err != nil {
 			return nil, err
 		}
 	}
@@ -95,11 +95,11 @@ func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*
 		depth = s.cfg.Crawl.Depth
 	}
 
-	return s.jobs.Start("crawl", entity.Name, func(jobCtx context.Context) (any, error) {
+	return s.jobs.Start("crawl", item.Name, func(jobCtx context.Context) (any, error) {
 		crawler := crawl.New(s.cfg, s.store, s.pages)
 		return crawler.Run(jobCtx, crawl.Options{
-			Entity:  entity,
-			Targets: entity.Targets,
+			Item:    item,
+			Targets: item.Targets,
 			Types:   types,
 			Depth:   depth,
 			Limit:   req.MaxPages,
@@ -119,7 +119,7 @@ type trainRequest struct {
 
 // trainJob validates a training run and starts it.
 func (s *Server) trainJob(ctx context.Context, name string, req trainRequest) (*Job, error) {
-	entity, err := s.store.EntityFull(ctx, name)
+	item, err := s.store.ItemFull(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -132,9 +132,9 @@ func (s *Server) trainJob(ctx context.Context, name string, req trainRequest) (*
 		}
 	}
 
-	return s.jobs.Start("train", entity.Name, func(jobCtx context.Context) (any, error) {
+	return s.jobs.Start("train", item.Name, func(jobCtx context.Context) (any, error) {
 		trainer := train.New(s.cfg, s.store, s.pages)
-		return trainer.Run(jobCtx, entity, train.Options{
+		return trainer.Run(jobCtx, item, train.Options{
 			Limit:   req.Limit,
 			Types:   types,
 			NoChain: req.NoChain,
@@ -193,9 +193,9 @@ func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, job)
 }
 
-// applyTemplate copies a shipped schema onto an entity, as `scour add
+// applyTemplate copies a shipped schema onto an item, as `scour add
 // --template` does.
-func applyTemplate(ctx context.Context, s *store.Store, entityID uint, name string) error {
+func applyTemplate(ctx context.Context, s *store.Store, itemID uint, name string) error {
 	schema, err := defaults.Schema(name)
 	if err != nil {
 		return ErrInvalid{msg: err.Error()}
@@ -211,12 +211,12 @@ func applyTemplate(ctx context.Context, s *store.Store, entityID uint, name stri
 		if len(p.Examples) > 0 {
 			example = p.Examples[0]
 		}
-		if err := s.AddPropertyDetail(ctx, entityID, store.PropertyDetail{
+		if err := s.AddPropertyDetail(ctx, itemID, store.PropertyDetail{
 			Name: p.Name, Type: string(p.Type), Example: example, Description: p.Description}); err != nil {
 			return err
 		}
 		for _, alias := range p.Aliases {
-			if err := s.AddPropertyAlias(ctx, entityID, "", p.Name, strings.TrimSpace(alias)); err != nil {
+			if err := s.AddPropertyAlias(ctx, itemID, "", p.Name, strings.TrimSpace(alias)); err != nil {
 				return err
 			}
 		}

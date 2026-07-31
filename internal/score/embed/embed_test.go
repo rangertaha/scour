@@ -138,7 +138,7 @@ func TestUnknownVocabularyScoresNeutral(t *testing.T) {
 	}
 }
 
-func TestAnEntityWithNoKnownWordsIsAnError(t *testing.T) {
+func TestAnItemWithNoKnownWordsIsAnError(t *testing.T) {
 	_, err := New(vectors(t), []string{"qwertyuiop", "zxcvbnm"})
 	if err == nil {
 		t.Error("a topic averaged from nothing should be an error, not a scorer that ranks at random")
@@ -273,7 +273,7 @@ func TestRegisteredButNeedsVectors(t *testing.T) {
 
 	// Without a path there is nothing to load, and saying so is better than
 	// silently ranking every link the same.
-	if _, err := score.New("embed", score.Config{Entity: "vehicle"}); err == nil {
+	if _, err := score.New("embed", score.Config{Item: "vehicle"}); err == nil {
 		t.Error("the embed scorer should refuse to start with no vectors configured")
 	}
 
@@ -282,7 +282,7 @@ func TestRegisteredButNeedsVectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, err := score.New("embed", score.Config{
-		Entity: "vehicle", Seed: []string{"car"}, Vectors: path,
+		Item: "vehicle", Seed: []string{"car"}, Vectors: path,
 	})
 	if err != nil {
 		t.Fatal(err)

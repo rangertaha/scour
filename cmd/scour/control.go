@@ -18,15 +18,15 @@ func newStopCmd(a *app) *cli.Command {
 		Category:  "Finding pages",
 		Name:      "stop",
 		ArgsUsage: "<name>",
-		Usage:     "Stop crawling an entity, keeping its frontier",
+		Usage:     "Stop crawling an item, keeping its frontier",
 		Description: "Stops a crawl wherever it is running: in a foreground `scour crawl` on this\n" +
 			"machine, or on crawlers being fed by a store elsewhere.\n\n" +
 			"Nothing is discarded. The frontier keeps its order and its leases, so a\n" +
-			"resumed crawl carries on rather than starting again, and the entity stays\n" +
+			"resumed crawl carries on rather than starting again, and the item stays\n" +
 			"stopped until it is started.",
 		UsageText: "  scour stop news",
 		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one entity name")
+			args, err := need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -40,12 +40,12 @@ func newStartCmd(a *app) *cli.Command {
 		Category:  "Finding pages",
 		Name:      "start",
 		ArgsUsage: "<name>",
-		Usage:     "Let an entity be crawled again",
-		Description: "Clears what `scour stop` set. Crawlers fed by a store pick the entity up on\n" +
+		Usage:     "Let an item be crawled again",
+		Description: "Clears what `scour stop` set. Crawlers fed by a store pick the item up on\n" +
 			"their own; a foreground crawl is still started with `scour crawl`.",
 		UsageText: "  scour start news",
 		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one entity name")
+			args, err := need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -60,19 +60,19 @@ func setPaused(c context.Context, a *app, name string, paused bool) error {
 		return err
 	}
 
-	entity, err := s.Entity(c, name)
+	item, err := s.Item(c, name)
 	if err != nil {
 		return err
 	}
-	if err := s.SetPaused(c, entity.ID, paused); err != nil {
+	if err := s.SetPaused(c, item.ID, paused); err != nil {
 		return err
 	}
 
 	if paused {
 		a.Printf("%s: stopped, frontier kept\nstart it again: scour start %s\n",
-			entity.Name, entity.Name)
+			item.Name, item.Name)
 		return nil
 	}
-	a.Printf("%s: started\ncrawl it here: scour crawl %s\n", entity.Name, entity.Name)
+	a.Printf("%s: started\ncrawl it here: scour crawl %s\n", item.Name, item.Name)
 	return nil
 }

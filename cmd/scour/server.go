@@ -163,7 +163,7 @@ func newMCPCmd(a *app) *cli.Command {
 		Description: "Speaks the Model Context Protocol on stdin and stdout, which is what a local\n" +
 			"agent launches directly. A running `scour server` also serves MCP over HTTP\n" +
 			"at /mcp for agents that attach instead of spawning.\n\n" +
-			"Both views share one database, so an entity defined over MCP is the entity\n" +
+			"Both views share one database, so an item defined over MCP is the item\n" +
 			"the CLI sees.",
 		Action: func(c context.Context, cmd *cli.Command) error {
 			s, err := a.Store()

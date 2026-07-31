@@ -71,7 +71,7 @@ func (h *webhook) Name() string { return "webhook" }
 
 // payload is what a receiver gets.
 type payload struct {
-	Entity  string       `json:"entity"`
+	Item    string       `json:"item"`
 	Domain  string       `json:"domain"`
 	Batch   int          `json:"batch"`
 	Batches int          `json:"batches"`
@@ -79,7 +79,7 @@ type payload struct {
 }
 
 // Export implements [Exporter].
-func (h *webhook) Export(ctx context.Context, entity string, rows []store.RecordRow) (*Result, error) {
+func (h *webhook) Export(ctx context.Context, item string, rows []store.RecordRow) (*Result, error) {
 	result := &Result{}
 	groups := byDomain(rows)
 
@@ -91,7 +91,7 @@ func (h *webhook) Export(ctx context.Context, entity string, rows []store.Record
 			end := min(i+batchSize, len(batch))
 
 			body := payload{
-				Entity:  entity,
+				Item:    item,
 				Domain:  domain,
 				Batch:   i/batchSize + 1,
 				Batches: total,

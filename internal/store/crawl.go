@@ -17,25 +17,25 @@ import (
 // URLHash is the frontier's identity for a URL. Re-discovering a URL is an
 // upsert on this, which is what makes the crawl idempotent under the
 // at-least-once delivery the bus will bring in M5.
-func URLHash(entityID uint, rawURL string) string {
-	sum := sha256.Sum256(fmt.Appendf(nil, "%d\x00%s", entityID, rawURL))
+func URLHash(itemID uint, rawURL string) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%d\x00%s", itemID, rawURL))
 	return hex.EncodeToString(sum[:])
 }
 
 // Discovered records a URL the crawler has seen but not yet fetched. An
 // already-known URL keeps its existing row, so a link found twice does not
 // reset its state.
-func (s *Store) Discovered(ctx context.Context, entityID uint, rawURL, parentURL string, depth int, score float64) error {
+func (s *Store) Discovered(ctx context.Context, itemID uint, rawURL, parentURL string, depth int, score float64) error {
 	var parentID *uint
 	if parentURL != "" && parentURL != rawURL {
-		if id, err := s.urlID(ctx, entityID, parentURL); err == nil {
+		if id, err := s.urlID(ctx, itemID, parentURL); err == nil {
 			parentID = &id
 		}
 	}
 
 	u := URL{
-		EntityID: entityID,
-		Hash:     URLHash(entityID, rawURL),
+		ItemID:   itemID,
+		Hash:     URLHash(itemID, rawURL),
 		URL:      rawURL,
 		ParentID: parentID,
 		Depth:    depth,
@@ -53,7 +53,7 @@ func (s *Store) Discovered(ctx context.Context, entityID uint, rawURL, parentURL
 
 // Fetched is the outcome of one fetch, as the crawl callbacks see it.
 type Fetched struct {
-	EntityID    uint
+	ItemID      uint
 	URL         string
 	ParentURL   string
 	Depth       int
@@ -73,14 +73,14 @@ func (s *Store) RecordFetch(ctx context.Context, f Fetched) error {
 
 	var parentID *uint
 	if f.ParentURL != "" {
-		if id, err := s.urlID(ctx, f.EntityID, f.ParentURL); err == nil {
+		if id, err := s.urlID(ctx, f.ItemID, f.ParentURL); err == nil {
 			parentID = &id
 		}
 	}
 
 	u := URL{
-		EntityID:    f.EntityID,
-		Hash:        URLHash(f.EntityID, f.URL),
+		ItemID:      f.ItemID,
+		Hash:        URLHash(f.ItemID, f.URL),
 		URL:         f.URL,
 		ParentID:    parentID,
 		Depth:       f.Depth,
@@ -123,7 +123,7 @@ func (s *Store) RecordFetch(ctx context.Context, f Fetched) error {
 	// fetch succeeded or failed. Both paths arrive here, so this is the single
 	// place a lease is released; anything that never arrives is returned by its
 	// lease expiring instead.
-	if err := s.ReleaseQueue(ctx, f.EntityID, u.Hash); err != nil {
+	if err := s.ReleaseQueue(ctx, f.ItemID, u.Hash); err != nil {
 		return err
 	}
 
@@ -131,7 +131,7 @@ func (s *Store) RecordFetch(ctx context.Context, f Fetched) error {
 		return nil
 	}
 
-	id, err := s.urlID(ctx, f.EntityID, f.URL)
+	id, err := s.urlID(ctx, f.ItemID, f.URL)
 	if err != nil {
 		return err
 	}
@@ -147,11 +147,11 @@ func (s *Store) RecordFetch(ctx context.Context, f Fetched) error {
 	return nil
 }
 
-func (s *Store) urlID(ctx context.Context, entityID uint, rawURL string) (uint, error) {
+func (s *Store) urlID(ctx context.Context, itemID uint, rawURL string) (uint, error) {
 	var u URL
 	err := s.db.WithContext(ctx).
 		Select("id").
-		Where("hash = ?", URLHash(entityID, rawURL)).
+		Where("hash = ?", URLHash(itemID, rawURL)).
 		First(&u).Error
 	if err != nil {
 		return 0, fmt.Errorf("look up url %s: %w", rawURL, err)
@@ -159,11 +159,11 @@ func (s *Store) urlID(ctx context.Context, entityID uint, rawURL string) (uint, 
 	return u.ID, nil
 }
 
-// URLs returns an entity's frontier rows, highest score first. A limit of zero
+// URLs returns an item's frontier rows, highest score first. A limit of zero
 // returns everything.
-func (s *Store) URLs(ctx context.Context, entityID uint, limit int) ([]URL, error) {
+func (s *Store) URLs(ctx context.Context, itemID uint, limit int) ([]URL, error) {
 	q := s.db.WithContext(ctx).
-		Where("entity_id = ?", entityID).
+		Where("item_id = ?", itemID).
 		Order("score DESC, url ASC")
 	if limit > 0 {
 		q = q.Limit(limit)
@@ -177,10 +177,10 @@ func (s *Store) URLs(ctx context.Context, entityID uint, limit int) ([]URL, erro
 
 // FetchedURLs returns only the rows a fetch was attempted for, which is what
 // the crawl summary is built from.
-func (s *Store) FetchedURLs(ctx context.Context, entityID uint) ([]URL, error) {
+func (s *Store) FetchedURLs(ctx context.Context, itemID uint) ([]URL, error) {
 	var out []URL
 	err := s.db.WithContext(ctx).
-		Where("entity_id = ? AND fetched_at IS NOT NULL", entityID).
+		Where("item_id = ? AND fetched_at IS NOT NULL", itemID).
 		Order("score DESC, url ASC").
 		Find(&out).Error
 	if err != nil {
@@ -189,7 +189,7 @@ func (s *Store) FetchedURLs(ctx context.Context, entityID uint) ([]URL, error) {
 	return out, nil
 }
 
-// Status summarises an entity, and is what `scour list` prints.
+// Status summarises an item, and is what `scour list` prints.
 type Status struct {
 	Targets    int64
 	Properties int64
@@ -208,8 +208,8 @@ type Status struct {
 	Model      *ModelMeta
 }
 
-// Status gathers the counters for one entity.
-func (s *Store) Status(ctx context.Context, entityID uint) (*Status, error) {
+// Status gathers the counters for one item.
+func (s *Store) Status(ctx context.Context, itemID uint) (*Status, error) {
 	db := s.db.WithContext(ctx)
 	st := &Status{Formats: map[string]int64{}, Roles: map[string]int64{}}
 
@@ -218,18 +218,18 @@ func (s *Store) Status(ctx context.Context, entityID uint) (*Status, error) {
 		model any
 		where []any
 	}{
-		{&st.Targets, &Target{}, []any{"entity_id = ?", entityID}},
-		{&st.Properties, &Property{}, []any{"entity_id = ?", entityID}},
-		{&st.Aliases, &Alias{}, []any{"entity_id = ?", entityID}},
-		{&st.Queued, &URL{}, []any{"entity_id = ? AND status = ?", entityID, URLQueued}},
-		{&st.Visited, &URL{}, []any{"entity_id = ? AND status = ?", entityID, URLFetched}},
-		{&st.Failed, &URL{}, []any{"entity_id = ? AND status = ?", entityID, URLFailed}},
-		{&st.Skipped, &URL{}, []any{"entity_id = ? AND status = ?", entityID, URLSkipped}},
-		{&st.Matches, &Record{}, []any{"entity_id = ?", entityID}},
-		{&st.Valid, &Record{}, []any{"entity_id = ? AND label = ?", entityID, Valid}},
-		{&st.Invalid, &Record{}, []any{"entity_id = ? AND label = ?", entityID, Invalid}},
-		{&st.Unlabelled, &Record{}, []any{"entity_id = ? AND label = ?", entityID, Unlabelled}},
-		{&st.Rules, &Rule{}, []any{"entity_id = ?", entityID}},
+		{&st.Targets, &Target{}, []any{"item_id = ?", itemID}},
+		{&st.Properties, &Property{}, []any{"item_id = ?", itemID}},
+		{&st.Aliases, &Alias{}, []any{"item_id = ?", itemID}},
+		{&st.Queued, &URL{}, []any{"item_id = ? AND status = ?", itemID, URLQueued}},
+		{&st.Visited, &URL{}, []any{"item_id = ? AND status = ?", itemID, URLFetched}},
+		{&st.Failed, &URL{}, []any{"item_id = ? AND status = ?", itemID, URLFailed}},
+		{&st.Skipped, &URL{}, []any{"item_id = ? AND status = ?", itemID, URLSkipped}},
+		{&st.Matches, &Record{}, []any{"item_id = ?", itemID}},
+		{&st.Valid, &Record{}, []any{"item_id = ? AND label = ?", itemID, Valid}},
+		{&st.Invalid, &Record{}, []any{"item_id = ? AND label = ?", itemID, Invalid}},
+		{&st.Unlabelled, &Record{}, []any{"item_id = ? AND label = ?", itemID, Unlabelled}},
+		{&st.Rules, &Rule{}, []any{"item_id = ?", itemID}},
 	}
 	for _, c := range counts {
 		if err := db.Model(c.model).Where(c.where[0], c.where[1:]...).Count(c.dst).Error; err != nil {
@@ -243,7 +243,7 @@ func (s *Store) Status(ctx context.Context, entityID uint) (*Status, error) {
 	}
 	err := db.Model(&URL{}).
 		Select("content_type AS key, COUNT(*) AS n").
-		Where("entity_id = ? AND content_type != ''", entityID).
+		Where("item_id = ? AND content_type != ''", itemID).
 		Group("content_type").Scan(&grouped).Error
 	if err != nil {
 		return nil, fmt.Errorf("count formats: %w", err)
@@ -255,7 +255,7 @@ func (s *Store) Status(ctx context.Context, entityID uint) (*Status, error) {
 	grouped = grouped[:0]
 	err = db.Model(&PageRole{}).
 		Select("role AS key, COUNT(*) AS n").
-		Where("entity_id = ? AND role != ''", entityID).
+		Where("item_id = ? AND role != ''", itemID).
 		Group("role").Scan(&grouped).Error
 	if err != nil {
 		return nil, fmt.Errorf("count roles: %w", err)
@@ -265,22 +265,22 @@ func (s *Store) Status(ctx context.Context, entityID uint) (*Status, error) {
 	}
 
 	var meta ModelMeta
-	if err := db.Where("entity_id = ?", entityID).First(&meta).Error; err == nil {
+	if err := db.Where("item_id = ?", itemID).First(&meta).Error; err == nil {
 		st.Model = &meta
 	}
 	return st, nil
 }
 
-// ResetFrontier clears an entity's crawl state, leaving its definition intact.
+// ResetFrontier clears an item's crawl state, leaving its definition intact.
 // The cached bodies survive, so a re-crawl is cheap.
 //
 // This includes the visited set. Clearing the frontier without it would leave
 // colly believing it had already seen every URL, so the re-crawl would fetch
 // nothing at all, which is the opposite of starting over.
-func (s *Store) ResetFrontier(ctx context.Context, entityID uint) error {
+func (s *Store) ResetFrontier(ctx context.Context, itemID uint) error {
 	db := s.db.WithContext(ctx)
 	var ids []uint
-	if err := db.Model(&URL{}).Where("entity_id = ?", entityID).Pluck("id", &ids).Error; err != nil {
+	if err := db.Model(&URL{}).Where("item_id = ?", itemID).Pluck("id", &ids).Error; err != nil {
 		return fmt.Errorf("collect urls: %w", err)
 	}
 	if len(ids) > 0 {
@@ -288,17 +288,17 @@ func (s *Store) ResetFrontier(ctx context.Context, entityID uint) error {
 			return fmt.Errorf("delete responses: %w", err)
 		}
 	}
-	if err := db.Where("entity_id = ?", entityID).Delete(&URL{}).Error; err != nil {
+	if err := db.Where("item_id = ?", itemID).Delete(&URL{}).Error; err != nil {
 		return fmt.Errorf("delete urls: %w", err)
 	}
-	return s.ClearCrawlState(ctx, entityID)
+	return s.ClearCrawlState(ctx, itemID)
 }
 
 // SetHostTransport records that a host needs a particular transport, which is
 // how an escalation to the browser survives the crawl that discovered it.
 //
 // Politeness and capability are owed to the server rather than to any one
-// entity, so this is shared across entities like the rest of the host policy.
+// item, so this is shared across items like the rest of the host policy.
 func (s *Store) SetHostTransport(ctx context.Context, host, transport string) error {
 	row := Host{Host: host, Transport: transport}
 	err := s.db.WithContext(ctx).

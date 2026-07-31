@@ -7,7 +7,7 @@
 A focused web crawler that scores links by how likely they are to describe the
 thing you are looking for.
 
-You tell scour what you care about: an entity, its aliases, and the properties
+You tell scour what you care about: an item, its aliases, and the properties
 it should have. scour then crawls outward from your seed targets, assigning
 every discovered URL a probability that it holds a match. Instead of scraping
 whole sites and filtering afterwards, you get a ranked frontier and spend your
@@ -122,7 +122,7 @@ go install github.com/Rangertaha/scour@latest
 
 ## Quick start
 
-Describe the entity you are hunting for, with the other words a page might use
+Describe the item you are hunting for, with the other words a page might use
 for it. The name is the handle for everything that follows:
 
 ```
@@ -132,7 +132,7 @@ scour add vehicle --alias 'car' --alias 'automobile' --alias 'pickup truck'
 Add seed targets to crawl. A domain makes the whole site a target; a URL starts
 from one page. Domains are normalised, so `example.com`, `www.example.com` and
 `https://example.com/` are one target; pass `--subdomains` to follow
-`shop.example.com` as well. An entity can have as many targets as you like,
+`shop.example.com` as well. An item can have as many targets as you like,
 across as many sites as you like:
 
 ```
@@ -145,7 +145,7 @@ scour import vehicle --domains domains.txt
 scour import vehicle --props props.csv
 ```
 
-Describe the properties that entity should have, with an example value for each:
+Describe the properties that item should have, with an example value for each:
 
 ```
 scour add vehicle -p make  -e Ford
@@ -250,15 +250,15 @@ scored and mined for properties like any other page. Types it cannot read, such
 as images, are recorded in the frontier with their status and size but never
 parsed, so allowing them costs bandwidth without adding matches.
 
-To make the choice permanent for an entity rather than passing it every crawl,
-set it on the entity itself:
+To make the choice permanent for an item rather than passing it every crawl,
+set it on the item itself:
 
 ```
 scour add vehicle --type html --type pdf
 ```
 
 Three places can set this, and the narrowest wins: a `--type` on `crawl` beats
-the entity's own setting, which beats `content_types` in `config.toml`.
+the item's own setting, which beats `content_types` in `config.toml`.
 
 ### Pages that need a browser
 
@@ -380,7 +380,7 @@ nothing else. That verdict is currently reachable only through the HTTP API and
 the MCP server, both of which accept `valid`, `invalid` and `unlabelled`:
 
 ```
-curl -X POST http://localhost:8080/v1/entities/vehicle/records/1042/label \
+curl -X POST http://localhost:8080/v1/items/vehicle/records/1042/label \
   -H 'Content-Type: application/json' -d '{"label":"valid"}'
 ```
 
@@ -397,7 +397,7 @@ matches     100  (97 valid, 1 invalid, 2 unlabelled)
 model       trained 2026-07-30, accuracy 0.91
 ```
 
-List the entities you have defined, and how many matches each has found:
+List the items you have defined, and how many matches each has found:
 
 ```
 scour list
@@ -423,11 +423,11 @@ output, and `--limit <n>` to cap the rows returned.
 
 | Command | Description |
 | --- | --- |
-| `scour add <name> --alias <word>` | Define an entity, or add another alias to it |
+| `scour add <name> --alias <word>` | Define an item, or add another alias to it |
 | `scour add <name> -d <domain>` | Add a whole domain as a crawl target |
 | `scour add <name> -u <url>` | Add a single URL as a crawl target |
 | `scour add <name> -p <prop> -e <example>` | Add a property with an example value |
-| `scour add <name> --type <type>` | Restrict this entity's crawls to a content type |
+| `scour add <name> --type <type>` | Restrict this item's crawls to a content type |
 | `scour tag <name> -p <prop>` | List the words a property might be labelled with |
 | `scour tag <name> -p <prop> -a <word>` | Add a word (repeatable) |
 | `scour tag <name> -p <prop> -d <word>` | Remove a word (repeatable) |
@@ -441,18 +441,18 @@ output, and `--limit <n>` to cap the rows returned.
 | `scour crawl <name> --max-pages <n>` | Stop after this many pages, keeping the frontier |
 | `scour crawl <name> --max-time <d>` | Stop after this long, keeping the frontier |
 | `scour train <name>` | Train the model and extraction rules on the cached pages |
-| `scour rules <name>` | List the extraction rules learned for an entity |
+| `scour rules <name>` | List the extraction rules learned for an item |
 | `scour search <name> --confidence <p>` | Search extracted records at or above a confidence |
 | `scour search <name> --type <type>` | Search only records extracted from a content type |
 | `scour search <name> --exclude-type <type>` | Search everything except a content type |
 | `scour invalid <name> <id>...` | Label records as wrong |
-| `scour top` | Watch every entity live, and start, stop or train one |
-| `scour start <name>` | Let an entity be crawled again |
-| `scour stop <name>` | Stop crawling an entity, keeping its frontier |
-| `scour list` | A line per entity: what it has, how far its crawl got, whether it is trained |
-| `scour list <name>` | Everything known about one entity |
+| `scour top` | Watch every item live, and start, stop or train one |
+| `scour start <name>` | Let an item be crawled again |
+| `scour stop <name>` | Stop crawling an item, keeping its frontier |
+| `scour list` | A line per item: what it has, how far its crawl got, whether it is trained |
+| `scour list <name>` | Everything known about one item |
 | `scour export <name>` | Write records out as CSV, JSON, or to a webhook |
-| `scour remove <name> [-d/-u/-p/--rule]` | Remove an entity, or one of its targets, properties or rules |
+| `scour remove <name> [-d/-u/-p/--rule]` | Remove an item, or one of its targets, properties or rules |
 | `scour templates` | List the built-in schemas `--template` accepts |
 | `scour mcp` | Run as an MCP server over stdio |
 | `scour server --listen <addr>` | Run as a service, serving the HTTP API and MCP |
@@ -507,8 +507,8 @@ fetch rather than nothing left.
 Created in your OS user config directory the first time you run `scour`:
 
 * `~/.config/scour/config.toml`: crawl defaults, including concurrency, rate limits, user agent, allowed content types, scoring algorithm, and directory paths
-* `~/.config/scour/scour.db`: the single store for entities, properties, targets, the frontier, rules, matches and labels
-* `~/.config/scour/models/<name>.json`: one scoring model per entity, holding the feature weights used to rank URLs
+* `~/.config/scour/scour.db`: the single store for items, properties, targets, the frontier, rules, matches and labels
+* `~/.config/scour/models/<name>.json`: one scoring model per item, holding the feature weights used to rank URLs
 
 Working data lives outside the config directory, so it can be cleared without
 losing your setup:
@@ -531,8 +531,8 @@ Reads answer immediately. Crawling and training return a job id instead of
 blocking, because they run for minutes:
 
 ```
-curl -X POST localhost:8080/v1/entities/vehicle/crawl -d '{"max_pages":200}'
-{"id":"crawl-1","kind":"crawl","entity":"vehicle","state":"running", ...}
+curl -X POST localhost:8080/v1/items/vehicle/crawl -d '{"max_pages":200}'
+{"id":"crawl-1","kind":"crawl","item":"vehicle","state":"running", ...}
 
 curl localhost:8080/v1/jobs/crawl-1
 {"id":"crawl-1","state":"done","result":{"Fetched":200, ...}}
@@ -541,20 +541,20 @@ curl localhost:8080/v1/jobs/crawl-1
 | Method | Path | Does |
 | --- | --- | --- |
 | `GET` | `/healthz` | Liveness. The one route that needs no token |
-| `GET` | `/v1/entities` | List entities and their record counts |
-| `POST` | `/v1/entities` | Create an entity, or add to one |
-| `GET` `DELETE` | `/v1/entities/{name}` | Fetch or remove one |
-| `GET` | `/v1/entities/{name}/frontier` | The ranked URLs |
-| `GET` | `/v1/entities/{name}/rules` | The learned extraction rules |
-| `GET` | `/v1/entities/{name}/records` | Search extracted records |
-| `POST` | `/v1/entities/{name}/records/{id}/label` | Mark a record valid or invalid |
-| `POST` | `/v1/entities/{name}/crawl` | Start a crawl, returns a job |
-| `POST` | `/v1/entities/{name}/train` | Start training, returns a job |
+| `GET` | `/v1/items` | List items and their record counts |
+| `POST` | `/v1/items` | Create an item, or add to one |
+| `GET` `DELETE` | `/v1/items/{name}` | Fetch or remove one |
+| `GET` | `/v1/items/{name}/frontier` | The ranked URLs |
+| `GET` | `/v1/items/{name}/rules` | The learned extraction rules |
+| `GET` | `/v1/items/{name}/records` | Search extracted records |
+| `POST` | `/v1/items/{name}/records/{id}/label` | Mark a record valid or invalid |
+| `POST` | `/v1/items/{name}/crawl` | Start a crawl, returns a job |
+| `POST` | `/v1/items/{name}/train` | Start training, returns a job |
 | `GET` | `/v1/jobs` `/v1/jobs/{id}` | Watch jobs |
 | `POST` | `/mcp` | MCP over HTTP |
 | `GET` | `/metrics` | Prometheus metrics |
 
-One entity cannot be crawled twice at once, since two crawls would race on the
+One item cannot be crawled twice at once, since two crawls would race on the
 frontier and double the load on the site. A second request returns `409` with
 the id of the run already in progress.
 
@@ -562,7 +562,7 @@ Set `token_file` to require a bearer token on everything except `/healthz`:
 
 ```
 head -c 32 /dev/urandom | base64 > /etc/scour/token
-curl -H "Authorization: Bearer $(cat /etc/scour/token)" localhost:8080/v1/entities
+curl -H "Authorization: Bearer $(cat /etc/scour/token)" localhost:8080/v1/items
 ```
 
 Installed as a service, scour runs as the unprivileged `scour` user and follows
@@ -571,8 +571,8 @@ the filesystem hierarchy standard rather than the per-user paths above:
 | Path | Contents |
 | --- | --- |
 | `/etc/scour/config.toml` | crawl defaults, listen address, and per-host overrides |
-| `/var/lib/scour/scour.db` | the single store for entities, properties, targets, the frontier, rules, matches and labels |
-| `/var/lib/scour/models/<name>.json` | one scoring model per entity, holding the feature weights used to rank URLs |
+| `/var/lib/scour/scour.db` | the single store for items, properties, targets, the frontier, rules, matches and labels |
+| `/var/lib/scour/models/<name>.json` | one scoring model per item, holding the feature weights used to rank URLs |
 | `/var/cache/scour/pages/<domain>/` | fetched page bodies, so a re-crawl doesn't re-download |
 | `/var/lib/scour/exports/<name>/<domain>/<date>.csv` | extracted records, with a `label` column holding `valid`, `invalid` or `unlabelled` |
 
@@ -692,7 +692,7 @@ scour run --role crawl --bus-url nats://broker:4222     # as many as you like
 ```
 
 The store owns the database and the frontier; crawlers own the network and
-nothing else. A crawler holds no state about an entity: what is in scope, what
+nothing else. A crawler holds no state about an item: what is in scope, what
 has been visited and what is worth fetching next are all decided by the store,
 so crawlers are interchangeable and losing one costs only the lease on whatever
 it was holding.
@@ -724,7 +724,7 @@ local disk, then training in a fourth process reading every one of them.
 
 ## Instrumentation
 
-Everything the pipeline measures is published on `scour.<entity>.metric`, so a
+Everything the pipeline measures is published on `scour.<item>.metric`, so a
 crawl can be watched while it happens rather than summarised when it ends.
 
 | Metric | Unit | Labels |
@@ -734,8 +734,8 @@ crawl can be watched while it happens rather than summarised when it ends.
 | `fetch.status` | count | host, status |
 | `queue.depth` | count | |
 | `queue.in_flight` | count | |
-| `extract.records` | count | entity |
-| `extract.rules` | count | entity |
+| `extract.records` | count | item |
+| `extract.rules` | count | item |
 
 Its own stream, and not a work queue like the others: a work queue delivers a
 message once and removes it, so one dashboard consuming a metric would take it
@@ -823,7 +823,7 @@ run stopped rather than starting the queue again.
 ## MCP server
 
 scour runs as a [Model Context Protocol](https://modelcontextprotocol.io)
-server, so an agent can drive the crawl directly: defining entities, adding
+server, so an agent can drive the crawl directly: defining items, adding
 targets, training the model, inspecting the cache, reading back the ranked
 frontier and extracted results, and suggesting fixes.
 
@@ -846,7 +846,7 @@ off; to reach it from another machine, bind an external address and set
 }
 ```
 
-Both views share one database, so an entity defined over MCP is the same entity
+Both views share one database, so an item defined over MCP is the same item
 the CLI sees.
 
 ## License

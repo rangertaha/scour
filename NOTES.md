@@ -4,31 +4,25 @@ COMMANDS:
    version  Print the version
    help, h  Shows a list of commands or help for one command
 
+   URLS:
+     import  Import domains and urls from file
+     export  Write domains and urls to file
+
    ITEMS:
-     add         Add an item, properties or tags
-     rm          Remove an item, properties, or tags
-     templates   List the built-in schemas scour ships with
+     item    Define items to find
+     stream  Stream live items to STDOUT
 
    TRAIN:
-     invalid  Label records as wrong
-     rules    List the extraction rules learned for an entity
-     train    Learn where an entity's properties live, from the pages already crawled
+     rules    List the extraction rules learned for an item
+     train    Learn where an item lives from cached pages
 
-   FIND:
-     crawl  Crawl an entity's targets, ranking discovered URLs by probability
-     top    Watch every entity live, and pause or resume a crawl
-     start  Let an entity be crawled again
-     stop   Stop crawling an entity, keeping its frontier
-
-   DATA:
-     search  S
-     import  Import domains, urls, item properties, and aliases form file
-     export  Write domains, urls, properties, and aliases to file
-     stream  Stream items to STDOUT
+   SEARCH:
+     search  Search domains and urls for items
+     top     Watch every item live, and pause or resume a crawl
+     start   Start a search for items
+     stop    Stop search 
 
    SERVER:
      mcp     Run as an MCP server over stdio
      server  Run as a service, serving the HTTP API and MCP
-     join    Join to another **scour** instance
-
-
+     join    Join a cluster for distributed workload

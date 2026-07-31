@@ -148,7 +148,7 @@ the page is not about any of the listed subjects, answer other_subject.`
 
 // verdict is the shape the model must answer in.
 //
-// The subject category is named after the entity rather than called "subject",
+// The subject category is named after the item rather than called "subject",
 // because the measured difference between this working and not is whether the
 // model is recognising a topic it knows or resolving a pronoun. "vehicle" is
 // something a model has seen; "the subject" is a referent it has to track.
@@ -214,14 +214,14 @@ func (l *LLM) ask(ctx context.Context, topic Topic, page Page) (Category, error)
 
 // subjectNames is what the model may answer to mean "this is the subject".
 //
-// Only the entity's name, deliberately, and that is a measured choice rather
+// Only the item's name, deliberately, and that is a measured choice rather
 // than a simplification. Offering the aliases as well seems obviously helpful
 // and is not: on a ten-page corpus, name alone scored 9 with no false
 // positives, while name plus aliases scored 7 with three, calling the recipe,
 // the privacy notice and the about page all on topic. More ways to say yes is
 // the assent bias again, wearing a different hat.
 //
-// The cost is that the entity's name carries the whole question. Named after
+// The cost is that the item's name carries the whole question. Named after
 // what it actually is, the classifier scores 9 of 10; named "api-cars" or
 // "proj7" it scores 2 or 6, because a coined word is not something a model can
 // recognise. That is worth knowing before turning this on, and it is what the

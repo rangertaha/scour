@@ -23,8 +23,8 @@ func newRemoveCmd(a *app) *cli.Command {
 		Name:      "remove",
 		ArgsUsage: "<name>",
 		Aliases:   []string{"rm"},
-		Usage:     "Remove an entity, or one of its targets, properties or rules",
-		Description: "With no flags this deletes the entity and everything belonging to it, which\n" +
+		Usage:     "Remove an item, or one of its targets, properties or rules",
+		Description: "With no flags this deletes the item and everything belonging to it, which\n" +
 			"cannot be undone, so it asks for --force. With flags it removes only what\n" +
 			"the flags name.",
 		UsageText: "  scour remove vehicle -d example.com\n" +
@@ -57,12 +57,12 @@ func newRemoveCmd(a *app) *cli.Command {
 			},
 			&cli.BoolFlag{
 				Name:        "force",
-				Usage:       "confirm deleting the whole entity",
+				Usage:       "confirm deleting the whole item",
 				Destination: &f.force,
 			},
 		},
 		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one entity name")
+			args, err := need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -82,18 +82,18 @@ func runRemove(c context.Context, a *app, name string, f removeFlags) error {
 	partial := len(f.domains) > 0 || len(f.urls) > 0 || len(f.props) > 0 || len(f.rules) > 0
 	if !partial {
 		if !f.force {
-			a.Printf("this deletes entity %q and every target, rule and record it owns\n", name)
+			a.Printf("this deletes item %q and every target, rule and record it owns\n", name)
 			a.Println("re-run with --force to confirm")
 			return errSilent
 		}
-		if err := s.DeleteEntity(c, name); err != nil {
+		if err := s.DeleteItem(c, name); err != nil {
 			return err
 		}
-		a.Printf("removed entity %s\n", name)
+		a.Printf("removed item %s\n", name)
 		return nil
 	}
 
-	entity, err := s.Entity(c, name)
+	item, err := s.Item(c, name)
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func runRemove(c context.Context, a *app, name string, f removeFlags) error {
 		if err != nil {
 			return err
 		}
-		if err := s.DeleteTarget(c, entity.ID, host); err != nil {
+		if err := s.DeleteTarget(c, item.ID, host); err != nil {
 			return err
 		}
 		a.Printf("%s: removed domain %s\n", name, host)
@@ -114,21 +114,21 @@ func runRemove(c context.Context, a *app, name string, f removeFlags) error {
 		if err != nil {
 			return err
 		}
-		if err := s.DeleteTarget(c, entity.ID, normalised); err != nil {
+		if err := s.DeleteTarget(c, item.ID, normalised); err != nil {
 			return err
 		}
 		a.Printf("%s: removed url %s\n", name, normalised)
 	}
 
 	for _, p := range f.props {
-		if err := s.DeleteProperty(c, entity.ID, p); err != nil {
+		if err := s.DeleteProperty(c, item.ID, p); err != nil {
 			return err
 		}
 		a.Printf("%s: removed property %s\n", name, p)
 	}
 
 	for _, id := range f.rules {
-		if err := s.DeleteRule(c, entity.ID, id); err != nil {
+		if err := s.DeleteRule(c, item.ID, id); err != nil {
 			return err
 		}
 		a.Printf("%s: removed rule %d\n", name, id)

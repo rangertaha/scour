@@ -23,8 +23,8 @@ var ErrQueueEmpty = errors.New("queue is empty")
 // MarkVisited records that colly has visited a request.
 //
 // See [Visit] for why colly's uint64 hash is stored as an int64.
-func (s *Store) MarkVisited(ctx context.Context, entityID uint, requestID uint64) error {
-	v := Visit{EntityID: entityID, RequestID: int64(requestID), VisitedAt: time.Now().UTC()}
+func (s *Store) MarkVisited(ctx context.Context, itemID uint, requestID uint64) error {
+	v := Visit{ItemID: itemID, RequestID: int64(requestID), VisitedAt: time.Now().UTC()}
 	err := s.db.WithContext(ctx).
 		Clauses(clause.OnConflict{DoNothing: true}).
 		Create(&v).Error
@@ -35,11 +35,11 @@ func (s *Store) MarkVisited(ctx context.Context, entityID uint, requestID uint64
 }
 
 // IsVisited reports whether colly has already visited a request.
-func (s *Store) IsVisited(ctx context.Context, entityID uint, requestID uint64) (bool, error) {
+func (s *Store) IsVisited(ctx context.Context, itemID uint, requestID uint64) (bool, error) {
 	var n int64
 	err := s.db.WithContext(ctx).
 		Model(&Visit{}).
-		Where("entity_id = ? AND request_id = ?", entityID, int64(requestID)).
+		Where("item_id = ? AND request_id = ?", itemID, int64(requestID)).
 		Count(&n).Error
 	if err != nil {
 		return false, fmt.Errorf("check visited: %w", err)
@@ -48,9 +48,9 @@ func (s *Store) IsVisited(ctx context.Context, entityID uint, requestID uint64) 
 }
 
 // VisitCount returns how many requests have been visited.
-func (s *Store) VisitCount(ctx context.Context, entityID uint) (int64, error) {
+func (s *Store) VisitCount(ctx context.Context, itemID uint) (int64, error) {
 	var n int64
-	err := s.db.WithContext(ctx).Model(&Visit{}).Where("entity_id = ?", entityID).Count(&n).Error
+	err := s.db.WithContext(ctx).Model(&Visit{}).Where("item_id = ?", itemID).Count(&n).Error
 	if err != nil {
 		return 0, fmt.Errorf("count visits: %w", err)
 	}
@@ -58,11 +58,11 @@ func (s *Store) VisitCount(ctx context.Context, entityID uint) (int64, error) {
 }
 
 // SetCookies stores the cookie header for a host.
-func (s *Store) SetCookies(ctx context.Context, entityID uint, host, cookies string) error {
-	c := Cookie{EntityID: entityID, Host: host, Value: cookies, UpdatedAt: time.Now().UTC()}
+func (s *Store) SetCookies(ctx context.Context, itemID uint, host, cookies string) error {
+	c := Cookie{ItemID: itemID, Host: host, Value: cookies, UpdatedAt: time.Now().UTC()}
 	err := s.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "entity_id"}, {Name: "host"}},
+			Columns:   []clause.Column{{Name: "item_id"}, {Name: "host"}},
 			DoUpdates: clause.AssignmentColumns([]string{"value", "updated_at"}),
 		}).
 		Create(&c).Error
@@ -73,10 +73,10 @@ func (s *Store) SetCookies(ctx context.Context, entityID uint, host, cookies str
 }
 
 // Cookies returns the stored cookie header for a host, or an empty string.
-func (s *Store) Cookies(ctx context.Context, entityID uint, host string) (string, error) {
+func (s *Store) Cookies(ctx context.Context, itemID uint, host string) (string, error) {
 	var c Cookie
 	err := s.db.WithContext(ctx).
-		Where("entity_id = ? AND host = ?", entityID, host).
+		Where("item_id = ? AND host = ?", itemID, host).
 		First(&c).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", nil
@@ -95,12 +95,12 @@ func (s *Store) Cookies(ctx context.Context, entityID uint, host string) (string
 // at once: the crawler that found it queues it, and the store queues it again
 // when the discovery is reported. Either way, fetching it twice is not what
 // anyone wanted.
-func (s *Store) PushQueue(ctx context.Context, entityID uint, score float64, hash string, data []byte) error {
+func (s *Store) PushQueue(ctx context.Context, itemID uint, score float64, hash string, data []byte) error {
 	if hash != "" {
 		var n int64
 		err := s.db.WithContext(ctx).
 			Model(&QueueItem{}).
-			Where("entity_id = ? AND hash = ?", entityID, hash).
+			Where("item_id = ? AND hash = ?", itemID, hash).
 			Count(&n).Error
 		if err != nil {
 			return fmt.Errorf("check queue for %s: %w", hash, err)
@@ -111,7 +111,7 @@ func (s *Store) PushQueue(ctx context.Context, entityID uint, score float64, has
 	}
 
 	item := QueueItem{
-		EntityID: entityID, Score: score, Hash: hash,
+		ItemID: itemID, Score: score, Hash: hash,
 		Host: hostOfRequest(data), Data: data,
 	}
 	if err := s.db.WithContext(ctx).Create(&item).Error; err != nil {
@@ -159,8 +159,8 @@ func hostOfRequest(data []byte) string {
 // recorded; if nothing reports back before the lease expires it is handed out
 // again, which is what makes a crawler dying mid-page cost a retry rather than
 // a silently missing page.
-func (s *Store) LeaseQueue(ctx context.Context, entityID uint, lease time.Duration) ([]byte, error) {
-	return s.LeaseQueueSkipping(ctx, entityID, lease, nil)
+func (s *Store) LeaseQueue(ctx context.Context, itemID uint, lease time.Duration) ([]byte, error) {
+	return s.LeaseQueueSkipping(ctx, itemID, lease, nil)
 }
 
 // LeaseQueueSkipping is LeaseQueue, ignoring items for hosts that have been
@@ -171,7 +171,7 @@ func (s *Store) LeaseQueue(ctx context.Context, entityID uint, lease time.Durati
 // the sum, and no crawler can see the others. The dispatcher can: it is the one
 // component handing out every URL, so pacing here bounds what a site actually
 // receives however many crawlers there are.
-func (s *Store) LeaseQueueSkipping(ctx context.Context, entityID uint, lease time.Duration, cooling []string) ([]byte, error) {
+func (s *Store) LeaseQueueSkipping(ctx context.Context, itemID uint, lease time.Duration, cooling []string) ([]byte, error) {
 	if lease <= 0 {
 		lease = DefaultLease
 	}
@@ -182,7 +182,7 @@ func (s *Store) LeaseQueueSkipping(ctx context.Context, entityID uint, lease tim
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var item QueueItem
 		q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("entity_id = ? AND (leased_until IS NULL OR leased_until < ?)", entityID, now)
+			Where("item_id = ? AND (leased_until IS NULL OR leased_until < ?)", itemID, now)
 		if len(cooling) > 0 {
 			// An item with no host recorded predates the column and is never
 			// skipped: it would otherwise be stuck for the life of the queue.
@@ -224,12 +224,12 @@ func (s *Store) LeaseQueueSkipping(ctx context.Context, entityID uint, lease tim
 }
 
 // ReleaseQueue removes a leased item once its fetch has been reported.
-func (s *Store) ReleaseQueue(ctx context.Context, entityID uint, hash string) error {
+func (s *Store) ReleaseQueue(ctx context.Context, itemID uint, hash string) error {
 	if hash == "" {
 		return nil
 	}
 	err := s.db.WithContext(ctx).
-		Where("entity_id = ? AND hash = ?", entityID, hash).
+		Where("item_id = ? AND hash = ?", itemID, hash).
 		Delete(&QueueItem{}).Error
 	if err != nil {
 		return fmt.Errorf("release queue item: %w", err)
@@ -241,11 +241,11 @@ func (s *Store) ReleaseQueue(ctx context.Context, entityID uint, hash string) er
 // already in flight are not waiting, so they are not counted: colly ends its
 // loop when the queue reports empty, and counting in-flight work would keep it
 // spinning on requests it has already been given.
-func (s *Store) QueueSize(ctx context.Context, entityID uint) (int, error) {
+func (s *Store) QueueSize(ctx context.Context, itemID uint) (int, error) {
 	var n int64
 	err := s.db.WithContext(ctx).
 		Model(&QueueItem{}).
-		Where("entity_id = ? AND (leased_until IS NULL OR leased_until < ?)", entityID, time.Now().UTC()).
+		Where("item_id = ? AND (leased_until IS NULL OR leased_until < ?)", itemID, time.Now().UTC()).
 		Count(&n).Error
 	if err != nil {
 		return 0, fmt.Errorf("queue size: %w", err)
@@ -254,48 +254,48 @@ func (s *Store) QueueSize(ctx context.Context, entityID uint) (int, error) {
 }
 
 // ClearCrawlState drops the visited set, the queue and the cookies for an
-// entity, which is what makes a re-crawl start over rather than resume.
-func (s *Store) ClearCrawlState(ctx context.Context, entityID uint) error {
+// item, which is what makes a re-crawl start over rather than resume.
+func (s *Store) ClearCrawlState(ctx context.Context, itemID uint) error {
 	db := s.db.WithContext(ctx)
 	for _, model := range []any{&Visit{}, &QueueItem{}, &Cookie{}} {
-		if err := db.Where("entity_id = ?", entityID).Delete(model).Error; err != nil {
+		if err := db.Where("item_id = ?", itemID).Delete(model).Error; err != nil {
 			return fmt.Errorf("clear %T: %w", model, err)
 		}
 	}
 	return nil
 }
 
-// QueuedEntities lists the entities with work waiting in the frontier, so a
-// dispatcher can find what to hand out without being told which entities are
+// QueuedItems lists the items with work waiting in the frontier, so a
+// dispatcher can find what to hand out without being told which items are
 // being crawled.
 //
-// A paused entity is not among them, which is the whole of what pausing does to
+// A paused item is not among them, which is the whole of what pausing does to
 // a dispatcher: it keeps its frontier, its order and its leases, and simply
 // stops being asked about.
-func (s *Store) QueuedEntities(ctx context.Context) ([]uint, error) {
+func (s *Store) QueuedItems(ctx context.Context) ([]uint, error) {
 	var ids []uint
 	err := s.db.WithContext(ctx).
 		Model(&QueueItem{}).
-		Distinct("queue_items.entity_id").
-		Joins("JOIN entities ON entities.id = queue_items.entity_id AND NOT entities.paused").
+		Distinct("queue_items.item_id").
+		Joins("JOIN items ON items.id = queue_items.item_id AND NOT items.paused").
 		Where("leased_until IS NULL OR leased_until < ?", time.Now().UTC()).
-		Pluck("queue_items.entity_id", &ids).Error
+		Pluck("queue_items.item_id", &ids).Error
 	if err != nil {
-		return nil, fmt.Errorf("entities with queued work: %w", err)
+		return nil, fmt.Errorf("items with queued work: %w", err)
 	}
 	return ids, nil
 }
 
-// ReturnLeases puts every in-flight item of an entity back in the queue.
+// ReturnLeases puts every in-flight item of an item back in the queue.
 //
 // A lease expiring is the net under a crawler that died. A crawler that stops
 // on purpose should not make the frontier wait for it: everything it had taken
 // and not fetched is available again immediately, which is what makes a crawl
 // stopped on its budget resumable rather than resumable in ten minutes.
-func (s *Store) ReturnLeases(ctx context.Context, entityID uint) error {
+func (s *Store) ReturnLeases(ctx context.Context, itemID uint) error {
 	err := s.db.WithContext(ctx).
 		Model(&QueueItem{}).
-		Where("entity_id = ? AND leased_until IS NOT NULL", entityID).
+		Where("item_id = ? AND leased_until IS NOT NULL", itemID).
 		Update("leased_until", nil).Error
 	if err != nil {
 		return fmt.Errorf("return leases: %w", err)
@@ -303,7 +303,7 @@ func (s *Store) ReturnLeases(ctx context.Context, entityID uint) error {
 	return nil
 }
 
-// InFlight counts an entity's handed-out items that have not reported back.
+// InFlight counts an item's handed-out items that have not reported back.
 //
 // This is what bounds dispatch. Counting unacknowledged broker messages instead
 // measures the wrong thing: a crawler acknowledges work when it queues it, not
@@ -311,12 +311,12 @@ func (s *Store) ReturnLeases(ctx context.Context, entityID uint) error {
 // thousands of URLs it has not got to. Left unbounded the frontier drains into
 // a crawler's memory, which is the failure lazy seeding was introduced to cure,
 // one layer further along.
-func (s *Store) InFlight(ctx context.Context, entityID uint) (int, error) {
+func (s *Store) InFlight(ctx context.Context, itemID uint) (int, error) {
 	var n int64
 	err := s.db.WithContext(ctx).
 		Model(&QueueItem{}).
-		Where("entity_id = ? AND leased_until IS NOT NULL AND leased_until >= ?",
-			entityID, time.Now().UTC()).
+		Where("item_id = ? AND leased_until IS NOT NULL AND leased_until >= ?",
+			itemID, time.Now().UTC()).
 		Count(&n).Error
 	if err != nil {
 		return 0, fmt.Errorf("in-flight count: %w", err)

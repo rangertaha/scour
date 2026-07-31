@@ -75,7 +75,7 @@ func TestAFailedJobKeepsItsError(t *testing.T) {
 	}
 }
 
-// Two crawls of one entity would race on the frontier and double the load on
+// Two crawls of one item would race on the frontier and double the load on
 // somebody else's server.
 func TestTheSameWorkCannotRunTwice(t *testing.T) {
 	jobs := NewJobs()
@@ -101,10 +101,10 @@ func TestTheSameWorkCannotRunTwice(t *testing.T) {
 		t.Errorf("busy names job %q, the running one is %q", busy.ID, first.ID)
 	}
 
-	// A different entity, and a different kind for the same entity, are both
+	// A different item, and a different kind for the same item, are both
 	// fine: the lock is per unit of work, not global.
 	if _, err := jobs.Start("crawl", "other", func(context.Context) (any, error) { return nil, nil }); err != nil {
-		t.Errorf("a different entity was blocked: %v", err)
+		t.Errorf("a different item was blocked: %v", err)
 	}
 	if _, err := jobs.Start("train", "vehicle", func(context.Context) (any, error) { return nil, nil }); err != nil {
 		t.Errorf("a different kind was blocked: %v", err)
@@ -177,7 +177,7 @@ func TestListIsNewestFirst(t *testing.T) {
 	jobs := NewJobs()
 
 	for i := range 3 {
-		started, err := jobs.Start("crawl", fmt.Sprintf("entity-%d", i), func(context.Context) (any, error) {
+		started, err := jobs.Start("crawl", fmt.Sprintf("item-%d", i), func(context.Context) (any, error) {
 			return nil, nil
 		})
 		if err != nil {
@@ -203,7 +203,7 @@ func TestFinishedJobsArePruned(t *testing.T) {
 	jobs := NewJobs()
 
 	for i := range maxFinished + 20 {
-		started, err := jobs.Start("crawl", fmt.Sprintf("entity-%d", i), func(context.Context) (any, error) {
+		started, err := jobs.Start("crawl", fmt.Sprintf("item-%d", i), func(context.Context) (any, error) {
 			return nil, nil
 		})
 		if err != nil {
@@ -228,14 +228,14 @@ func TestConcurrentStarts(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// Half contend for one entity, half are distinct, so the test
+			// Half contend for one item, half are distinct, so the test
 			// exercises both the lock and the counter.
-			entity := "shared"
+			item := "shared"
 			if i%2 == 0 {
-				entity = fmt.Sprintf("entity-%d", i)
+				item = fmt.Sprintf("item-%d", i)
 			}
 
-			_, err := jobs.Start("crawl", entity, func(context.Context) (any, error) {
+			_, err := jobs.Start("crawl", item, func(context.Context) (any, error) {
 				time.Sleep(time.Millisecond)
 				return nil, nil
 			})
@@ -256,7 +256,7 @@ func TestConcurrentStarts(t *testing.T) {
 	wg.Wait()
 	jobs.Wait()
 
-	// Every distinct entity started, and the contended one started at most once
+	// Every distinct item started, and the contended one started at most once
 	// per moment rather than sixteen times at once.
 	if started == 0 {
 		t.Error("nothing started")
@@ -271,7 +271,7 @@ func TestIDsAreUnique(t *testing.T) {
 	seen := map[string]bool{}
 
 	for i := range 20 {
-		job, err := jobs.Start("crawl", fmt.Sprintf("entity-%d", i), func(context.Context) (any, error) {
+		job, err := jobs.Start("crawl", fmt.Sprintf("item-%d", i), func(context.Context) (any, error) {
 			return nil, nil
 		})
 		if err != nil {

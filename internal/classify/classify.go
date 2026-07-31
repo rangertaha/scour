@@ -38,7 +38,7 @@ import (
 // actually matters.
 type Category string
 
-// The categories every page is sorted into. Subject is filled in per entity
+// The categories every page is sorted into. Subject is filled in per item
 // with the thing being hunted; the rest are the kinds of page every site has
 // that are not it.
 const (
@@ -77,7 +77,7 @@ func (c Category) Relevant() bool { return c == Subject }
 
 // Topic is what the page is being judged against.
 type Topic struct {
-	// Name is the entity's name.
+	// Name is the item's name.
 	Name string
 	// Aliases are the other words a page might use for it.
 	Aliases []string

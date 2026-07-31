@@ -42,19 +42,19 @@ type Scorer interface {
 
 // Config is what a scorer is built from.
 //
-// It carries the entity rather than a database handle on purpose: a scorer
+// It carries the item rather than a database handle on purpose: a scorer
 // decides whether a link is worth fetching and should not be able to reach
 // anything else.
 type Config struct {
-	// Entity is the name being crawled.
-	Entity string
-	// Seed are the words describing the entity: its aliases and the example
+	// Item is the name being crawled.
+	Item string
+	// Seed are the words describing the item: its aliases and the example
 	// values of its properties. They are what a scorer starts from before any
 	// crawl has happened.
 	Seed []string
-	// Path is where this entity's trained model is kept. A scorer that finds
+	// Path is where this item's trained model is kept. A scorer that finds
 	// nothing there is expected to start cold rather than fail, because the
-	// first crawl of a new entity has no model by definition.
+	// first crawl of a new item has no model by definition.
 	Path string
 	// Vectors is where a vector-based scorer loads its word vectors from.
 	Vectors string

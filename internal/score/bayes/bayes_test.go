@@ -205,7 +205,7 @@ func TestSaveThenLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "models", "vehicle.score.json")
 
 	m := New()
-	m.Entity = "vehicle"
+	m.Item = "vehicle"
 	m.Seed([]string{"car"})
 	if err := m.Train([]Observation{
 		{Features: features("http://example.com/cars/one/"), Relevant: true},
@@ -221,8 +221,8 @@ func TestSaveThenLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if loaded.Entity != "vehicle" {
-		t.Errorf("entity = %q", loaded.Entity)
+	if loaded.Item != "vehicle" {
+		t.Errorf("item = %q", loaded.Item)
 	}
 
 	probe := features("http://example.com/cars/two/")
@@ -239,7 +239,7 @@ func TestLoadMissingReportsNotExist(t *testing.T) {
 }
 
 func TestRegistered(t *testing.T) {
-	s, err := score.New("bayes", score.Config{Entity: "vehicle"})
+	s, err := score.New("bayes", score.Config{Item: "vehicle"})
 	if err != nil {
 		t.Fatalf("bayes should be registered: %v", err)
 	}

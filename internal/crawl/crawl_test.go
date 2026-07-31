@@ -94,19 +94,19 @@ func harness(t *testing.T) (*Crawler, *store.Store, config.Config) {
 	return New(cfg, s, cache.Local(cfg.PagesDir())), s, cfg
 }
 
-// entity creates an entity with one URL target pointing at the test server.
-func entity(t *testing.T, s *store.Store, base string) (*store.Entity, []store.Target) {
+// item creates an item with one URL target pointing at the test server.
+func item(t *testing.T, s *store.Store, base string) (*store.Item, []store.Target) {
 	t.Helper()
 	ctx := context.Background()
 
-	e, err := s.CreateEntity(ctx, "vehicle")
+	e, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AddTarget(ctx, e.ID, store.TargetURL, base+"/", false, 0); err != nil {
 		t.Fatal(err)
 	}
-	full, err := s.EntityFull(ctx, "vehicle")
+	full, err := s.ItemFull(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,11 +125,11 @@ func types(t *testing.T, allow ...string) *content.Set {
 func TestCrawlFollowsLinksAndCachesPages(t *testing.T) {
 	srv := site(t)
 	c, s, cfg := harness(t)
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 	ctx := context.Background()
 
 	result, err := c.Run(ctx, Options{
-		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 5,
+		Item: e, Targets: targets, Types: types(t, "html"), Depth: 5,
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -165,11 +165,11 @@ func TestCrawlFollowsLinksAndCachesPages(t *testing.T) {
 func TestCrawlRecordsDepthAndParent(t *testing.T) {
 	srv := site(t)
 	c, s, _ := harness(t)
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 	ctx := context.Background()
 
 	if _, err := c.Run(ctx, Options{
-		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 5,
+		Item: e, Targets: targets, Types: types(t, "html"), Depth: 5,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -198,11 +198,11 @@ func TestCrawlRecordsDepthAndParent(t *testing.T) {
 func TestContentTypeFilteringSkipsUnwantedBodies(t *testing.T) {
 	srv := site(t)
 	c, s, cfg := harness(t)
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 	ctx := context.Background()
 
 	result, err := c.Run(ctx, Options{
-		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 5,
+		Item: e, Targets: targets, Types: types(t, "html"), Depth: 5,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -237,11 +237,11 @@ func TestContentTypeFilteringSkipsUnwantedBodies(t *testing.T) {
 func TestPDFIsFetchedWhenAllowed(t *testing.T) {
 	srv := site(t)
 	c, s, cfg := harness(t)
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 	ctx := context.Background()
 
 	if _, err := c.Run(ctx, Options{
-		Entity: e, Targets: targets, Types: types(t, "html", "pdf"), Depth: 5,
+		Item: e, Targets: targets, Types: types(t, "html", "pdf"), Depth: 5,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -257,11 +257,11 @@ func TestPDFIsFetchedWhenAllowed(t *testing.T) {
 func TestErrorsAreRecordedNotFatal(t *testing.T) {
 	srv := site(t)
 	c, s, _ := harness(t)
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 	ctx := context.Background()
 
 	result, err := c.Run(ctx, Options{
-		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 5,
+		Item: e, Targets: targets, Types: types(t, "html"), Depth: 5,
 	})
 	if err != nil {
 		t.Fatalf("a 404 and a 500 must not fail the crawl: %v", err)
@@ -291,12 +291,12 @@ func TestErrorsAreRecordedNotFatal(t *testing.T) {
 func TestDepthLimitIsHonoured(t *testing.T) {
 	srv := site(t)
 	c, s, _ := harness(t)
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 	ctx := context.Background()
 
 	// Depth 2 reaches the seed and its direct links, but not /cars/one/.
 	if _, err := c.Run(ctx, Options{
-		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 2,
+		Item: e, Targets: targets, Types: types(t, "html"), Depth: 2,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -315,10 +315,10 @@ func TestDepthLimitIsHonoured(t *testing.T) {
 func TestMaxPagesStopsTheCrawl(t *testing.T) {
 	srv := site(t)
 	c, s, _ := harness(t)
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 
 	result, err := c.Run(context.Background(), Options{
-		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 5, Limit: 2,
+		Item: e, Targets: targets, Types: types(t, "html"), Depth: 5, Limit: 2,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -334,25 +334,25 @@ func TestCrawlWithoutTargetsIsAnError(t *testing.T) {
 	c, s, _ := harness(t)
 	ctx := context.Background()
 
-	e, err := s.CreateEntity(ctx, "vehicle")
+	e, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Run(ctx, Options{Entity: e, Types: types(t, "html")}); err == nil {
-		t.Error("crawling an entity with no targets must fail with advice")
+	if _, err := c.Run(ctx, Options{Item: e, Types: types(t, "html")}); err == nil {
+		t.Error("crawling an item with no targets must fail with advice")
 	}
 }
 
 func TestCancellationStopsTheCrawl(t *testing.T) {
 	srv := site(t)
 	c, s, _ := harness(t)
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	result, err := c.Run(ctx, Options{
-		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 5,
+		Item: e, Targets: targets, Types: types(t, "html"), Depth: 5,
 	})
 	if err == nil {
 		t.Error("a cancelled crawl should report the cancellation")
@@ -413,7 +413,7 @@ func TestURLTargetStaysUnderItsDirectory(t *testing.T) {
 	}
 }
 
-// An entity with no targets is unrestricted rather than closed, which is what
+// An item with no targets is unrestricted rather than closed, which is what
 // the old empty filter list meant.
 func TestAnEmptyScopeAllowsEverything(t *testing.T) {
 	sc, err := NewScope(nil)
@@ -464,7 +464,7 @@ func TestScopeHandlesAListRatherThanAHandful(t *testing.T) {
 func TestScoreOrderDecidesWhatIsCrawledFirst(t *testing.T) {
 	srv := site(t)
 	c, s, _ := harness(t)
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 
 	// A scorer that likes /cars/ and dislikes everything else, which is what a
 	// trained model looks like once a crawl has found where the records are.
@@ -478,7 +478,7 @@ func TestScoreOrderDecidesWhatIsCrawledFirst(t *testing.T) {
 	// Budget for two pages beyond the seed, so what gets fetched is decided by
 	// the queue order rather than by exhausting the site.
 	if _, err := c.Run(context.Background(), Options{
-		Entity: e, Targets: targets, Types: types(t, "html"),
+		Item: e, Targets: targets, Types: types(t, "html"),
 		Depth: 5, Limit: 3, Scorer: scorer,
 	}); err != nil {
 		t.Fatal(err)
@@ -525,10 +525,10 @@ func TestElapsedHandlesMissingStart(t *testing.T) {
 func TestVisitedSetMakesASecondCrawlResume(t *testing.T) {
 	srv := site(t)
 	c, s, _ := harness(t)
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 	ctx := context.Background()
 
-	opts := Options{Entity: e, Targets: targets, Types: types(t, "html"), Depth: 5}
+	opts := Options{Item: e, Targets: targets, Types: types(t, "html"), Depth: 5}
 
 	first, err := c.Run(ctx, opts)
 	if err != nil {
@@ -564,12 +564,12 @@ func TestVisitedSetMakesASecondCrawlResume(t *testing.T) {
 func TestQueueSurvivesAnInterruptedCrawl(t *testing.T) {
 	srv := site(t)
 	c, s, _ := harness(t)
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 	ctx := context.Background()
 
 	// Stop after one page, leaving the links it found still queued.
 	if _, err := c.Run(ctx, Options{
-		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 5, Limit: 1,
+		Item: e, Targets: targets, Types: types(t, "html"), Depth: 5, Limit: 1,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -584,7 +584,7 @@ func TestQueueSurvivesAnInterruptedCrawl(t *testing.T) {
 
 	// Resuming picks the queue up rather than starting from the seeds.
 	resumed, err := c.Run(ctx, Options{
-		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 5,
+		Item: e, Targets: targets, Types: types(t, "html"), Depth: 5,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -602,12 +602,12 @@ func TestQueueSurvivesAnInterruptedCrawl(t *testing.T) {
 func TestAFailedCacheWriteIsAFailedFetch(t *testing.T) {
 	srv := site(t)
 	c, s, cfg := harness(t)
-	e, targets := entity(t, s, srv.URL)
+	e, targets := item(t, s, srv.URL)
 
 	c = c.WithCache(refusingCache{})
 
 	result, err := c.Run(context.Background(), Options{
-		Entity: e, Targets: targets, Types: types(t, "html"), Depth: 2,
+		Item: e, Targets: targets, Types: types(t, "html"), Depth: 2,
 		Scorer: score.Fixed(1),
 	})
 	if err != nil {
@@ -624,7 +624,7 @@ func TestAFailedCacheWriteIsAFailedFetch(t *testing.T) {
 
 	var ok int64
 	if err := s.DB().Model(&store.URL{}).
-		Where("entity_id = ? AND status = ?", e.ID, store.URLFetched).
+		Where("item_id = ? AND status = ?", e.ID, store.URLFetched).
 		Count(&ok).Error; err != nil {
 		t.Fatal(err)
 	}

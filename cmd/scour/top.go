@@ -32,8 +32,8 @@ func newTopCmd(a *app) *cli.Command {
 	return &cli.Command{
 		Category: "Finding pages",
 		Name:     "top",
-		Usage:    "Watch every entity live, and pause or resume a crawl",
-		Description: "One screen per fleet: what each entity has, how far its crawl has got, how\n" +
+		Usage:    "Watch every item live, and pause or resume a crawl",
+		Description: "One screen per fleet: what each item has, how far its crawl has got, how\n" +
 			"fast it is going now, and whether it is running.\n\n" +
 			"Pausing keeps everything. The frontier holds its order and its leases, so a\n" +
 			"resumed crawl carries on rather than starting again, and a crawl paused here\n" +
@@ -135,7 +135,7 @@ func runTop(ctx context.Context, a *app, s *store.Store) error {
 	}
 
 	// The selected row is the one acted on, and it is identified by name rather
-	// than by index: rows are sorted, so an entity added or removed between
+	// than by index: rows are sorted, so an item added or removed between
 	// refreshes would otherwise move the cursor onto something else.
 	selected := func() (tui.Row, bool) {
 		row, _ := table.GetSelection()
@@ -148,15 +148,15 @@ func runTop(ctx context.Context, a *app, s *store.Store) error {
 	}
 
 	// Starting clears the pause and, if nothing else is fetching for the
-	// entity, begins a crawl here. Stopping sets it, which halts a crawl in
-	// this process and takes the entity out of what a dispatcher elsewhere is
+	// item, begins a crawl here. Stopping sets it, which halts a crawl in
+	// this process and takes the item out of what a dispatcher elsewhere is
 	// offered: one key, whichever topology is running.
 	act := func(start bool) {
 		r, ok := selected()
 		if !ok {
 			return
 		}
-		if err := s.SetPaused(ctx, r.EntityID, !start); err != nil {
+		if err := s.SetPaused(ctx, r.ItemID, !start); err != nil {
 			setNote("[red]" + err.Error() + "[-]")
 			refresh()
 			return
@@ -244,7 +244,7 @@ func bar(rate float64) string {
 
 var columns = []string{"NAME", "TARGETS", "QUEUED", "FETCHED", "RECORDS", "RULES", "RATE", "STATE"}
 
-// renderTable draws one row per entity.
+// renderTable draws one row per item.
 func renderTable(t *tview.Table, s tui.Snapshot) {
 	t.Clear()
 	for i, name := range columns {
@@ -318,7 +318,7 @@ func count(n int64) string {
 
 // runner starts crawls and trainings on behalf of the view.
 //
-// It keeps the entities it has work in flight for, so pressing start twice does
+// It keeps the items it has work in flight for, so pressing start twice does
 // not run two crawls over one frontier. A crawl started elsewhere is not
 // visible here, which is why start also clears the pause: that is the part that
 // works whoever is doing the fetching.
@@ -333,7 +333,7 @@ func newRunner(a *app, note func(string)) *runner {
 	return &runner{app: a, busy: map[string]bool{}, note: note}
 }
 
-// claim reserves an entity, reporting whether the caller got it.
+// claim reserves an item, reporting whether the caller got it.
 func (r *runner) claim(name string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -350,10 +350,10 @@ func (r *runner) release(name string) {
 	r.mu.Unlock()
 }
 
-// start crawls one entity with the configured defaults.
+// start crawls one item with the configured defaults.
 //
 // No page budget: the view is how a crawl is stopped now, and a budget chosen
-// here would be a number nobody asked for. The entity's own depth and content
+// here would be a number nobody asked for. The item's own depth and content
 // types still apply, because those describe the site rather than this run.
 func (r *runner) start(ctx context.Context, name string) {
 	if !r.claim(name) {
@@ -366,23 +366,23 @@ func (r *runner) start(ctx context.Context, name string) {
 		r.note("[red]" + err.Error() + "[-]")
 		return
 	}
-	entity, err := s.EntityFull(ctx, name)
+	item, err := s.ItemFull(ctx, name)
 	if err != nil {
 		r.note("[red]" + err.Error() + "[-]")
 		return
 	}
 
-	types, err := content.New(entityTypes(entity), nil)
+	types, err := content.New(itemTypes(item), nil)
 	if err != nil {
 		r.note("[red]" + err.Error() + "[-]")
 		return
 	}
-	scorer, _, err := train.Scorer(r.app.cfg, entity)
+	scorer, _, err := train.Scorer(r.app.cfg, item)
 	if err != nil {
 		r.note("[red]" + err.Error() + "[-]")
 		return
 	}
-	scorer, _, err = train.ChainScorer(ctx, s, entity, scorer)
+	scorer, _, err = train.ChainScorer(ctx, s, item, scorer)
 	if err != nil {
 		r.note("[red]" + err.Error() + "[-]")
 		return
@@ -394,8 +394,8 @@ func (r *runner) start(ctx context.Context, name string) {
 	}
 
 	_, err = crawl.New(r.app.cfg, s, pages).Run(ctx, crawl.Options{
-		Entity:  entity,
-		Targets: entity.Targets,
+		Item:    item,
+		Targets: item.Targets,
 		Types:   types,
 		Depth:   r.app.cfg.Crawl.Depth,
 		Scorer:  scorer,
@@ -424,12 +424,12 @@ func (r *runner) train(ctx context.Context, name string) {
 		r.note("[red]" + err.Error() + "[-]")
 		return
 	}
-	entity, err := s.EntityFull(ctx, name)
+	item, err := s.ItemFull(ctx, name)
 	if err != nil {
 		r.note("[red]" + err.Error() + "[-]")
 		return
 	}
-	result, err := train.New(r.app.cfg, s, pages).Run(ctx, entity, train.Options{})
+	result, err := train.New(r.app.cfg, s, pages).Run(ctx, item, train.Options{})
 	if err != nil {
 		r.note(fmt.Sprintf("[red]%s: %v[-]", name, err))
 		return
@@ -437,9 +437,9 @@ func (r *runner) train(ctx context.Context, name string) {
 	r.note(fmt.Sprintf("[green]%s: %d rules, %d records[-]", name, result.Rules, result.Records))
 }
 
-// entityTypes is the entity's content types, or the configured default when it
+// itemTypes is the item's content types, or the configured default when it
 // has none of its own.
-func entityTypes(e *store.Entity) []string {
+func itemTypes(e *store.Item) []string {
 	if len(e.ContentTypes) == 0 {
 		return nil
 	}

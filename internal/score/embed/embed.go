@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Package embed scores a link by how close its words are, in meaning, to the
-// entity being hunted.
+// item being hunted.
 //
 // The bag-of-words scorer can only reward words it has already seen pay off.
 // A link reading "saloons" is worthless to it until a crawl has proved that
@@ -42,10 +42,10 @@ func build(cfg score.Config) (score.Scorer, error) {
 	return New(vecs, cfg.Seed)
 }
 
-// Scorer ranks a link by cosine similarity to the entity's topic.
+// Scorer ranks a link by cosine similarity to the item's topic.
 type Scorer struct {
 	vectors *Vectors
-	// topic is the mean of the entity's own words: what we are looking for,
+	// topic is the mean of the item's own words: what we are looking for,
 	// as one direction in the vector space.
 	topic []float32
 
@@ -53,7 +53,7 @@ type Scorer struct {
 	cache map[string]float64
 }
 
-// New builds a scorer for an entity described by seed words.
+// New builds a scorer for an item described by seed words.
 //
 // It fails when none of those words are known to the vectors, because a topic
 // vector averaged from nothing points nowhere: every link would score the same
@@ -66,7 +66,7 @@ func New(vectors *Vectors, seed []string) (*Scorer, error) {
 
 	topic, known := vectors.Mean(seed)
 	if known == 0 {
-		return nil, fmt.Errorf("embed: none of the entity's %d words are in the vectors, so there is no topic to compare against", len(seed))
+		return nil, fmt.Errorf("embed: none of the item's %d words are in the vectors, so there is no topic to compare against", len(seed))
 	}
 
 	return &Scorer{

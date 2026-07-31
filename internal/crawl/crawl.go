@@ -38,7 +38,7 @@ import (
 
 // Options configures one crawl.
 type Options struct {
-	Entity  *store.Entity
+	Item    *store.Item
 	Targets []store.Target
 	Types   *content.Set
 	Depth   int
@@ -147,7 +147,7 @@ type state struct {
 	// "stopped after 15 minutes" tell an operator to change different numbers.
 	spentBudget string
 
-	// pausedAt is when the entity was last seen paused, so the check is not
+	// pausedAt is when the item was last seen paused, so the check is not
 	// made on every response.
 	checkedPause time.Time
 	paused       bool
@@ -201,8 +201,8 @@ func (s *state) spend(limit int) bool {
 // a second to ask permission.
 const pauseInterval = time.Second
 
-// refreshPause reads the entity's paused flag, at most once per interval.
-func (c *Crawler) refreshPause(ctx context.Context, st *state, entityID uint) {
+// refreshPause reads the item's paused flag, at most once per interval.
+func (c *Crawler) refreshPause(ctx context.Context, st *state, itemID uint) {
 	st.mu.Lock()
 	if time.Since(st.checkedPause) < pauseInterval {
 		st.mu.Unlock()
@@ -211,10 +211,10 @@ func (c *Crawler) refreshPause(ctx context.Context, st *state, entityID uint) {
 	st.checkedPause = time.Now()
 	st.mu.Unlock()
 
-	paused, err := c.store.IsPaused(ctx, entityID)
+	paused, err := c.store.IsPaused(ctx, itemID)
 	if err != nil {
 		// Not being able to ask is not a reason to stop crawling.
-		slog.Debug("could not read paused state", "entity", entityID, "err", err)
+		slog.Debug("could not read paused state", "item", itemID, "err", err)
 		return
 	}
 	st.mu.Lock()
@@ -228,13 +228,13 @@ func (s *state) countStatus(code int) {
 	s.statuses[code]++
 }
 
-// Run crawls one entity and returns when the frontier is exhausted, the budget
+// Run crawls one item and returns when the frontier is exhausted, the budget
 // is spent, or ctx is cancelled.
 func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 	// A crawler handed its work by another process has no targets of its own:
 	// what to fetch and what is in scope were both decided before it was told.
 	if len(opts.Targets) == 0 && opts.Frontier == nil {
-		return nil, fmt.Errorf("entity %q has no targets: scour add %s -d <domain>", opts.Entity.Name, opts.Entity.Name)
+		return nil, fmt.Errorf("item %q has no targets: scour add %s -d <domain>", opts.Item.Name, opts.Item.Name)
 	}
 	if opts.Scorer == nil {
 		opts.Scorer = score.Fixed(1)
@@ -260,7 +260,7 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 
 	// The visited set and the cookie jar live in the database, so a restarted
 	// crawl knows what it has already seen.
-	visited := crawlstorage.New(ctx, c.store, opts.Entity.ID)
+	visited := crawlstorage.New(ctx, c.store, opts.Item.ID)
 	if err := collector.SetStorage(visited); err != nil {
 		return nil, fmt.Errorf("attach storage: %w", err)
 	}
@@ -268,7 +268,7 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 	// So does the queue, which is also where scour's crawl order will live.
 	var pending Frontier = opts.Frontier
 	if pending == nil {
-		pending = crawlqueue.New(ctx, c.store, opts.Entity.ID)
+		pending = crawlqueue.New(ctx, c.store, opts.Item.ID)
 	}
 	threads := c.cfg.Crawl.Concurrency
 	if threads < 1 {
@@ -338,8 +338,8 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 	// make the next run wait ten minutes for work it already has. Only for the
 	// database frontier: a crawler handed its work does not own the queue.
 	if opts.Frontier == nil {
-		if err := c.store.ReturnLeases(ctx, opts.Entity.ID); err != nil {
-			slog.Warn("could not return leases", "entity", opts.Entity.Name, "err", err)
+		if err := c.store.ReturnLeases(ctx, opts.Item.ID); err != nil {
+			slog.Warn("could not return leases", "item", opts.Item.Name, "err", err)
 		}
 	}
 
@@ -361,7 +361,7 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 	return result, ctx.Err()
 }
 
-// newCollector builds the colly collector from the entity's targets and the
+// newCollector builds the colly collector from the item's targets and the
 // configuration. Depth, domain scope and politeness are colly's to enforce.
 func (c *Crawler) newCollector(opts Options) (*colly.Collector, error) {
 	depth := opts.Depth
@@ -523,7 +523,7 @@ const (
 
 // register wires the callbacks. This is the whole integration with colly.
 func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pending Frontier, sc *Scope, opts Options, st *state) {
-	entityID := opts.Entity.ID
+	itemID := opts.Item.ID
 
 	// Attach the timing and lineage this request will be recorded with, and
 	// drop links whose extension already disagrees with the allowed types.
@@ -535,7 +535,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		}
 		if !opts.Types.AllowsPath(r.URL.Path) {
 			slog.Debug("skipped by extension", "url", r.URL.String())
-			c.skip(ctx, st, entityID, r.URL.String(), r.Depth)
+			c.skip(ctx, st, itemID, r.URL.String(), r.Depth)
 			r.Abort()
 			return
 		}
@@ -554,14 +554,14 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		ct := r.Headers.Get("Content-Type")
 		if !opts.Types.AllowsMIME(ct) {
 			slog.Debug("skipped by content type", "url", r.Request.URL.String(), "type", ct)
-			c.skip(ctx, st, entityID, r.Request.URL.String(), r.Request.Depth)
+			c.skip(ctx, st, itemID, r.Request.URL.String(), r.Request.Depth)
 			r.Request.Abort()
 			return
 		}
 		if max := int64(c.cfg.Crawl.MaxSize); max > 0 && r.Headers.Get("Content-Length") != "" {
 			if size := parseSize(r.Headers.Get("Content-Length")); size > max {
 				slog.Debug("skipped by size", "url", r.Request.URL.String(), "size", size)
-				c.skip(ctx, st, entityID, r.Request.URL.String(), r.Request.Depth)
+				c.skip(ctx, st, itemID, r.Request.URL.String(), r.Request.Depth)
 				r.Request.Abort()
 			}
 		}
@@ -589,7 +589,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 			st.mu.Unlock()
 
 			failed := store.Fetched{
-				EntityID:   entityID,
+				ItemID:     itemID,
 				URL:        rawURL,
 				ParentURL:  r.Ctx.Get(ctxParent),
 				Depth:      r.Request.Depth,
@@ -610,7 +610,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		st.mu.Unlock()
 		st.countStatus(r.StatusCode)
 
-		c.refreshPause(ctx, st, entityID)
+		c.refreshPause(ctx, st, itemID)
 		if st.spend(opts.Limit) {
 			// Freeze rather than abort: everything still queued stays queued,
 			// so the next run resumes instead of starting over.
@@ -623,7 +623,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		}
 
 		f := store.Fetched{
-			EntityID:    entityID,
+			ItemID:      itemID,
 			URL:         rawURL,
 			ParentURL:   r.Ctx.Get(ctxParent),
 			Depth:       r.Request.Depth,
@@ -635,7 +635,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 			Latency:     latency,
 			CacheKey:    key,
 		}
-		c.measureFetch(ctx, opts.Entity.Name, rawURL, r.StatusCode, latency, int64(len(r.Body)))
+		c.measureFetch(ctx, opts.Item.Name, rawURL, r.StatusCode, latency, int64(len(r.Body)))
 
 		if err := c.sink.Fetched(ctx, f); err != nil {
 			slog.Error("record fetch failed", "url", rawURL, "err", err)
@@ -663,13 +663,13 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		}
 
 		// Out of scope is not discovered: recording it would put links to
-		// anywhere at all in the entity's URL table, which is what the bus
+		// anywhere at all in the item's URL table, which is what the bus
 		// path did until the store started applying the same test.
 		if !sc.Allows(link) {
 			return
 		}
 
-		if err := c.sink.Discovered(ctx, entityID, link, e.Request.URL.String(), e.Request.Depth+1, predicted); err != nil {
+		if err := c.sink.Discovered(ctx, itemID, link, e.Request.URL.String(), e.Request.Depth+1, predicted); err != nil {
 			slog.Error("record discovered failed", "url", link, "err", err)
 		}
 
@@ -708,7 +708,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 
 		slog.Debug("fetch failed", "url", rawURL, "status", r.StatusCode, "err", err)
 		f := store.Fetched{
-			EntityID:   entityID,
+			ItemID:     itemID,
 			URL:        rawURL,
 			ParentURL:  r.Ctx.Get(ctxParent),
 			Depth:      r.Request.Depth,
@@ -717,7 +717,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 			StatusCode: r.StatusCode,
 			Latency:    elapsed(r.Ctx.Get(ctxStart)),
 		}
-		c.measureFetch(ctx, opts.Entity.Name, rawURL, r.StatusCode, f.Latency, 0)
+		c.measureFetch(ctx, opts.Item.Name, rawURL, r.StatusCode, f.Latency, 0)
 
 		if err := c.sink.Fetched(ctx, f); err != nil {
 			slog.Error("record failure failed", "url", rawURL, "err", err)
@@ -726,16 +726,16 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 }
 
 // skip records a URL that was deliberately not downloaded.
-func (c *Crawler) skip(ctx context.Context, st *state, entityID uint, rawURL string, depth int) {
+func (c *Crawler) skip(ctx context.Context, st *state, itemID uint, rawURL string, depth int) {
 	st.mu.Lock()
 	st.skipped++
 	st.mu.Unlock()
 
 	f := store.Fetched{
-		EntityID: entityID,
-		URL:      rawURL,
-		Depth:    depth,
-		Status:   store.URLSkipped,
+		ItemID: itemID,
+		URL:    rawURL,
+		Depth:  depth,
+		Status: store.URLSkipped,
 	}
 	if err := c.sink.Fetched(ctx, f); err != nil {
 		slog.Error("record skip failed", "url", rawURL, "err", err)

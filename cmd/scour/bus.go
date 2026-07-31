@@ -21,7 +21,7 @@ import (
 // single-process run behaves like a distributed one without anything to
 // install. The returned function waits for the writer to catch up, and must be
 // called before reading back what the crawl produced.
-func (a *app) busCrawler(ctx context.Context, crawler *crawl.Crawler, entity string) (*crawl.Crawler, func() error, error) {
+func (a *app) busCrawler(ctx context.Context, crawler *crawl.Crawler, item string) (*crawl.Crawler, func() error, error) {
 	s, err := a.Store()
 	if err != nil {
 		return nil, nil, err
@@ -66,8 +66,8 @@ func (a *app) busCrawler(ctx context.Context, crawler *crawl.Crawler, entity str
 	}
 
 	return crawler.
-		WithSink(service.NewBusSink(b, entity)).
-		WithMeter(service.NewBusMeter(b, entity)), settle, nil
+		WithSink(service.NewBusSink(b, item)).
+		WithMeter(service.NewBusMeter(b, item)), settle, nil
 }
 
 func newRunCmd(a *app) *cli.Command {
@@ -139,7 +139,7 @@ func runServices(c context.Context, a *app, spec string) error {
 			services = append(services, service.NewStore(b, s, service.Dispatching(a.cfg.Crawl.Rate.Duration())))
 		case service.RoleCrawl:
 			// Content types and the browser policy come from this process's
-			// configuration rather than from the entity: a crawler does not
+			// configuration rather than from the item: a crawler does not
 			// read the database, and both describe the machine doing the
 			// fetching rather than the thing being looked for.
 			types, err := content.New(a.cfg.Crawl.ContentTypes, nil)

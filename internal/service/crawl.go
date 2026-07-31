@@ -18,7 +18,7 @@ import (
 
 // CrawlService fetches the URLs the store hands out.
 //
-// It holds no state about an entity. What is in scope, what has been visited
+// It holds no state about an item. What is in scope, what has been visited
 // and what is worth fetching next are all decided by the store, which is the
 // component with the targets and the frontier. A crawler is therefore
 // interchangeable with any other, and losing one costs the lease on whatever it
@@ -36,8 +36,8 @@ type CrawlService struct {
 }
 
 // NewCrawl returns the crawl service. The content types and browser policy come
-// from this process's configuration rather than from the entity, because a
-// stateless crawler cannot read the entity and these are properties of the
+// from this process's configuration rather than from the item, because a
+// stateless crawler cannot read the item and these are properties of the
 // machine doing the fetching.
 func NewCrawl(b *bus.Bus, c *crawl.Crawler, types *content.Set, browser string) *CrawlService {
 	return &CrawlService{
@@ -57,7 +57,7 @@ func (c *CrawlService) Role() Role { return RoleCrawl }
 // second process is then the whole of scaling out.
 func (c *CrawlService) Start(ctx context.Context) error {
 	stop, err := c.bus.Consume(ctx, bus.StreamCrawl, "crawl-work",
-		bus.AllEntities(bus.SubjectWork), c.handleWork)
+		bus.AllItems(bus.SubjectWork), c.handleWork)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func (c *CrawlService) Start(ctx context.Context) error {
 	return nil
 }
 
-// handleWork hands one URL to the colly loop for its entity.
+// handleWork hands one URL to the colly loop for its item.
 //
 // The message is acknowledged once the request is queued rather than once it is
 // fetched. colly owns retries, redirects and the browser escalation from that
@@ -92,7 +92,7 @@ func (c *CrawlService) handleWork(ctx context.Context, data []byte) error {
 	if err := json.Unmarshal(data, &ev); err != nil {
 		return nil //nolint:nilerr // deliberate: poison message
 	}
-	if len(ev.Request) == 0 || ev.EntityID == 0 {
+	if len(ev.Request) == 0 || ev.ItemID == 0 {
 		return nil
 	}
 
@@ -104,41 +104,41 @@ func (c *CrawlService) handleWork(ctx context.Context, data []byte) error {
 	return nil
 }
 
-// feedFor returns the queue for an entity, starting its crawl loop the first
+// feedFor returns the queue for an item, starting its crawl loop the first
 // time work arrives for it.
 func (c *CrawlService) feedFor(ctx context.Context, ev bus.Work) (*crawlqueue.Work, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if feed, ok := c.feeds[ev.EntityID]; ok {
+	if feed, ok := c.feeds[ev.ItemID]; ok {
 		return feed, nil
 	}
 
 	feed := crawlqueue.NewWork()
-	c.feeds[ev.EntityID] = feed
+	c.feeds[ev.ItemID] = feed
 
-	// The entity is reconstructed from the message rather than read: a crawler
+	// The item is reconstructed from the message rather than read: a crawler
 	// does not touch the database, and its id and name are all the crawl needs.
-	entity := &store.Entity{ID: ev.EntityID, Name: ev.Entity}
+	item := &store.Item{ID: ev.ItemID, Name: ev.Item}
 	crawler := c.crawler.
-		WithSink(NewBusSink(c.bus, ev.Entity)).
-		WithMeter(NewBusMeter(c.bus, ev.Entity))
+		WithSink(NewBusSink(c.bus, ev.Item)).
+		WithMeter(NewBusMeter(c.bus, ev.Item))
 
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
 		_, err := crawler.Run(ctx, crawl.Options{
-			Entity:   entity,
+			Item:     item,
 			Types:    c.types,
 			Browser:  c.browser,
 			Scorer:   score.Fixed(1),
 			Frontier: feed,
 		})
 		if err != nil && ctx.Err() == nil {
-			slog.Error("crawl loop stopped", "entity", ev.Entity, "err", err)
+			slog.Error("crawl loop stopped", "item", ev.Item, "err", err)
 		}
 	}()
 
-	slog.Info("crawling for a new entity", "entity", ev.Entity)
+	slog.Info("crawling for a new item", "item", ev.Item)
 	return feed, nil
 }

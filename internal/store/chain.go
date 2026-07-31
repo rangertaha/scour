@@ -13,13 +13,13 @@ import (
 )
 
 // SaveChain stores a fitted chain. The extraction chain transfers between
-// entities and is stored with a null entity, the crawl chain is per entity.
-func (s *Store) SaveChain(ctx context.Context, entityID *uint, kind ChainKind, transitions []byte, observations int) error {
+// items and is stored with a null item, the crawl chain is per item.
+func (s *Store) SaveChain(ctx context.Context, itemID *uint, kind ChainKind, transitions []byte, observations int) error {
 	q := s.db.WithContext(ctx).Where("kind = ?", kind)
-	if entityID == nil {
-		q = q.Where("entity_id IS NULL")
+	if itemID == nil {
+		q = q.Where("item_id IS NULL")
 	} else {
-		q = q.Where("entity_id = ?", *entityID)
+		q = q.Where("item_id = ?", *itemID)
 	}
 
 	var existing Chain
@@ -35,7 +35,7 @@ func (s *Store) SaveChain(ctx context.Context, entityID *uint, kind ChainKind, t
 		return nil
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		row := Chain{
-			EntityID:     entityID,
+			ItemID:       itemID,
 			Kind:         kind,
 			Transitions:  string(transitions),
 			Observations: observations,
@@ -51,12 +51,12 @@ func (s *Store) SaveChain(ctx context.Context, entityID *uint, kind ChainKind, t
 }
 
 // LoadChain returns a stored chain, or nil when none has been fitted.
-func (s *Store) LoadChain(ctx context.Context, entityID *uint, kind ChainKind) ([]byte, error) {
+func (s *Store) LoadChain(ctx context.Context, itemID *uint, kind ChainKind) ([]byte, error) {
 	q := s.db.WithContext(ctx).Where("kind = ?", kind)
-	if entityID == nil {
-		q = q.Where("entity_id IS NULL")
+	if itemID == nil {
+		q = q.Where("item_id IS NULL")
 	} else {
-		q = q.Where("entity_id = ?", *entityID)
+		q = q.Where("item_id = ?", *itemID)
 	}
 
 	var row Chain
@@ -79,16 +79,16 @@ type Path struct {
 	Statuses []int
 }
 
-// Paths reconstructs every root-to-leaf crawl path for an entity, following
+// Paths reconstructs every root-to-leaf crawl path for an item, following
 // the parent edges recorded during the crawl.
 //
 // Fitting runs over these rather than over the whole visited set, because a
 // chain fitted to every page at once is dominated by boilerplate, which is the
 // class it exists to discount.
-func (s *Store) Paths(ctx context.Context, entityID uint) ([]Path, error) {
+func (s *Store) Paths(ctx context.Context, itemID uint) ([]Path, error) {
 	var rows []URL
 	err := s.db.WithContext(ctx).
-		Where("entity_id = ? AND fetched_at IS NOT NULL", entityID).
+		Where("item_id = ? AND fetched_at IS NOT NULL", itemID).
 		Order("id ASC").
 		Find(&rows).Error
 	if err != nil {
@@ -113,7 +113,7 @@ func (s *Store) Paths(ctx context.Context, entityID uint) ([]Path, error) {
 	var discovered []URL
 	err = s.db.WithContext(ctx).
 		Select("parent_id").
-		Where("entity_id = ? AND parent_id IS NOT NULL", entityID).
+		Where("item_id = ? AND parent_id IS NOT NULL", itemID).
 		Find(&discovered).Error
 	if err != nil {
 		return nil, fmt.Errorf("count links: %w", err)
@@ -155,7 +155,7 @@ func (s *Store) Paths(ctx context.Context, entityID uint) ([]Path, error) {
 
 // SetRoles records the role decoding gave each page, which is what `scour
 // status` counts and what the next crawl scores links against.
-func (s *Store) SetRoles(ctx context.Context, entityID uint, roles map[string]string) error {
+func (s *Store) SetRoles(ctx context.Context, itemID uint, roles map[string]string) error {
 	if len(roles) == 0 {
 		return nil
 	}
@@ -163,14 +163,14 @@ func (s *Store) SetRoles(ctx context.Context, entityID uint, roles map[string]st
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for rawURL, role := range roles {
 			row := PageRole{
-				EntityID:  entityID,
-				Hash:      URLHash(entityID, rawURL),
+				ItemID:    itemID,
+				Hash:      URLHash(itemID, rawURL),
 				URL:       rawURL,
 				Role:      role,
 				DecodedAt: now,
 			}
 			err := tx.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "entity_id"}, {Name: "hash"}},
+				Columns:   []clause.Column{{Name: "item_id"}, {Name: "hash"}},
 				DoUpdates: clause.AssignmentColumns([]string{"role", "url", "decoded_at"}),
 			}).Create(&row).Error
 			if err != nil {
@@ -182,10 +182,10 @@ func (s *Store) SetRoles(ctx context.Context, entityID uint, roles map[string]st
 }
 
 // Roles returns the decoded role of every page that has one.
-func (s *Store) Roles(ctx context.Context, entityID uint) (map[string]string, error) {
+func (s *Store) Roles(ctx context.Context, itemID uint) (map[string]string, error) {
 	var rows []PageRole
 	err := s.db.WithContext(ctx).
-		Where("entity_id = ?", entityID).
+		Where("item_id = ?", itemID).
 		Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("read roles: %w", err)

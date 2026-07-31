@@ -42,8 +42,8 @@ func newCrawlCmd(a *app) *cli.Command {
 		Category:  "Finding pages",
 		Name:      "crawl",
 		ArgsUsage: "<name>",
-		Usage:     "Crawl an entity's targets, ranking discovered URLs by probability",
-		Description: "Follows links out from the entity's targets up to a depth, caching every page\n" +
+		Usage:     "Crawl an item's targets, ranking discovered URLs by probability",
+		Description: "Follows links out from the item's targets up to a depth, caching every page\n" +
 			"it keeps. Until a model has been trained, every URL scores the same, so the\n" +
 			"first crawl is broad by design.",
 		UsageText: "  scour crawl vehicle --depth 3\n" +
@@ -97,7 +97,7 @@ func newCrawlCmd(a *app) *cli.Command {
 			},
 		},
 		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one entity name")
+			args, err := need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -116,28 +116,28 @@ func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 		return err
 	}
 
-	entity, err := s.EntityFull(c, name)
+	item, err := s.ItemFull(c, name)
 	if err != nil {
 		return err
 	}
 
-	// A paused entity used to be crawled anyway: the check happens once a
+	// A paused item used to be crawled anyway: the check happens once a
 	// second, so it fetched a handful of pages and then stopped saying
 	// "paused", which explains neither why nor what to do.
-	if entity.Paused {
-		return fmt.Errorf("%s is stopped; start it first: scour start %s", entity.Name, entity.Name)
+	if item.Paused {
+		return fmt.Errorf("%s is stopped; start it first: scour start %s", item.Name, item.Name)
 	}
 	// Announcing a crawl that cannot run puts the reason it failed after the
 	// claim that it started.
-	if len(entity.Targets) == 0 {
-		return fmt.Errorf("entity %q has no targets: scour add %s -d <domain>", entity.Name, entity.Name)
+	if len(item.Targets) == 0 {
+		return fmt.Errorf("item %q has no targets: scour add %s -d <domain>", item.Name, item.Name)
 	}
 
-	// The narrowest wins: a --type on the crawl beats the entity's own
+	// The narrowest wins: a --type on the crawl beats the item's own
 	// setting, which beats content_types in the configuration.
 	allow := f.types
 	if len(allow) == 0 {
-		for _, t := range entity.ContentTypes {
+		for _, t := range item.ContentTypes {
 			allow = append(allow, t.Type)
 		}
 	}
@@ -150,19 +150,19 @@ func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 	}
 
 	if f.reset {
-		if err := s.ResetFrontier(c, entity.ID); err != nil {
+		if err := s.ResetFrontier(c, item.ID); err != nil {
 			return err
 		}
 	}
 
-	scorer, trained, err := train.Scorer(a.cfg, entity)
+	scorer, trained, err := train.Scorer(a.cfg, item)
 	if err != nil {
 		return err
 	}
 
 	// The chain sits on top of the per-URL scorer, crediting a link for where
 	// it leads rather than only for what it says.
-	scorer, chained, err := train.ChainScorer(c, s, entity, scorer)
+	scorer, chained, err := train.ChainScorer(c, s, item, scorer)
 	if err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 	var settle func() error
 	if f.bus {
 		var err error
-		crawler, settle, err = a.busCrawler(c, crawler, entity.Name)
+		crawler, settle, err = a.busCrawler(c, crawler, item.Name)
 		if err != nil {
 			return err
 		}
@@ -207,12 +207,12 @@ func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 			scoring += " with crawl chain"
 		}
 		a.Printf("crawling %s: %d targets, depth %d, types %s, scoring %s\n",
-			entity.Name, len(entity.Targets), depth, strings.Join(types.Names(), " "), scoring)
+			item.Name, len(item.Targets), depth, strings.Join(types.Names(), " "), scoring)
 	}
 
 	result, err := crawler.Run(c, crawl.Options{
-		Entity:  entity,
-		Targets: entity.Targets,
+		Item:    item,
+		Targets: item.Targets,
 		Types:   types,
 		Depth:   depth,
 		Limit:   f.limit,
@@ -235,7 +235,7 @@ func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 		}
 	}
 
-	rows, err := s.FetchedURLs(c, entity.ID)
+	rows, err := s.FetchedURLs(c, item.ID)
 	if err != nil {
 		return err
 	}
@@ -266,7 +266,7 @@ func runCrawl(c context.Context, a *app, name string, f crawlFlags) error {
 	// Pages on their own are not the point, and the next step is not guessable
 	// from the ones already run.
 	if result.Fetched > 0 && !a.jsonOut {
-		a.Printf("\nnext: scour train %s\n", entity.Name)
+		a.Printf("\nnext: scour train %s\n", item.Name)
 	}
 	return nil
 }

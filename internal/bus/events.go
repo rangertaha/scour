@@ -20,8 +20,8 @@ import (
 // HTML through the broker would buy nothing, since every component that wants
 // it can read the cache.
 type Fetched struct {
-	Entity      string        `json:"entity"`
-	EntityID    uint          `json:"entity_id"`
+	Item        string        `json:"item"`
+	ItemID      uint          `json:"item_id"`
 	URL         string        `json:"url"`
 	ParentURL   string        `json:"parent_url,omitempty"`
 	Depth       int           `json:"depth"`
@@ -36,8 +36,8 @@ type Fetched struct {
 
 // Discovered is published when a link is found and scored.
 type Discovered struct {
-	Entity    string  `json:"entity"`
-	EntityID  uint    `json:"entity_id"`
+	Item      string  `json:"item"`
+	ItemID    uint    `json:"item_id"`
 	URL       string  `json:"url"`
 	ParentURL string  `json:"parent_url,omitempty"`
 	Depth     int     `json:"depth"`
@@ -50,10 +50,10 @@ type Discovered struct {
 // crawler feeds it back to colly, which needs the depth and the context the
 // scorer and the lineage were recorded in.
 type Work struct {
-	Entity   string `json:"entity"`
-	EntityID uint   `json:"entity_id"`
-	URL      string `json:"url"`
-	Request  []byte `json:"request"`
+	Item    string `json:"item"`
+	ItemID  uint   `json:"item_id"`
+	URL     string `json:"url"`
+	Request []byte `json:"request"`
 }
 
 // Metric is one measurement taken while the pipeline ran.
@@ -63,13 +63,13 @@ type Work struct {
 // else; a name and a value need none of that, and the labels carry whatever
 // distinguishes one reading from another.
 type Metric struct {
-	Entity   string            `json:"entity"`
-	EntityID uint              `json:"entity_id,omitempty"`
-	Name     string            `json:"name"`
-	Value    float64           `json:"value"`
-	Unit     string            `json:"unit,omitempty"`
-	At       time.Time         `json:"at"`
-	Labels   map[string]string `json:"labels,omitempty"`
+	Item   string            `json:"item"`
+	ItemID uint              `json:"item_id,omitempty"`
+	Name   string            `json:"name"`
+	Value  float64           `json:"value"`
+	Unit   string            `json:"unit,omitempty"`
+	At     time.Time         `json:"at"`
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // Metric names, so a publisher and a consumer agree on the spelling.
@@ -90,8 +90,8 @@ const (
 // nothing is retried, and no caller has to decide what to do about a number
 // that went missing. This is why it is not Publish, which deduplicates and
 // reports failure because a page really must be written exactly once.
-func (b *Bus) Emit(ctx context.Context, entity string, m Metric) {
-	m.Entity = entity
+func (b *Bus) Emit(ctx context.Context, item string, m Metric) {
+	m.Item = item
 	if m.At.IsZero() {
 		m.At = time.Now().UTC()
 	}
@@ -100,7 +100,7 @@ func (b *Bus) Emit(ctx context.Context, entity string, m Metric) {
 		slog.Debug("metric not encoded", "name", m.Name, "err", err)
 		return
 	}
-	if _, err := b.js.PublishAsync(Subject(entity, SubjectMetric), body); err != nil {
+	if _, err := b.js.PublishAsync(Subject(item, SubjectMetric), body); err != nil {
 		slog.Debug("metric not published", "name", m.Name, "err", err)
 	}
 }

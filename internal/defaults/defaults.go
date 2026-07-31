@@ -4,7 +4,7 @@
 //
 // A fresh install knows nothing: no properties, no aliases, no examples, and
 // so nothing to bootstrap labels from. That is a real cost, because the first
-// crawl of a new entity is the one with the least to go on. Shipping starter
+// crawl of a new item is the one with the least to go on. Shipping starter
 // schemas inside the binary removes it, and go:embed means they cannot go
 // missing from a package, a container image, or a `go install`.
 //
@@ -132,7 +132,7 @@ func Model(name string) (*wom.Model, error) {
 }
 
 // Schema returns just the properties a shipped model describes, which is what
-// creating an entity from a template needs.
+// creating an item from a template needs.
 func Schema(name string) (wom.Schema, error) {
 	m, err := Model(name)
 	if err != nil {

@@ -27,8 +27,8 @@ type ChainResult struct {
 // The roles are what the next crawl scores against: a link found on a page the
 // chain calls a hub is credited for where it leads, which is how a page with
 // no records on it stops being a dead end.
-func (t *Trainer) trainChain(ctx context.Context, entity *store.Entity) (*ChainResult, error) {
-	paths, err := t.store.Paths(ctx, entity.ID)
+func (t *Trainer) trainChain(ctx context.Context, item *store.Item) (*ChainResult, error) {
+	paths, err := t.store.Paths(ctx, item.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +36,7 @@ func (t *Trainer) trainChain(ctx context.Context, entity *store.Entity) (*ChainR
 		return &ChainResult{Roles: map[string]int{}}, nil
 	}
 
-	chain, err := t.loadChain(ctx, entity)
+	chain, err := t.loadChain(ctx, item)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func (t *Trainer) trainChain(ctx context.Context, entity *store.Entity) (*ChainR
 		}
 	}
 
-	if err := t.store.SetRoles(ctx, entity.ID, roles); err != nil {
+	if err := t.store.SetRoles(ctx, item.ID, roles); err != nil {
 		return nil, err
 	}
 
@@ -76,7 +76,7 @@ func (t *Trainer) trainChain(ctx context.Context, entity *store.Entity) (*ChainR
 	if err != nil {
 		return nil, fmt.Errorf("encode crawl chain: %w", err)
 	}
-	if err := t.store.SaveChain(ctx, &entity.ID, store.ChainCrawl, encoded, chain.Observations); err != nil {
+	if err := t.store.SaveChain(ctx, &item.ID, store.ChainCrawl, encoded, chain.Observations); err != nil {
 		return nil, err
 	}
 
@@ -88,8 +88,8 @@ func (t *Trainer) trainChain(ctx context.Context, entity *store.Entity) (*ChainR
 	}, nil
 }
 
-func (t *Trainer) loadChain(ctx context.Context, entity *store.Entity) (*hmm.Chain, error) {
-	stored, err := t.store.LoadChain(ctx, &entity.ID, store.ChainCrawl)
+func (t *Trainer) loadChain(ctx context.Context, item *store.Item) (*hmm.Chain, error) {
+	stored, err := t.store.LoadChain(ctx, &item.ID, store.ChainCrawl)
 	if err != nil {
 		return nil, err
 	}
@@ -114,10 +114,10 @@ func observationsOf(p store.Path) []hmm.Observation {
 	return out
 }
 
-// ChainScorer wraps a base scorer with the entity's crawl chain, when one has
+// ChainScorer wraps a base scorer with the item's crawl chain, when one has
 // been fitted. The bool reports whether the chain is in play.
-func ChainScorer(ctx context.Context, s *store.Store, entity *store.Entity, base score.Scorer) (score.Scorer, bool, error) {
-	stored, err := s.LoadChain(ctx, &entity.ID, store.ChainCrawl)
+func ChainScorer(ctx context.Context, s *store.Store, item *store.Item, base score.Scorer) (score.Scorer, bool, error) {
+	stored, err := s.LoadChain(ctx, &item.ID, store.ChainCrawl)
 	if err != nil {
 		return base, false, err
 	}
@@ -130,7 +130,7 @@ func ChainScorer(ctx context.Context, s *store.Store, entity *store.Entity, base
 		return base, false, err
 	}
 
-	storedRoles, err := s.Roles(ctx, entity.ID)
+	storedRoles, err := s.Roles(ctx, item.ID)
 	if err != nil {
 		return base, false, err
 	}
@@ -154,7 +154,7 @@ func ChainScorer(ctx context.Context, s *store.Store, entity *store.Entity, base
 //
 // Unlike locators, a chain over field order is a property of how records are
 // written rather than of any one site's markup, so it is stored once with no
-// entity attached and seeded into every induction.
+// item attached and seeded into every induction.
 func (t *Trainer) loadFieldChain(ctx context.Context) (*wom.ChainPrior, error) {
 	stored, err := t.store.LoadChain(ctx, nil, store.ChainExtract)
 	if err != nil || len(stored) == 0 {
@@ -170,7 +170,7 @@ func (t *Trainer) loadFieldChain(ctx context.Context) (*wom.ChainPrior, error) {
 	return &prior, nil
 }
 
-// saveFieldChain stores the chain induction fitted, for the next entity to
+// saveFieldChain stores the chain induction fitted, for the next item to
 // start from.
 func (t *Trainer) saveFieldChain(ctx context.Context, model *wom.Model) error {
 	if model.Chain == nil {

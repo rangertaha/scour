@@ -37,7 +37,7 @@ func TestPublishThenConsume(t *testing.T) {
 		mu   sync.Mutex
 		seen []string
 	)
-	stop, err := b.Consume(ctx, StreamCrawl, "test-fetched", AllEntities(SubjectFetched),
+	stop, err := b.Consume(ctx, StreamCrawl, "test-fetched", AllItems(SubjectFetched),
 		func(_ context.Context, data []byte) error {
 			mu.Lock()
 			defer mu.Unlock()
@@ -70,7 +70,7 @@ func TestDuplicateIDsCollapse(t *testing.T) {
 		mu sync.Mutex
 		n  int
 	)
-	stop, err := b.Consume(ctx, StreamCrawl, "test-dupes", AllEntities(SubjectDiscovered),
+	stop, err := b.Consume(ctx, StreamCrawl, "test-dupes", AllItems(SubjectDiscovered),
 		func(context.Context, []byte) error {
 			mu.Lock()
 			defer mu.Unlock()
@@ -111,7 +111,7 @@ func TestDrainWaitsForConsumers(t *testing.T) {
 	ctx := context.Background()
 
 	release := make(chan struct{})
-	stop, err := b.Consume(ctx, StreamCrawl, "test-slow", AllEntities(SubjectFetched),
+	stop, err := b.Consume(ctx, StreamCrawl, "test-slow", AllItems(SubjectFetched),
 		func(context.Context, []byte) error {
 			<-release
 			return nil
@@ -139,15 +139,15 @@ func TestDrainWaitsForConsumers(t *testing.T) {
 	}
 }
 
-func TestSubjectsAreScopedPerEntity(t *testing.T) {
+func TestSubjectsAreScopedPerItem(t *testing.T) {
 	if got := Subject("vehicle", SubjectFetched); got != "scour.vehicle.fetched" {
 		t.Errorf("Subject = %q", got)
 	}
-	if got := AllEntities(SubjectFetched); got != "scour.*.fetched" {
-		t.Errorf("AllEntities = %q", got)
+	if got := AllItems(SubjectFetched); got != "scour.*.fetched" {
+		t.Errorf("AllItems = %q", got)
 	}
 
-	// An entity named with NATS syntax must not be able to widen a
+	// An item named with NATS syntax must not be able to widen a
 	// subscription or split a subject.
 	for _, name := range []string{"a.b", "a*b", "a>b", "a b"} {
 		got := Subject(name, SubjectFetched)

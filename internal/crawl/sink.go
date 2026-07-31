@@ -21,7 +21,7 @@ type Sink interface {
 	Fetched(ctx context.Context, f store.Fetched) error
 	// Discovered records a link found on a page, with the score it was queued
 	// at.
-	Discovered(ctx context.Context, entityID uint, rawURL, parentURL string, depth int, score float64) error
+	Discovered(ctx context.Context, itemID uint, rawURL, parentURL string, depth int, score float64) error
 }
 
 // DirectSink writes to the database from the crawler's own goroutine. It is
@@ -34,6 +34,6 @@ func (d DirectSink) Fetched(ctx context.Context, f store.Fetched) error {
 }
 
 // Discovered implements [Sink].
-func (d DirectSink) Discovered(ctx context.Context, entityID uint, rawURL, parentURL string, depth int, score float64) error {
-	return d.Store.Discovered(ctx, entityID, rawURL, parentURL, depth, score)
+func (d DirectSink) Discovered(ctx context.Context, itemID uint, rawURL, parentURL string, depth int, score float64) error {
+	return d.Store.Discovered(ctx, itemID, rawURL, parentURL, depth, score)
 }

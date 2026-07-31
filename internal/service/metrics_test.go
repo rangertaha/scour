@@ -30,7 +30,7 @@ func TestMetricsReachSubscribers(t *testing.T) {
 
 	seen := make(chan bus.Metric, 32)
 	stop, err := b.Consume(ctx, bus.StreamMetrics, "watcher",
-		bus.AllEntities(bus.SubjectMetric), func(_ context.Context, data []byte) error {
+		bus.AllItems(bus.SubjectMetric), func(_ context.Context, data []byte) error {
 			var m bus.Metric
 			if err := json.Unmarshal(data, &m); err != nil {
 				return err
@@ -52,8 +52,8 @@ func TestMetricsReachSubscribers(t *testing.T) {
 		if got.Name != bus.MetricFetchLatency || got.Value != 250 {
 			t.Errorf("got %+v", got)
 		}
-		if got.Entity != "news" {
-			t.Errorf("entity = %q, want news", got.Entity)
+		if got.Item != "news" {
+			t.Errorf("item = %q, want news", got.Item)
 		}
 		if got.Labels["host"] != "example.com" {
 			t.Errorf("labels = %v", got.Labels)

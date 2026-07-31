@@ -10,7 +10,7 @@ import (
 	"github.com/rangertaha/scour/internal/store"
 )
 
-// Scope decides whether a URL is inside an entity's targets.
+// Scope decides whether a URL is inside an item's targets.
 //
 // This used to be a regular expression per target, handed to colly as
 // URLFilters. That is fine for the handful of targets a person types and

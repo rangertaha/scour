@@ -32,9 +32,9 @@ func page(make, model, year string) string {
 </dl></div></body></html>`, make, model, year)
 }
 
-// harness builds an entity whose pages are already crawled and cached, which
+// harness builds an item whose pages are already crawled and cached, which
 // is the state training expects to find.
-func harness(t *testing.T) (*Trainer, *store.Store, *store.Entity) {
+func harness(t *testing.T) (*Trainer, *store.Store, *store.Item) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -50,7 +50,7 @@ func harness(t *testing.T) (*Trainer, *store.Store, *store.Entity) {
 	cfg.Paths.Cache = filepath.Join(dir, "cache")
 	pages := cache.Local(cfg.PagesDir())
 
-	e, err := s.CreateEntity(ctx, "vehicle")
+	e, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func harness(t *testing.T) (*Trainer, *store.Store, *store.Entity) {
 			t.Fatal(err)
 		}
 		err = s.RecordFetch(ctx, store.Fetched{
-			EntityID: e.ID, URL: url, Depth: 2, Score: 1,
+			ItemID: e.ID, URL: url, Depth: 2, Score: 1,
 			Status: store.URLFetched, StatusCode: 200,
 			ContentType: "html", Size: int64(len(body)), CacheKey: key,
 		})
@@ -82,7 +82,7 @@ func harness(t *testing.T) (*Trainer, *store.Store, *store.Entity) {
 		}
 	}
 
-	full, err := s.EntityFull(ctx, "vehicle")
+	full, err := s.ItemFull(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,11 +227,11 @@ func TestRunWithoutPropertiesExplainsItself(t *testing.T) {
 	tr, s, _ := harness(t)
 	ctx := context.Background()
 
-	bare, err := s.CreateEntity(ctx, "bare")
+	bare, err := s.CreateItem(ctx, "bare")
 	if err != nil {
 		t.Fatal(err)
 	}
-	full, err := s.EntityFull(ctx, "bare")
+	full, err := s.ItemFull(ctx, "bare")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestRunWithoutPropertiesExplainsItself(t *testing.T) {
 
 	_, err = tr.Run(ctx, full, Options{})
 	if err == nil {
-		t.Fatal("training an entity with no properties must fail")
+		t.Fatal("training an item with no properties must fail")
 	}
 }
 
@@ -247,13 +247,13 @@ func TestRunWithoutCachedPages(t *testing.T) {
 	tr, s, _ := harness(t)
 	ctx := context.Background()
 
-	if _, err := s.CreateEntity(ctx, "fresh"); err != nil {
+	if _, err := s.CreateItem(ctx, "fresh"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AddProperty(ctx, 2, "make", "", "Ford"); err != nil {
 		t.Fatal(err)
 	}
-	full, err := s.EntityFull(ctx, "fresh")
+	full, err := s.ItemFull(ctx, "fresh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,10 +271,10 @@ func TestSchemaOfBuildsOneRecordProp(t *testing.T) {
 		t.Fatalf("got %d top-level props, want one record", len(props))
 	}
 	if props[0].Name != "vehicle" {
-		t.Errorf("record name = %q, want the entity name", props[0].Name)
+		t.Errorf("record name = %q, want the item name", props[0].Name)
 	}
 	if len(props[0].Aliases) != 1 || props[0].Aliases[0] != "car" {
-		t.Errorf("aliases = %v, want the entity's", props[0].Aliases)
+		t.Errorf("aliases = %v, want the item's", props[0].Aliases)
 	}
 	if len(props[0].Props) != 3 {
 		t.Errorf("got %d fields, want one per property", len(props[0].Props))

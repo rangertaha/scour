@@ -26,7 +26,7 @@ func init() {
 	score.Register("bayes", build)
 }
 
-// build loads this entity's model, or starts cold from its seed words.
+// build loads this item's model, or starts cold from its seed words.
 //
 // A missing model file is the normal state on a first crawl, not an error:
 // there is nothing to have trained on yet. Starting from the aliases and
@@ -45,7 +45,7 @@ func build(cfg score.Config) (score.Scorer, error) {
 	}
 
 	cold := New()
-	cold.Entity = cfg.Entity
+	cold.Item = cfg.Item
 	cold.Seed(cfg.Seed)
 	return cold, nil
 }
@@ -58,7 +58,7 @@ func (m *Model) Trained() bool { return !m.TrainedAt.IsZero() }
 // old binary fails loudly rather than misreading a file.
 const Version = 1
 
-// seedWeight is how many observations a token from the entity's aliases and
+// seedWeight is how many observations a token from the item's aliases and
 // property examples is worth.
 //
 // It has to be enough to steer the first crawl, which has no evidence at all,
@@ -83,7 +83,7 @@ type Model struct {
 	mu sync.RWMutex
 
 	Version   int               `json:"version"`
-	Entity    string            `json:"entity,omitempty"`
+	Item      string            `json:"item,omitempty"`
 	Tokens    map[string]Counts `json:"tokens"`
 	Positives float64           `json:"positives"`
 	Negatives float64           `json:"negatives"`
@@ -104,7 +104,7 @@ func (m *Model) Name() string { return "bayes" }
 //
 // The first crawl has no outcomes to learn from, so without this every link
 // scores the same and the crawl is breadth-first. The words the user already
-// supplied, the entity name, its aliases and the property examples, are the
+// supplied, the item name, its aliases and the property examples, are the
 // only evidence available, and a URL containing them is a better bet than one
 // that does not. Seeding is additive, so real observations accumulate on top
 // and eventually outweigh it.

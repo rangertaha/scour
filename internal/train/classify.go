@@ -60,13 +60,13 @@ func (t *Trainer) classifierFor() (classify.Classifier, error) {
 	return classify.New(name, cfg)
 }
 
-// topicOf describes an entity in the terms a classifier judges against.
-func topicOf(entity *store.Entity) classify.Topic {
-	topic := classify.Topic{Name: entity.Name}
-	for _, a := range entity.Aliases {
+// topicOf describes an item in the terms a classifier judges against.
+func topicOf(item *store.Item) classify.Topic {
+	topic := classify.Topic{Name: item.Name}
+	for _, a := range item.Aliases {
 		topic.Aliases = append(topic.Aliases, a.Word)
 	}
-	for _, p := range entity.Properties {
+	for _, p := range item.Properties {
 		topic.Fields = append(topic.Fields, p.Name)
 	}
 	return topic
@@ -82,11 +82,11 @@ func topicOf(entity *store.Entity) classify.Topic {
 // the rules can yet pull a price out of it.
 func (t *Trainer) classifyPages(
 	ctx context.Context,
-	entity *store.Entity,
+	item *store.Item,
 	rows []store.URL,
 	classifier classify.Classifier,
 ) (map[string]classify.Category, *ClassifyResult) {
-	topic := topicOf(entity)
+	topic := topicOf(item)
 	result := &ClassifyResult{Name: classifier.Name(), Categories: map[string]int{}}
 	out := make(map[string]classify.Category, len(rows))
 

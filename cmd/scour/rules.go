@@ -15,12 +15,12 @@ func newRulesCmd(a *app) *cli.Command {
 		Category:  "Learning where the data is",
 		Name:      "rules",
 		ArgsUsage: "<name>",
-		Usage:     "List the extraction rules learned for an entity",
+		Usage:     "List the extraction rules learned for an item",
 		Description: "Rules nest: the parent locates each record on the page, and its children\n" +
 			"pull one property out of that record. HIT is the share of matching pages\n" +
 			"where the rule fires.",
 		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one entity name")
+			args, err := need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -29,11 +29,11 @@ func newRulesCmd(a *app) *cli.Command {
 				return err
 			}
 
-			entity, err := s.Entity(c, args[0])
+			item, err := s.Item(c, args[0])
 			if err != nil {
 				return err
 			}
-			rules, err := s.Rules(c, entity.ID)
+			rules, err := s.Rules(c, item.ID)
 			if err != nil {
 				return err
 			}
@@ -42,7 +42,7 @@ func newRulesCmd(a *app) *cli.Command {
 				return writeJSON(a.Out(), rules)
 			}
 			if len(rules) == 0 {
-				a.Printf("no rules yet: scour train %s\n", entity.Name)
+				a.Printf("no rules yet: scour train %s\n", item.Name)
 				return nil
 			}
 			if a.limit > 0 && len(rules) > a.limit {

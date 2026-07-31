@@ -56,8 +56,8 @@ func TestBenchmarkCorpusIsBalanced(t *testing.T) {
 //
 //	SCOUR_BENCH_MODEL=gemma3:270m go test ./internal/classify/ -run Benchmark -v
 //
-// SCOUR_BENCH_SUBJECT sets the entity name, which matters more than it looks:
-// an entity named after a real word and one named "api-cars" are not the same
+// SCOUR_BENCH_SUBJECT sets the item name, which matters more than it looks:
+// an item named after a real word and one named "api-cars" are not the same
 // question to a model.
 func TestClassifierBenchmark(t *testing.T) {
 	model := os.Getenv("SCOUR_BENCH_MODEL")

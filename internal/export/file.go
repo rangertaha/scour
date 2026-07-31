@@ -26,7 +26,7 @@ type format interface {
 	write(w *os.File, rows []store.RecordRow) error
 }
 
-// file exports to `<dir>/<entity>/<domain>/<timestamp>.<ext>`, which is the
+// file exports to `<dir>/<item>/<domain>/<timestamp>.<ext>`, which is the
 // layout the documentation promises.
 type file struct {
 	dir       string
@@ -48,7 +48,7 @@ func newFile(cfg Config, f format) (Exporter, error) {
 func (f *file) Name() string { return f.format.ext() }
 
 // Export implements [Exporter].
-func (f *file) Export(ctx context.Context, entity string, rows []store.RecordRow) (*Result, error) {
+func (f *file) Export(ctx context.Context, item string, rows []store.RecordRow) (*Result, error) {
 	result := &Result{}
 	groups := byDomain(rows)
 
@@ -57,7 +57,7 @@ func (f *file) Export(ctx context.Context, entity string, rows []store.RecordRow
 			return result, err
 		}
 
-		dir := filepath.Join(f.dir, safe(entity), safe(domain))
+		dir := filepath.Join(f.dir, safe(item), safe(domain))
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return result, fmt.Errorf("create export directory: %w", err)
 		}
@@ -85,7 +85,7 @@ func (f *file) Export(ctx context.Context, entity string, rows []store.RecordRow
 
 // safe makes a name usable as a path segment.
 //
-// Entity names and domains both reach this from user input, and a name
+// Item names and domains both reach this from user input, and a name
 // containing a separator would otherwise write outside the export directory.
 func safe(name string) string {
 	cleaned := strings.Map(func(r rune) rune {
@@ -152,7 +152,7 @@ func (jsonWriter) ext() string { return "json" }
 // jsonRecord is the exported shape.
 //
 // It is flatter than the database row on purpose: an export is read by
-// something that does not know scour's tables, and internal ids for the entity
+// something that does not know scour's tables, and internal ids for the item
 // and the URL row would mean nothing to it.
 type jsonRecord struct {
 	ID         uint              `json:"id"`

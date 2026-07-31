@@ -21,7 +21,7 @@ const (
 	// frontier is not a busy loop.
 	dispatchInterval = 250 * time.Millisecond
 
-	// dispatchCeiling is how many URLs may be out with a crawler, per entity,
+	// dispatchCeiling is how many URLs may be out with a crawler, per item,
 	// before the store stops handing out more.
 	//
 	// This is the backpressure, and it counts leases rather than unacknowledged
@@ -99,9 +99,9 @@ func (s *StoreService) asked(host string, at time.Time) {
 	s.mu.Unlock()
 }
 
-// dispatchOnce hands out at most one batch, for every entity with work.
+// dispatchOnce hands out at most one batch, for every item with work.
 func (s *StoreService) dispatchOnce(ctx context.Context) error {
-	entities, err := s.store.QueuedEntities(ctx)
+	items, err := s.store.QueuedItems(ctx)
 	if err != nil {
 		return err
 	}
@@ -110,7 +110,7 @@ func (s *StoreService) dispatchOnce(ctx context.Context) error {
 		return err
 	}
 
-	for _, id := range entities {
+	for _, id := range items {
 		inFlight, err := s.store.InFlight(ctx, id)
 		if err != nil {
 			return err
@@ -125,7 +125,7 @@ func (s *StoreService) dispatchOnce(ctx context.Context) error {
 			room = dispatchBatch
 		}
 
-		name, err := s.entityName(ctx, id)
+		name, err := s.itemName(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -136,12 +136,12 @@ func (s *StoreService) dispatchOnce(ctx context.Context) error {
 		// faster than it can fetch.
 		if depth, err := s.store.QueueSize(ctx, id); err == nil {
 			s.bus.Emit(ctx, name, bus.Metric{
-				EntityID: id, Name: bus.MetricQueueDepth,
+				ItemID: id, Name: bus.MetricQueueDepth,
 				Value: float64(depth), Unit: "count",
 			})
 		}
 		s.bus.Emit(ctx, name, bus.Metric{
-			EntityID: id, Name: bus.MetricQueueFlight,
+			ItemID: id, Name: bus.MetricQueueFlight,
 			Value: float64(inFlight), Unit: "count",
 		})
 
@@ -150,15 +150,15 @@ func (s *StoreService) dispatchOnce(ctx context.Context) error {
 			data, err := s.store.LeaseQueueSkipping(ctx, id, 0, s.cooling(now, rates))
 			if err != nil {
 				// Empty, or every host still cooling. Either way there is
-				// nothing to hand out for this entity right now.
+				// nothing to hand out for this item right now.
 				break
 			}
 			s.asked(hostOf(data), now)
 			ev := bus.Work{
-				Entity:   name,
-				EntityID: id,
-				URL:      urlOf(data),
-				Request:  data,
+				Item:    name,
+				ItemID:  id,
+				URL:     urlOf(data),
+				Request: data,
 			}
 			// Keyed on the URL so a redelivery and a re-dispatch collapse to
 			// one message inside the duplicate window.
@@ -192,9 +192,9 @@ func urlOf(data []byte) string {
 	return req.URL
 }
 
-// entityName resolves an id to a name, which subjects are built from. Cached
-// because it is asked once per dispatch pass and entities are not renamed.
-func (s *StoreService) entityName(ctx context.Context, id uint) (string, error) {
+// itemName resolves an id to a name, which subjects are built from. Cached
+// because it is asked once per dispatch pass and items are not renamed.
+func (s *StoreService) itemName(ctx context.Context, id uint) (string, error) {
 	s.mu.Lock()
 	if name, ok := s.names[id]; ok {
 		s.mu.Unlock()
@@ -202,7 +202,7 @@ func (s *StoreService) entityName(ctx context.Context, id uint) (string, error) 
 	}
 	s.mu.Unlock()
 
-	e, err := s.store.EntityByID(ctx, id)
+	e, err := s.store.ItemByID(ctx, id)
 	if err != nil {
 		return "", err
 	}

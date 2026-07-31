@@ -20,7 +20,7 @@ func harness(t *testing.T) (*Storage, *store.Store, uint) {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	e, err := s.CreateEntity(context.Background(), "vehicle")
+	e, err := s.CreateItem(context.Background(), "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestQueueSurvivesReopening(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e, err := s.CreateEntity(ctx, "vehicle")
+	e, err := s.CreateItem(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,11 +162,11 @@ func TestQueueSurvivesReopening(t *testing.T) {
 	}
 }
 
-func TestEntitiesHaveSeparateQueues(t *testing.T) {
+func TestItemsHaveSeparateQueues(t *testing.T) {
 	q, s, _ := harness(t)
 	ctx := context.Background()
 
-	other, err := s.CreateEntity(ctx, "article")
+	other, err := s.CreateItem(ctx, "article")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,10 +177,10 @@ func TestEntitiesHaveSeparateQueues(t *testing.T) {
 	}
 
 	if n, _ := otherQ.QueueSize(); n != 0 {
-		t.Errorf("the other entity sees %d requests, want 0", n)
+		t.Errorf("the other item sees %d requests, want 0", n)
 	}
 	if _, err := otherQ.GetRequest(); !errors.Is(err, store.ErrQueueEmpty) {
-		t.Errorf("err = %v, want the other entity's queue to be empty", err)
+		t.Errorf("err = %v, want the other item's queue to be empty", err)
 	}
 }
 

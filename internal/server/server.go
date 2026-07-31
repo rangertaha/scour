@@ -3,7 +3,7 @@
 // Package server exposes scour over HTTP.
 //
 // It is the same scour the command line drives, over a socket: one database,
-// one set of models, one cache. An entity defined through the API is the entity
+// one set of models, one cache. An item defined through the API is the item
 // the CLI sees, because both go through the same store rather than through each
 // other.
 //
@@ -69,18 +69,18 @@ func (s *Server) Handler() http.Handler {
 	// process is up.
 	mux.HandleFunc("GET /healthz", s.health)
 
-	mux.HandleFunc("GET /v1/entities", s.listEntities)
-	mux.HandleFunc("POST /v1/entities", s.createEntity)
-	mux.HandleFunc("GET /v1/entities/{name}", s.getEntity)
-	mux.HandleFunc("DELETE /v1/entities/{name}", s.deleteEntity)
+	mux.HandleFunc("GET /v1/items", s.listItems)
+	mux.HandleFunc("POST /v1/items", s.createItem)
+	mux.HandleFunc("GET /v1/items/{name}", s.getItem)
+	mux.HandleFunc("DELETE /v1/items/{name}", s.deleteItem)
 
-	mux.HandleFunc("GET /v1/entities/{name}/frontier", s.frontier)
-	mux.HandleFunc("GET /v1/entities/{name}/rules", s.rules)
-	mux.HandleFunc("GET /v1/entities/{name}/records", s.records)
-	mux.HandleFunc("POST /v1/entities/{name}/records/{id}/label", s.label)
+	mux.HandleFunc("GET /v1/items/{name}/frontier", s.frontier)
+	mux.HandleFunc("GET /v1/items/{name}/rules", s.rules)
+	mux.HandleFunc("GET /v1/items/{name}/records", s.records)
+	mux.HandleFunc("POST /v1/items/{name}/records/{id}/label", s.label)
 
-	mux.HandleFunc("POST /v1/entities/{name}/crawl", s.startCrawl)
-	mux.HandleFunc("POST /v1/entities/{name}/train", s.startTrain)
+	mux.HandleFunc("POST /v1/items/{name}/crawl", s.startCrawl)
+	mux.HandleFunc("POST /v1/items/{name}/train", s.startTrain)
 
 	mux.HandleFunc("GET /v1/jobs", s.listJobs)
 	mux.HandleFunc("GET /v1/jobs/{id}", s.getJob)
@@ -108,19 +108,19 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
-func (s *Server) listEntities(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.store.Entities(r.Context())
+func (s *Server) listItems(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.store.Items(r.Context())
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entities": rows})
+	writeJSON(w, http.StatusOK, map[string]any{"items": rows})
 }
 
-// entityRequest is what creating or extending an entity accepts. Every field is
+// itemRequest is what creating or extending an item accepts. Every field is
 // optional and additive, mirroring `scour add`: the same request run twice
 // changes nothing the second time.
-type entityRequest struct {
+type itemRequest struct {
 	Name       string   `json:"name"`
 	Aliases    []string `json:"aliases,omitempty"`
 	Domains    []string `json:"domains,omitempty"`
@@ -138,8 +138,8 @@ type entityRequest struct {
 	} `json:"properties,omitempty"`
 }
 
-func (s *Server) createEntity(w http.ResponseWriter, r *http.Request) {
-	var req entityRequest
+func (s *Server) createItem(w http.ResponseWriter, r *http.Request) {
+	var req itemRequest
 	if !decode(w, r, &req) {
 		return
 	}
@@ -149,58 +149,58 @@ func (s *Server) createEntity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	entity, err := s.store.CreateEntity(ctx, req.Name)
+	item, err := s.store.CreateItem(ctx, req.Name)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 
 	if req.Template != "" {
-		if err := applyTemplate(ctx, s.store, entity.ID, req.Template); err != nil {
+		if err := applyTemplate(ctx, s.store, item.ID, req.Template); err != nil {
 			s.fail(w, r, err)
 			return
 		}
 	}
 
 	for _, alias := range req.Aliases {
-		if err := s.store.AddAlias(ctx, entity.ID, alias); err != nil {
+		if err := s.store.AddAlias(ctx, item.ID, alias); err != nil {
 			s.fail(w, r, err)
 			return
 		}
 	}
 	for _, d := range req.Domains {
-		if err := s.store.AddTarget(ctx, entity.ID, store.TargetDomain, d, req.Subdomains, req.Depth); err != nil {
+		if err := s.store.AddTarget(ctx, item.ID, store.TargetDomain, d, req.Subdomains, req.Depth); err != nil {
 			s.fail(w, r, err)
 			return
 		}
 	}
 	for _, u := range req.URLs {
-		if err := s.store.AddTarget(ctx, entity.ID, store.TargetURL, u, req.Subdomains, req.Depth); err != nil {
+		if err := s.store.AddTarget(ctx, item.ID, store.TargetURL, u, req.Subdomains, req.Depth); err != nil {
 			s.fail(w, r, err)
 			return
 		}
 	}
 	for _, t := range req.Types {
-		if err := s.store.AddContentType(ctx, entity.ID, strings.ToLower(t)); err != nil {
+		if err := s.store.AddContentType(ctx, item.ID, strings.ToLower(t)); err != nil {
 			s.fail(w, r, err)
 			return
 		}
 	}
 	for _, p := range req.Properties {
-		if err := s.store.AddPropertyDetail(ctx, entity.ID, store.PropertyDetail{
+		if err := s.store.AddPropertyDetail(ctx, item.ID, store.PropertyDetail{
 			Name: p.Name, Type: p.Type, Example: p.Example, Description: p.Description}); err != nil {
 			s.fail(w, r, err)
 			return
 		}
 		for _, alias := range p.Aliases {
-			if err := s.store.AddPropertyAlias(ctx, entity.ID, "", p.Name, alias); err != nil {
+			if err := s.store.AddPropertyAlias(ctx, item.ID, "", p.Name, alias); err != nil {
 				s.fail(w, r, err)
 				return
 			}
 		}
 	}
 
-	full, err := s.store.EntityFull(ctx, entity.Name)
+	full, err := s.store.ItemFull(ctx, item.Name)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -208,17 +208,17 @@ func (s *Server) createEntity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, full)
 }
 
-func (s *Server) getEntity(w http.ResponseWriter, r *http.Request) {
-	entity, err := s.store.EntityFull(r.Context(), r.PathValue("name"))
+func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
+	item, err := s.store.ItemFull(r.Context(), r.PathValue("name"))
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, entity)
+	writeJSON(w, http.StatusOK, item)
 }
 
-func (s *Server) deleteEntity(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.DeleteEntity(r.Context(), r.PathValue("name")); err != nil {
+func (s *Server) deleteItem(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.DeleteItem(r.Context(), r.PathValue("name")); err != nil {
 		s.fail(w, r, err)
 		return
 	}
@@ -226,13 +226,13 @@ func (s *Server) deleteEntity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) frontier(w http.ResponseWriter, r *http.Request) {
-	entity, err := s.store.Entity(r.Context(), r.PathValue("name"))
+	item, err := s.store.Item(r.Context(), r.PathValue("name"))
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 
-	rows, err := s.store.FetchedURLs(r.Context(), entity.ID)
+	rows, err := s.store.FetchedURLs(r.Context(), item.ID)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -244,13 +244,13 @@ func (s *Server) frontier(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) rules(w http.ResponseWriter, r *http.Request) {
-	entity, err := s.store.Entity(r.Context(), r.PathValue("name"))
+	item, err := s.store.Item(r.Context(), r.PathValue("name"))
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 
-	rows, err := s.store.Rules(r.Context(), entity.ID)
+	rows, err := s.store.Rules(r.Context(), item.ID)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -259,7 +259,7 @@ func (s *Server) rules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) records(w http.ResponseWriter, r *http.Request) {
-	entity, err := s.store.Entity(r.Context(), r.PathValue("name"))
+	item, err := s.store.Item(r.Context(), r.PathValue("name"))
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -282,7 +282,7 @@ func (s *Server) records(w http.ResponseWriter, r *http.Request) {
 		query.Label = store.Label(v)
 	}
 
-	rows, total, err := s.store.SearchRecords(r.Context(), entity.ID, query)
+	rows, total, err := s.store.SearchRecords(r.Context(), item.ID, query)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -291,7 +291,7 @@ func (s *Server) records(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) label(w http.ResponseWriter, r *http.Request) {
-	entity, err := s.store.Entity(r.Context(), r.PathValue("name"))
+	item, err := s.store.Item(r.Context(), r.PathValue("name"))
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -318,13 +318,13 @@ func (s *Server) label(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	n, err := s.store.LabelRecords(r.Context(), entity.ID, []uint{uint(id)}, label)
+	n, err := s.store.LabelRecords(r.Context(), item.ID, []uint{uint(id)}, label)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	if n == 0 {
-		writeError(w, http.StatusNotFound, "no such record for this entity")
+		writeError(w, http.StatusNotFound, "no such record for this item")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "label": label})
@@ -332,7 +332,7 @@ func (s *Server) label(w http.ResponseWriter, r *http.Request) {
 
 // fail turns a store error into the right status.
 //
-// A missing entity is a 404 rather than a 500, because the caller asked for
+// A missing item is a 404 rather than a 500, because the caller asked for
 // something that is not there, which is their business rather than the
 // server's failure.
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {

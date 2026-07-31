@@ -72,7 +72,7 @@ func newTagCmd(a *app) *cli.Command {
 			},
 		},
 		Action: func(c context.Context, cmd *cli.Command) error {
-			args, err := need(cmd, 1, "one entity name")
+			args, err := need(cmd, 1, "one item name")
 			if err != nil {
 				return err
 			}
@@ -95,7 +95,7 @@ func runTag(c context.Context, a *app, name string, f tagFlags) error {
 	if err != nil {
 		return err
 	}
-	entity, err := s.Entity(c, name)
+	item, err := s.Item(c, name)
 	if err != nil {
 		return err
 	}
@@ -115,49 +115,49 @@ func runTag(c context.Context, a *app, name string, f tagFlags) error {
 	case len(f.update) > 0:
 		// No per-word line here: replacing the set is one act, and the summary
 		// below already says what it ended up as.
-		if err := s.SetPropertyAliases(c, entity.ID, scope, f.prop, f.update); err != nil {
+		if err := s.SetPropertyAliases(c, item.ID, scope, f.prop, f.update); err != nil {
 			return err
 		}
 
 	default:
 		for _, word := range f.delete {
-			n, err := s.RemovePropertyAliases(c, entity.ID, scope, f.prop, []string{word})
+			n, err := s.RemovePropertyAliases(c, item.ID, scope, f.prop, []string{word})
 			if err != nil {
 				return err
 			}
 			if n == 0 {
 				// Reporting a removal that removed nothing is how someone ends
 				// up believing a word is gone while a crawl still matches it.
-				a.Printf("%s: %s%s was not tagged %q\n", entity.Name, f.prop, where, word)
+				a.Printf("%s: %s%s was not tagged %q\n", item.Name, f.prop, where, word)
 				continue
 			}
-			a.Printf("%s: %s%s no longer reads %q\n", entity.Name, f.prop, where, word)
+			a.Printf("%s: %s%s no longer reads %q\n", item.Name, f.prop, where, word)
 		}
 		for _, word := range f.append {
-			if err := s.AddPropertyAlias(c, entity.ID, scope, f.prop, word); err != nil {
+			if err := s.AddPropertyAlias(c, item.ID, scope, f.prop, word); err != nil {
 				return err
 			}
-			a.Printf("%s: %s%s also reads %q\n", entity.Name, f.prop, where, word)
+			a.Printf("%s: %s%s also reads %q\n", item.Name, f.prop, where, word)
 		}
 	}
 
-	words, err := s.PropertyAliases(c, entity.ID, scope, f.prop)
+	words, err := s.PropertyAliases(c, item.ID, scope, f.prop)
 	if err != nil {
 		return err
 	}
 	if len(f.append) == 0 && len(f.delete) == 0 && len(f.update) == 0 {
 		if len(words) == 0 {
-			a.Printf("%s: %s%s has no tags yet\n\n", entity.Name, f.prop, where)
+			a.Printf("%s: %s%s has no tags yet\n\n", item.Name, f.prop, where)
 			a.Printf("Teach it what a page might call it:\n  scour tag %s -p %s --append '<word>'\n",
-				entity.Name, f.prop)
+				item.Name, f.prop)
 			return nil
 		}
-		a.Printf("%s: %s%s reads %s\n", entity.Name, f.prop, where, quoteList(words))
+		a.Printf("%s: %s%s reads %s\n", item.Name, f.prop, where, quoteList(words))
 		return nil
 	}
 
 	a.Printf("\n%s%s now reads %s\n", f.prop, where, quoteList(words))
-	a.Printf("run `scour train %s` to fold that into the model\n", entity.Name)
+	a.Printf("run `scour train %s` to fold that into the model\n", item.Name)
 	return nil
 }
 

@@ -23,7 +23,7 @@ type StoreService struct {
 	bus   *bus.Bus
 	store *store.Store
 
-	// scopes caches one scope per entity. Deciding what is in scope belongs
+	// scopes caches one scope per item. Deciding what is in scope belongs
 	// here because this is the process that holds the targets: a crawler in
 	// another process cannot be handed a scope built from a million of them,
 	// so it reports every link it finds and the decision is made once, here.
@@ -76,15 +76,15 @@ func NewStore(b *bus.Bus, s *store.Store, opts ...StoreOption) *StoreService {
 	return svc
 }
 
-// scopeFor returns the entity's scope, building it once.
-func (s *StoreService) scopeFor(ctx context.Context, entityID uint) (*crawl.Scope, error) {
+// scopeFor returns the item's scope, building it once.
+func (s *StoreService) scopeFor(ctx context.Context, itemID uint) (*crawl.Scope, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if sc, ok := s.scopes[entityID]; ok {
+	if sc, ok := s.scopes[itemID]; ok {
 		return sc, nil
 	}
 
-	targets, err := s.store.TargetsFor(ctx, entityID)
+	targets, err := s.store.TargetsFor(ctx, itemID)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func (s *StoreService) scopeFor(ctx context.Context, entityID uint) (*crawl.Scop
 	if err != nil {
 		return nil, err
 	}
-	s.scopes[entityID] = sc
+	s.scopes[itemID] = sc
 	return sc, nil
 }
 
@@ -103,14 +103,14 @@ func (s *StoreService) Role() Role { return RoleStore }
 // when ctx is cancelled, draining whatever is in flight on the way out.
 func (s *StoreService) Start(ctx context.Context) error {
 	stopFetched, err := s.bus.Consume(ctx, bus.StreamCrawl, "store-fetched",
-		bus.AllEntities(bus.SubjectFetched), s.handleFetched)
+		bus.AllItems(bus.SubjectFetched), s.handleFetched)
 	if err != nil {
 		return err
 	}
 	defer stopFetched()
 
 	stopDiscovered, err := s.bus.Consume(ctx, bus.StreamCrawl, "store-discovered",
-		bus.AllEntities(bus.SubjectDiscovered), s.handleDiscovered)
+		bus.AllItems(bus.SubjectDiscovered), s.handleDiscovered)
 	if err != nil {
 		return err
 	}
@@ -138,7 +138,7 @@ func (s *StoreService) handleFetched(ctx context.Context, data []byte) error {
 	}
 
 	err := s.store.RecordFetch(ctx, store.Fetched{
-		EntityID:    ev.EntityID,
+		ItemID:      ev.ItemID,
 		URL:         ev.URL,
 		ParentURL:   ev.ParentURL,
 		Depth:       ev.Depth,
@@ -156,28 +156,28 @@ func (s *StoreService) handleFetched(ctx context.Context, data []byte) error {
 	return nil
 }
 
-// handleDiscovered records one discovered link that is inside the entity.
+// handleDiscovered records one discovered link that is inside the item.
 //
 // The single-process crawler checks the scope itself before queueing, but the
 // bus path never did, so a link to anywhere at all was recorded as discovered
-// for the entity. Doing it here rather than in the crawler is also what lets a
+// for the item. Doing it here rather than in the crawler is also what lets a
 // crawler stay stateless: it reports every link it saw and needs to know
-// nothing about what the entity covers.
+// nothing about what the item covers.
 func (s *StoreService) handleDiscovered(ctx context.Context, data []byte) error {
 	var ev bus.Discovered
 	if err := json.Unmarshal(data, &ev); err != nil {
 		return nil //nolint:nilerr // deliberate: poison message
 	}
 
-	sc, err := s.scopeFor(ctx, ev.EntityID)
+	sc, err := s.scopeFor(ctx, ev.ItemID)
 	if err != nil {
-		return fmt.Errorf("scope for entity %d: %w", ev.EntityID, err)
+		return fmt.Errorf("scope for item %d: %w", ev.ItemID, err)
 	}
 	if !sc.Allows(ev.URL) {
 		return nil
 	}
 
-	err = s.store.Discovered(ctx, ev.EntityID, ev.URL, ev.ParentURL, ev.Depth, ev.Score)
+	err = s.store.Discovered(ctx, ev.ItemID, ev.URL, ev.ParentURL, ev.Depth, ev.Score)
 	if err != nil {
 		return fmt.Errorf("store discovered %s: %w", ev.URL, err)
 	}
@@ -192,7 +192,7 @@ func (s *StoreService) handleDiscovered(ctx context.Context, data []byte) error 
 		// retrying the message for.
 		return nil //nolint:nilerr // deliberate: unusable link, see comment
 	}
-	err = s.store.PushQueue(ctx, ev.EntityID, ev.Score, store.URLHash(ev.EntityID, ev.URL), data)
+	err = s.store.PushQueue(ctx, ev.ItemID, ev.Score, store.URLHash(ev.ItemID, ev.URL), data)
 	if err != nil {
 		return fmt.Errorf("queue discovered %s: %w", ev.URL, err)
 	}

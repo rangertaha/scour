@@ -23,24 +23,24 @@ import (
 // what is happening rather than what happened a minute ago.
 const Window = 15 * time.Second
 
-// Row is one entity as the fleet table shows it.
+// Row is one item as the fleet table shows it.
 type Row struct {
-	Name     string
-	Targets  int64
-	Queued   int64
-	Visited  int64
-	Records  int64
-	Rules    int64
-	Rate     float64
-	State    State
-	EntityID uint
+	Name    string
+	Targets int64
+	Queued  int64
+	Visited int64
+	Records int64
+	Rules   int64
+	Rate    float64
+	State   State
+	ItemID  uint
 }
 
-// State is what an entity is doing, which is not the same question as whether
+// State is what an item is doing, which is not the same question as whether
 // it has work.
 type State string
 
-// The states an entity can be in.
+// The states an item can be in.
 const (
 	// StateRunning is fetching now.
 	StateRunning State = "running"
@@ -73,22 +73,22 @@ func (s Snapshot) Totals() (queued, visited, records int64, rate float64) {
 // Source is what a snapshot is built from. It is an interface so the model can
 // be tested without a database.
 type Source interface {
-	Entities(ctx context.Context) ([]store.EntitySummary, error)
-	Entity(ctx context.Context, name string) (*store.Entity, error)
-	Status(ctx context.Context, entityID uint) (*store.Status, error)
-	FetchRate(ctx context.Context, entityID uint, window time.Duration) (float64, error)
+	Items(ctx context.Context) ([]store.ItemSummary, error)
+	Item(ctx context.Context, name string) (*store.Item, error)
+	Status(ctx context.Context, itemID uint) (*store.Status, error)
+	FetchRate(ctx context.Context, itemID uint, window time.Duration) (float64, error)
 }
 
-// Take builds a snapshot of every entity.
+// Take builds a snapshot of every item.
 func Take(ctx context.Context, src Source) (Snapshot, error) {
-	names, err := src.Entities(ctx)
+	names, err := src.Items(ctx)
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("list entities: %w", err)
+		return Snapshot{}, fmt.Errorf("list items: %w", err)
 	}
 
 	snap := Snapshot{Taken: time.Now(), Rows: make([]Row, 0, len(names))}
 	for _, n := range names {
-		e, err := src.Entity(ctx, n.Name)
+		e, err := src.Item(ctx, n.Name)
 		if err != nil {
 			return Snapshot{}, err
 		}
@@ -101,7 +101,7 @@ func Take(ctx context.Context, src Source) (Snapshot, error) {
 			return Snapshot{}, err
 		}
 		snap.Rows = append(snap.Rows, Row{
-			Name: e.Name, EntityID: e.ID,
+			Name: e.Name, ItemID: e.ID,
 			Targets: st.Targets, Queued: st.Queued, Visited: st.Visited,
 			Records: st.Matches, Rules: st.Rules,
 			Rate:  rate,
@@ -112,9 +112,9 @@ func Take(ctx context.Context, src Source) (Snapshot, error) {
 	return snap, nil
 }
 
-// stateOf decides what an entity is doing.
+// stateOf decides what an item is doing.
 //
-// Paused first, because it is a fact rather than an inference: an entity can be
+// Paused first, because it is a fact rather than an inference: an item can be
 // paused with pages still arriving from requests that were already in flight,
 // and it is still paused. Then fetching, then whether there is anything left to
 // fetch.

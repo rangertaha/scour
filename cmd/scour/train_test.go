@@ -61,7 +61,7 @@ func carSite(t *testing.T) *httptest.Server {
 	return srv
 }
 
-// trained sets up an entity, crawls the site and trains, returning the dir.
+// trained sets up an item, crawls the site and trains, returning the dir.
 func trained(t *testing.T) (string, *httptest.Server) {
 	t.Helper()
 	srv := carSite(t)
@@ -182,7 +182,7 @@ func TestTrainWithoutProperties(t *testing.T) {
 	runOK(t, dir, "add", "other", "-u", srv.URL+"/")
 
 	if _, err := run(t, dir, "train", "other"); err == nil {
-		t.Error("training an entity with no properties must fail")
+		t.Error("training an item with no properties must fail")
 	}
 }
 

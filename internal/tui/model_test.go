@@ -12,16 +12,16 @@ import (
 
 // fakeSource is a fleet without a database behind it.
 type fakeSource struct {
-	entities []store.EntitySummary
-	byName   map[string]*store.Entity
-	status   map[uint]*store.Status
-	rates    map[uint]float64
+	items  []store.ItemSummary
+	byName map[string]*store.Item
+	status map[uint]*store.Status
+	rates  map[uint]float64
 }
 
-func (f fakeSource) Entities(context.Context) ([]store.EntitySummary, error) {
-	return f.entities, nil
+func (f fakeSource) Items(context.Context) ([]store.ItemSummary, error) {
+	return f.items, nil
 }
-func (f fakeSource) Entity(_ context.Context, name string) (*store.Entity, error) {
+func (f fakeSource) Item(_ context.Context, name string) (*store.Item, error) {
 	return f.byName[name], nil
 }
 func (f fakeSource) Status(_ context.Context, id uint) (*store.Status, error) {
@@ -31,7 +31,7 @@ func (f fakeSource) FetchRate(_ context.Context, id uint, _ time.Duration) (floa
 	return f.rates[id], nil
 }
 
-// What an entity is doing is not the same question as whether it has work.
+// What an item is doing is not the same question as whether it has work.
 func TestStateOf(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -44,7 +44,7 @@ func TestStateOf(t *testing.T) {
 		{"work but nothing fetching it", false, 100, 0, StateIdle},
 		{"frontier empty", false, 0, 0, StateDone},
 		{"paused", true, 100, 0, StatePaused},
-		// An entity can be paused while requests already in flight are still
+		// An item can be paused while requests already in flight are still
 		// landing. It is still paused: that is a fact, not an inference.
 		{"paused with pages still arriving", true, 100, 4.2, StatePaused},
 		// Nothing queued but still fetching means the last few are in flight.
@@ -62,8 +62,8 @@ func TestStateOf(t *testing.T) {
 
 func TestTakeBuildsSortedRows(t *testing.T) {
 	src := fakeSource{
-		entities: []store.EntitySummary{{Name: "zebra"}, {Name: "alpha"}},
-		byName: map[string]*store.Entity{
+		items: []store.ItemSummary{{Name: "zebra"}, {Name: "alpha"}},
+		byName: map[string]*store.Item{
 			"zebra": {ID: 2, Name: "zebra", Paused: true},
 			"alpha": {ID: 1, Name: "alpha"},
 		},
