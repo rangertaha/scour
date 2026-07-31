@@ -396,3 +396,54 @@ func TestTaughtRegexIsValidated(t *testing.T) {
 		t.Error("an invalid regex should be rejected")
 	}
 }
+
+// AutoMigrate adds a column but will not rebuild a unique index whose
+// definition changed, so a database created before `domain` joined
+// (entity_id, name) kept the two-column index and every property upsert failed
+// with "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE
+// constraint". Opening it again has to repair that.
+func TestOpeningRepairsAStaleUniqueIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scour.db")
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Put the pre-domain index back, which is what an older database holds.
+	if err := s.db.Exec("DROP INDEX IF EXISTS idx_prop_entity_name").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.Exec(
+		"CREATE UNIQUE INDEX idx_prop_entity_name ON properties(entity_id, name)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	e, err := reopened.CreateEntity(ctx, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.AddPropertyDetail(ctx, e.ID, PropertyDetail{
+		Name: "link", Example: "https://example.com/a"}); err != nil {
+		t.Fatalf("upsert against a repaired database: %v", err)
+	}
+	// And the domain scoping the index exists for still works.
+	if err := reopened.AddPropertyDetail(ctx, e.ID, PropertyDetail{
+		Domain: "example.com", Name: "link", Example: "https://example.com/b"}); err != nil {
+		t.Fatalf("domain-scoped upsert: %v", err)
+	}
+	props, err := reopened.PropertiesFor(ctx, e.ID, "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(props) != 1 || props[0].Example != "https://example.com/b" {
+		t.Errorf("got %+v, want the domain-scoped row to win", props)
+	}
+}

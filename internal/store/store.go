@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -110,9 +111,40 @@ func OpenMemory() (*Store, error) {
 }
 
 func (s *Store) migrate() error {
+	// AutoMigrate adds a column but will not rebuild a unique index whose
+	// definition changed. A database created before `domain` joined
+	// (entity_id, name) therefore keeps the old two-column index, and every
+	// property upsert fails with "ON CONFLICT clause does not match any
+	// PRIMARY KEY or UNIQUE constraint" because the conflict target no longer
+	// exists. Dropping the stale one first lets AutoMigrate rebuild it.
+	if err := s.dropStaleIndex("properties", "idx_prop_entity_name", "domain"); err != nil {
+		return err
+	}
 	if err := s.db.AutoMigrate(tables()...); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	return nil
+}
+
+// dropStaleIndex removes an index whose definition predates a column it should
+// now cover. It reads sqlite's own record of the index rather than guessing,
+// so an index that is already correct is left alone.
+func (s *Store) dropStaleIndex(table, index, mustCover string) error {
+	var ddl string
+	err := s.db.Raw(
+		"SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name = ?",
+		table, index,
+	).Scan(&ddl).Error
+	if err != nil {
+		return fmt.Errorf("read index %s: %w", index, err)
+	}
+	if ddl == "" || strings.Contains(ddl, mustCover) {
+		return nil
+	}
+	if err := s.db.Exec("DROP INDEX IF EXISTS " + index).Error; err != nil {
+		return fmt.Errorf("drop stale index %s: %w", index, err)
+	}
+	slog.Info("rebuilt index for a changed definition", "index", index, "now covers", mustCover)
 	return nil
 }
 
