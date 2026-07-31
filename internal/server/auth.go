@@ -5,6 +5,7 @@ package server
 import (
 	"crypto/subtle"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -65,6 +66,14 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 		}
 
 		if !a.ok(r.Header.Get("Authorization")) {
+			// Logged separately from the access line because a run of these is
+			// the one thing in this log worth alerting on, and the access line
+			// alone cannot tell a rejected token from a missing one.
+			slog.Warn("unauthorized",
+				"path", r.URL.Path,
+				"remote", clientIP(r),
+				"presented", r.Header.Get("Authorization") != "",
+				"id", RequestID(r.Context()))
 			w.Header().Set("WWW-Authenticate", `Bearer realm="scour"`)
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return

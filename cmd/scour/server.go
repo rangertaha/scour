@@ -78,6 +78,12 @@ func runServer(c context.Context, a *app, listen string) error {
 	ctx, stop := signal.NotifyContext(c, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	slog.Info("server starting",
+		"listen", cfg.Server.Listen,
+		"mcp", cfg.Server.MCP,
+		"metrics", cfg.Server.Metrics != "",
+		"auth", cfg.Server.TokenFile != "")
+
 	errs := make(chan error, 1)
 	go func() {
 		a.Printf("scour listening on %s\n", cfg.Server.Listen)
@@ -101,6 +107,7 @@ func runServer(c context.Context, a *app, listen string) error {
 		return err
 	case <-ctx.Done():
 		a.Println("\nshutting down")
+		slog.Info("server stopping")
 	}
 
 	// Stop accepting first, then let running jobs finish. A crawl abandoned
@@ -120,7 +127,11 @@ func runServer(c context.Context, a *app, listen string) error {
 
 	select {
 	case <-done:
+		slog.Info("server stopped")
 	case <-shutdown.Done():
+		// A crawl killed here leaves a frontier claiming pages were queued and
+		// never fetched, so this is worth a level someone will actually see.
+		slog.Warn("server stopped with jobs still running", "grace", shutdownGrace)
 		a.Println("jobs still running after the grace period, exiting anyway")
 	}
 	return nil

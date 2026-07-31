@@ -45,6 +45,9 @@ func NewMetrics() *Metrics {
 type recorder struct {
 	http.ResponseWriter
 	status int
+	// written is the response size, which the access log reports and net/http
+	// no more exposes after the fact than it does the status.
+	written int64
 }
 
 func (r *recorder) WriteHeader(code int) {
@@ -57,7 +60,9 @@ func (r *recorder) Write(b []byte) (int, error) {
 	if r.status == 0 {
 		r.status = http.StatusOK
 	}
-	return r.ResponseWriter.Write(b)
+	n, err := r.ResponseWriter.Write(b)
+	r.written += int64(n)
+	return n, err
 }
 
 // Flush forwards to the underlying writer when it supports it, which streaming

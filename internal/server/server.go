@@ -97,9 +97,11 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("/mcp/", s.MCPHandler())
 	}
 
-	// Order matters: metrics counts what auth allowed through, and both see
-	// every request including the ones that 404.
-	return s.stats.Middleware(s.auth.Middleware(mux))
+	// Order matters. Metrics is outermost so it owns the recorder and counts
+	// every request, including the ones auth rejects and the ones that 404.
+	// Logging sits inside it, reusing that recorder, and outside auth so a
+	// rejected request is still a line in the log rather than a silent 401.
+	return s.stats.Middleware(Logging(s.auth.Middleware(mux)))
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
