@@ -76,6 +76,35 @@ What it exposed, and what came of it:
   repeated, so this is a mix of section pages read as articles and titles that
   really are that short. *Open*, and the reason `internal/classify` exists.
 
+### What training costs
+
+Measured on one corpus at four sizes, so the numbers say something about scaling
+rather than about two different collections of sites.
+
+| Pages | Seconds | Per page |
+| --- | --- | --- |
+| 100 | 49 | 0.49 |
+| 200 | 84 | 0.42 |
+| 400 | 241 | 0.60 |
+| 800 | 394 | 0.49 |
+| 1,267 | 794 | 0.63 |
+
+Linear: the exponent over the whole range is 1.09, and 1.03 over the top end.
+
+It is linear in bytes rather than in pages, which is what makes one corpus look
+slower than another. news-html averages 95KB a page and costs 0.18s each;
+news2 averages 297KB and costs 0.63s. Three times the markup, three times the
+work. Comparing the two totals, 78MB against 422MB, gives 5.4 times the bytes
+for 5.6 times the time.
+
+So a corpus is budgeted by its size on disk, not by its page count, and the
+cache reports that directly:
+
+```
+scour status news2
+cache       2,829 pages, 580.2MB
+```
+
 ### What the corpora exposed
 
 Every one of these was found by running against live data and measuring, not by
