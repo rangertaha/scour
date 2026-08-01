@@ -87,6 +87,16 @@ func List(a *cli.App) *ucli.Command {
 				LastRun string `json:"last_run"`
 			}
 
+			// One query for every job's last run, rather than one per row.
+			ids := make([]uint, 0, len(jobs))
+			for _, j := range jobs {
+				ids = append(ids, j.ID)
+			}
+			last, err := s.LastRuns(c, ids)
+			if err != nil {
+				return err
+			}
+
 			rows := make([]row, 0, len(jobs))
 			for _, j := range jobs {
 				it, err := s.ItemByID(c, j.ItemID)
@@ -109,14 +119,21 @@ func List(a *cli.App) *ucli.Command {
 				if err != nil {
 					return err
 				}
-				last := "never"
-				if j.LastRunAt != nil {
-					last = j.LastRunAt.Format("2006-01-02")
+				// From the run history rather than from a column on the job:
+				// a run says how it ended, and "never" against a job that has
+				// crawled is what the column said for every job on a real
+				// database, because nothing ever wrote to it.
+				lastRun := "never"
+				if r, ok := last[j.ID]; ok {
+					lastRun = r.StartedAt.Local().Format("2006-01-02")
+					if r.State == store.RunRunning {
+						lastRun = "running"
+					}
 				}
 				rows = append(rows, row{
 					Name: j.Name, Item: it.Name, Targets: len(j.Targets),
 					Queued: int64(queued), Visited: st.Visited, Records: st.Matches,
-					State: string(j.State), LastRun: last,
+					State: string(j.State), LastRun: lastRun,
 				})
 			}
 

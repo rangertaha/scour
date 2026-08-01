@@ -180,7 +180,13 @@ type URL struct {
 	// which a page or a record belongs to one: the item owns the corpus, and
 	// a job is what paid to put this page in it. Zero until something fetches
 	// it, since a URL is discovered before it is fetched.
-	JobID       uint   `gorm:"index"`
+	JobID uint `gorm:"index"`
+	// RunID is the run that last fetched this page, which is what makes a run
+	// have a log. Last rather than first: a page fetched again belongs to the
+	// run that fetched it again, so an old run's log thins out as its pages
+	// are recrawled. The alternative is a row per fetch, which is the same
+	// data again for a history almost nobody reads twice.
+	RunID       uint   `gorm:"index"`
 	Hash        string `gorm:"uniqueIndex;not null"`
 	URL         string `gorm:"not null"`
 	ParentID    *uint  `gorm:"index"`
@@ -406,7 +412,7 @@ type Judgement struct {
 // tables lists every model, in dependency order, for migration.
 func tables() []any {
 	return []any{
-		&Item{}, &Alias{}, &Property{}, &PropertyAlias{}, &Job{}, &Target{}, &ContentType{},
+		&Item{}, &Alias{}, &Property{}, &PropertyAlias{}, &Job{}, &Run{}, &Target{}, &ContentType{},
 		&Host{}, &URL{}, &Response{},
 		&Rule{}, &Record{}, &Value{},
 		&ModelMeta{}, &Chain{}, &Judgement{},

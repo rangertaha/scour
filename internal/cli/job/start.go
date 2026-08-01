@@ -5,6 +5,7 @@ package job
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"sort"
 	"strings"
@@ -229,8 +230,18 @@ func runCrawl(c context.Context, a *cli.App, name string, f crawlFlags) error {
 			item.Name, len(job.Targets), depth, strings.Join(types.Names(), " "), scoring)
 	}
 
+	// The history row opens before the crawl and closes after it, whichever
+	// way the crawl ends, so a run that died is a row saying it started rather
+	// than no row at all.
+	run, err := s.StartRun(c, job.ID)
+	if err != nil {
+		return err
+	}
+
 	result, err := crawler.Run(c, crawl.Options{
 		Item:    item,
+		Job:     job,
+		RunID:   run.ID,
 		Targets: job.Targets,
 		Types:   types,
 		Depth:   depth,
@@ -240,6 +251,11 @@ func runCrawl(c context.Context, a *cli.App, name string, f crawlFlags) error {
 		Scorer:  scorer,
 		Debug:   f.debug,
 	})
+	if finErr := s.FinishRun(c, run.ID, result.Finished(err)); finErr != nil {
+		// A crawl that fetched ten thousand pages and could not write its own
+		// history row still fetched them.
+		slog.Warn("could not record the run", "job", job.Name, "err", finErr)
+	}
 	if err != nil {
 		return err
 	}

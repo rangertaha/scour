@@ -253,3 +253,65 @@ func visitedCount(t *testing.T, dir string) int {
 	t.Fatalf("no frontier line in item show:\n%s", runOK(t, dir, "item", "show", "vehicle"))
 	return 0
 }
+
+// A job with no history says so rather than showing an empty table, and a crawl
+// writes one row that says how it ended.
+func TestRunsAndLog(t *testing.T) {
+	srv := carSite(t)
+	dir := crawlDir(t)
+	runOK(t, dir, "item", "add", "vehicle", "-u", srv.URL+"/")
+
+	// Empty is not an error outside --strict, so this is about what it says.
+	if out := runOK(t, dir, "job", "runs", "vehicle"); !strings.Contains(out, "has not run yet") {
+		t.Errorf("runs on a job with no history said:\n%s", out)
+	}
+
+	// Budgeted, so it ends on its budget rather than on an empty frontier.
+	runOK(t, dir, "start", "vehicle", "--depth", "5", "--max-pages", "2")
+
+	runs := runOK(t, dir, "job", "runs", "vehicle")
+	if !strings.Contains(runs, "budget") {
+		t.Errorf("a run stopped by --max-pages did not say so:\n%s", runs)
+	}
+	// The distinction a page count hides: an exhausted frontier and a spent
+	// budget both leave the same number of pages behind.
+	if strings.Contains(runs, "running") {
+		t.Errorf("the run was left open after the crawl returned:\n%s", runs)
+	}
+
+	log := runOK(t, dir, "job", "log", "vehicle")
+	for _, want := range []string{"run", "how", "budget", "pages"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("the log is missing %q:\n%s", want, log)
+		}
+	}
+	// The log defaults to the last run, and the pages it fetched are in it.
+	if !strings.Contains(log, srv.URL) {
+		t.Errorf("the log names no page the run fetched:\n%s", log)
+	}
+
+	// A second run is a second row, so the history accumulates.
+	runOK(t, dir, "start", "vehicle", "--depth", "5", "--max-pages", "2")
+	if again := runOK(t, dir, "job", "runs", "vehicle"); strings.Count(again, "budget") < 2 {
+		t.Errorf("the second run did not join the history:\n%s", again)
+	}
+
+	// And the listing stops claiming a crawled job never ran.
+	if ls := runOK(t, dir, "job", "ls"); strings.Contains(ls, "never") {
+		t.Errorf("job ls still says never for a job that has run:\n%s", ls)
+	}
+}
+
+// Following a run that has already ended must say so rather than waiting for
+// lines that will never come.
+func TestLogWillNotFollowAFinishedRun(t *testing.T) {
+	srv := carSite(t)
+	dir := crawlDir(t)
+	runOK(t, dir, "item", "add", "vehicle", "-u", srv.URL+"/")
+	runOK(t, dir, "start", "vehicle", "--depth", "5", "--max-pages", "2")
+
+	out := runOK(t, dir, "job", "log", "vehicle", "--follow")
+	if !strings.Contains(out, "already ended") {
+		t.Errorf("following a finished run did not say it was over:\n%s", out)
+	}
+}

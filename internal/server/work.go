@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -102,9 +103,18 @@ func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*
 	}
 
 	return s.jobs.Start("crawl", item.Name, func(jobCtx context.Context) (any, error) {
+		// A crawl started over HTTP is a run like any other. Without this the
+		// history would show only what was started from a terminal, which is
+		// the half nobody needs a history of.
+		run, err := s.store.StartRun(jobCtx, job.ID)
+		if err != nil {
+			return nil, err
+		}
 		crawler := crawl.New(s.cfg, s.store, s.pages)
-		return crawler.Run(jobCtx, crawl.Options{
+		result, err := crawler.Run(jobCtx, crawl.Options{
 			Item:    item,
+			Job:     job,
+			RunID:   run.ID,
 			Targets: job.Targets,
 			Types:   types,
 			Depth:   depth,
@@ -113,6 +123,10 @@ func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*
 			Browser: req.Browser,
 			Scorer:  scorer,
 		})
+		if finErr := s.store.FinishRun(jobCtx, run.ID, result.Finished(err)); finErr != nil {
+			slog.Warn("could not record the run", "job", job.Name, "err", finErr)
+		}
+		return result, err
 	})
 }
 

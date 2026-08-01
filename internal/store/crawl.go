@@ -56,6 +56,9 @@ type Fetched struct {
 	// ItemID owns the url row: a fetched page joins the item's corpus, and is
 	// there for the next job over the same site rather than fetched again.
 	ItemID uint
+	// RunID is the occasion this fetch happened on, which is what gives a run
+	// a log. Zero for a fetch outside any run.
+	RunID uint
 	// JobID owns the frontier entry this fetch settles. A page can be reached
 	// by two jobs of one item, and each has its own entry to release.
 	JobID       uint
@@ -86,6 +89,7 @@ func (s *Store) RecordFetch(ctx context.Context, f Fetched) error {
 	u := URL{
 		ItemID:      f.ItemID,
 		JobID:       f.JobID,
+		RunID:       f.RunID,
 		Hash:        URLHash(f.ItemID, f.URL),
 		URL:         f.URL,
 		ParentID:    parentID,
@@ -119,6 +123,9 @@ func (s *Store) RecordFetch(ctx context.Context, f Fetched) error {
 	// earlier fetch had already made.
 	if f.JobID != 0 {
 		columns = append(columns, "job_id")
+	}
+	if f.RunID != 0 {
+		columns = append(columns, "run_id")
 	}
 
 	err := s.db.WithContext(ctx).

@@ -40,6 +40,9 @@ import (
 // Options configures one crawl.
 type Options struct {
 	Item *store.Item
+	// RunID is the occasion, recorded on every page this crawl fetches so the
+	// run has a log. Zero for a crawl nobody is keeping a history of.
+	RunID uint
 	// Job is the crawl this run belongs to, and owns the frontier it drains.
 	// Nil resolves the item's implicit job, which is what a bare "scour crawl
 	// <item>" wants: one job, named after the item, made on first use.
@@ -106,6 +109,38 @@ type Result struct {
 	// frontier means the site is exhausted, a spent budget means there is more
 	// to fetch next run.
 	BudgetSpent string
+}
+
+// Finished is this result as a run's history row.
+//
+// It lives here because only the crawl knows why it stopped, and the
+// distinction is the one a page count hides: an exhausted frontier means the
+// site is done for the scope it was given, a spent budget means there is more
+// waiting for next time, and both leave the same number of pages behind.
+//
+// A nil result is a crawl that did not get far enough to have one, which is
+// still a run that happened and still worth a row saying so.
+func (r *Result) Finished(err error) store.Finished {
+	f := store.Finished{Err: err, State: store.RunDone}
+	if err != nil {
+		f.State = store.RunFailed
+	}
+	if r == nil {
+		return f
+	}
+	f.Fetched, f.Failed, f.Skipped = r.Fetched, r.Failed, r.Skipped
+	f.Bytes, f.Budget, f.Statuses = r.Bytes, r.BudgetSpent, r.Statuses
+	if err == nil {
+		switch r.BudgetSpent {
+		case "":
+			f.State = store.RunDone
+		case "pause":
+			f.State = store.RunStopped
+		default:
+			f.State = store.RunBudget
+		}
+	}
+	return f
 }
 
 // Crawler holds everything a crawl needs that outlives a single run.
@@ -565,6 +600,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 	if opts.Job != nil {
 		jobID = opts.Job.ID
 	}
+	runID := opts.RunID
 
 	// Attach the timing and lineage this request will be recorded with, and
 	// drop links whose extension already disagrees with the allowed types.
@@ -576,7 +612,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		}
 		if !opts.Types.AllowsPath(r.URL.Path) {
 			slog.Debug("skipped by extension", "url", r.URL.String())
-			c.skip(ctx, st, itemID, jobID, r.URL.String(), r.Depth)
+			c.skip(ctx, st, itemID, jobID, runID, r.URL.String(), r.Depth)
 			r.Abort()
 			return
 		}
@@ -595,14 +631,14 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		ct := r.Headers.Get("Content-Type")
 		if !opts.Types.AllowsMIME(ct) {
 			slog.Debug("skipped by content type", "url", r.Request.URL.String(), "type", ct)
-			c.skip(ctx, st, itemID, jobID, r.Request.URL.String(), r.Request.Depth)
+			c.skip(ctx, st, itemID, jobID, runID, r.Request.URL.String(), r.Request.Depth)
 			r.Request.Abort()
 			return
 		}
 		if max := int64(c.cfg.Crawl.MaxSize); max > 0 && r.Headers.Get("Content-Length") != "" {
 			if size := parseSize(r.Headers.Get("Content-Length")); size > max {
 				slog.Debug("skipped by size", "url", r.Request.URL.String(), "size", size)
-				c.skip(ctx, st, itemID, jobID, r.Request.URL.String(), r.Request.Depth)
+				c.skip(ctx, st, itemID, jobID, runID, r.Request.URL.String(), r.Request.Depth)
 				r.Request.Abort()
 			}
 		}
@@ -632,6 +668,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 			failed := store.Fetched{
 				ItemID:     itemID,
 				JobID:      jobID,
+				RunID:      runID,
 				URL:        rawURL,
 				ParentURL:  r.Ctx.Get(ctxParent),
 				Depth:      r.Request.Depth,
@@ -667,6 +704,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		f := store.Fetched{
 			ItemID:      itemID,
 			JobID:       jobID,
+			RunID:       runID,
 			URL:         rawURL,
 			ParentURL:   r.Ctx.Get(ctxParent),
 			Depth:       r.Request.Depth,
@@ -753,6 +791,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		f := store.Fetched{
 			ItemID:     itemID,
 			JobID:      jobID,
+			RunID:      runID,
 			URL:        rawURL,
 			ParentURL:  r.Ctx.Get(ctxParent),
 			Depth:      r.Request.Depth,
@@ -770,7 +809,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 }
 
 // skip records a URL that was deliberately not downloaded.
-func (c *Crawler) skip(ctx context.Context, st *state, itemID, jobID uint, rawURL string, depth int) {
+func (c *Crawler) skip(ctx context.Context, st *state, itemID, jobID, runID uint, rawURL string, depth int) {
 	st.mu.Lock()
 	st.skipped++
 	st.mu.Unlock()
@@ -778,6 +817,7 @@ func (c *Crawler) skip(ctx context.Context, st *state, itemID, jobID uint, rawUR
 	f := store.Fetched{
 		ItemID: itemID,
 		JobID:  jobID,
+		RunID:  runID,
 		URL:    rawURL,
 		Depth:  depth,
 		Status: store.URLSkipped,
