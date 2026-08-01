@@ -63,6 +63,7 @@ they are built from, and in nothing else, so they share one implementation in
 | transport | `http.RoundTripper` | `http`, `webdriver` | `[[host]] transport` |
 | score | `Scorer` | `bayes`, `embed` | `[model] scorer` |
 | matcher | `wom.Matcher` | `heuristic`, `llm` | `[model] matcher` |
+
 | classify | `Classifier` | `llm` | `[model] classifier` |
 | nodeclass | `Classifier` | `recency`*, `topic`* | not yet wired |
 | cache | `Store` | `local`, `s3`†, `gcs`† | `[cache] driver` |
@@ -133,6 +134,32 @@ extraction runs over every fetched page whatever the crawl graph concluded. That
 is why 118 of 867 titles on the second corpus are `"Page A1"`, `"Ads"`,
 `"Community"`. Moving that decoder behind `nodeclass` and reading its answer is
 the next piece of work, and it is reading a decision already made.
+
+## Scoring, which is per graph
+
+scour has more than one graph, and both get ranked.
+
+| Node | Question | Interface | Registry |
+| --- | --- | --- | --- |
+| a URL in the crawl graph | how likely is this to lead to a match? | `Score(Features) float64` | `internal/score` |
+| a node of a parsed page | how strongly is this that field? | `Score(ctx, Prop, *Node) float64` | `internal/matcher` |
+
+They are the same kind of extension over different graphs, and they looked
+unrelated only because one of them was called a matcher. Each registry now
+declares what it ranks, as `score.Ranks` and `matcher.Ranks`, and `score.Kinds`
+is the one place that says what can be scored and where the registry for it
+lives.
+
+They stay two registries rather than one. A scorer of one kind takes an input
+the other cannot produce, so folding them together would mean a cast at every
+call, and a feed's items or a PDF's regions would want a third input again. The
+kind is what makes room for that without pretending the inputs are the same.
+
+The URL scorer has a second layer worth knowing about. `internal/score/hmm`
+wraps a base scorer with the crawl chain: the base answers "does this URL look
+like a record page", which is the wrong question for a hub, and the chain
+answers "does this URL lead to one", which is the right one. Neither is
+sufficient alone, so the two are combined as independent evidence in odds form.
 
 ## Scheduling, which is two questions
 

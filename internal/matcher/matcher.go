@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/rangertaha/scour/internal/registry"
+	"github.com/rangertaha/scour/internal/score"
 
 	"github.com/rangertaha/scour/internal/ai"
 	"github.com/rangertaha/scour/internal/wom"
@@ -37,6 +38,14 @@ type Config struct {
 	// the measured defaults.
 	Floor, Ceiling float64
 }
+
+// Ranks is the sort of node this registry's implementations score.
+//
+// A matcher is the document node scorer: it ranks an element, attribute or text
+// against a property, where internal/score ranks a URL against an item. The two
+// are the same kind of extension over different graphs, and naming that here is
+// what stops them looking unrelated because one was called a matcher.
+const Ranks = score.KindDocument
 
 // reg holds the implementations. See internal/registry for the shape every
 // extension point in scour shares, and for how to add one.

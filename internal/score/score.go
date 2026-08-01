@@ -73,6 +73,9 @@ type Trained interface {
 // is compared against.
 const Default = "bayes"
 
+// Ranks is the sort of node this registry's implementations score.
+const Ranks = KindURL
+
 // reg holds the implementations. See internal/registry for the shape every
 // extension point in scour shares, and for how to add one.
 var reg = registry.New[Config, Scorer]("scorer").Default(Default)
