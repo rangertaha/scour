@@ -174,7 +174,7 @@ func TestStartResumesAPausedItem(t *testing.T) {
 	dir := crawlDir(t)
 	runOK(t, dir, "item", "add", "vehicle", "-u", srv.URL+"/")
 
-	runOK(t, dir, "pause", "vehicle")
+	runOK(t, dir, "job", "pause", "vehicle")
 	if shown := runOK(t, dir, "item", "ls", "vehicle"); !strings.Contains(shown, "paused") {
 		t.Fatalf("the item did not record the pause:\n%s", shown)
 	}
@@ -203,18 +203,18 @@ func TestStopNeedsForceAndThenDiscards(t *testing.T) {
 
 	// Naming a destructive default "stop" is how someone loses a frontier they
 	// meant to keep, so it has to be asked for.
-	_, err := run(t, dir, "stop", "vehicle")
+	_, err := run(t, dir, "job", "stop", "vehicle")
 	if err == nil {
 		t.Fatal("stop must not discard a frontier without --force")
 	}
-	if !strings.Contains(err.Error(), "scour pause vehicle") {
+	if !strings.Contains(err.Error(), "scour job pause vehicle") {
 		t.Errorf("the refusal should name the non-destructive verb: %v", err)
 	}
 	if after := runOK(t, dir, "item", "ls", "vehicle"); after != before {
 		t.Errorf("a refused stop changed something:\n%s\n%s", before, after)
 	}
 
-	out := runOK(t, dir, "stop", "vehicle", "--force")
+	out := runOK(t, dir, "job", "stop", "vehicle", "--force")
 	if !strings.Contains(out, "discarded") {
 		t.Errorf("stop did not say what it threw away:\n%s", out)
 	}

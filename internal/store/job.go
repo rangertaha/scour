@@ -182,7 +182,7 @@ func (s *Store) DeleteJob(ctx context.Context, name string) error {
 // to learn the word before crawling anything. This is what resolves that: given
 // an item, the job of the same name, created if it is not there.
 //
-// It is also what keeps `scour start vehicle` and `scour run vehicle` pointing
+// It is also what keeps `scour run vehicle` and `scour run vehicle` pointing
 // at one frontier across the change, since the migration named every existing
 // item's job after the item.
 func (s *Store) JobForItem(ctx context.Context, item *Item) (*Job, error) {

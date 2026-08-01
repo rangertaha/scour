@@ -33,7 +33,7 @@ func TestImportingTargetsAndProperties(t *testing.T) {
 			"make,string,Ford,the company that built it,manufacturer;brand\n"+
 			`price,number,"$42,000",what it sells for,cost;asking price`+"\n")
 
-	out := runOK(t, dir, "import", "vehicle", "--urls", urls, "--props", props)
+	out := runOK(t, dir, "job", "import", "vehicle", "--urls", urls, "--props", props)
 	if !strings.Contains(out, "2 urls") || !strings.Contains(out, "2 properties") {
 		t.Fatalf("output = %s", out)
 	}
@@ -54,7 +54,7 @@ func TestABadLineIsSkippedNotFatal(t *testing.T) {
 	dir := t.TempDir()
 	urls := writeFile(t, dir, "urls.txt", "http://www.example.com/\nnot a url\nhttp://example.org/\n")
 
-	out := runOK(t, dir, "import", "vehicle", "--urls", urls)
+	out := runOK(t, dir, "job", "import", "vehicle", "--urls", urls)
 	if !strings.Contains(out, "2 urls") || !strings.Contains(out, "1 skipped") {
 		t.Errorf("output = %s", out)
 	}
@@ -66,8 +66,8 @@ func TestImportingTwiceAddsNothing(t *testing.T) {
 	dir := t.TempDir()
 	urls := writeFile(t, dir, "urls.txt", "http://www.example.com/\nhttp://example.org/\n")
 
-	runOK(t, dir, "import", "vehicle", "--urls", urls)
-	runOK(t, dir, "import", "vehicle", "--urls", urls)
+	runOK(t, dir, "job", "import", "vehicle", "--urls", urls)
+	runOK(t, dir, "job", "import", "vehicle", "--urls", urls)
 
 	shown := runOK(t, dir, "item", "ls", "vehicle")
 	if !strings.Contains(shown, "targets     2") {
@@ -92,7 +92,7 @@ func TestImportingMoreThanOneBatch(t *testing.T) {
 	b.WriteString("http://example.com/1/#a\nhttp://example.com/1/#b\n")
 
 	urls := writeFile(t, dir, "many.txt", b.String())
-	runOK(t, dir, "import", "vehicle", "--urls", urls)
+	runOK(t, dir, "job", "import", "vehicle", "--urls", urls)
 
 	shown := runOK(t, dir, "item", "ls", "vehicle")
 	if !strings.Contains(shown, fmt.Sprintf("targets     %d", lines)) {
@@ -106,27 +106,27 @@ func TestBothCSVForms(t *testing.T) {
 	dir := t.TempDir()
 
 	plain := writeFile(t, dir, "plain.csv", "mileage,42000\nvin,1HGBH41JXMN109186\n")
-	if out := runOK(t, dir, "import", "plain", "--props", plain); !strings.Contains(out, "2 properties") {
+	if out := runOK(t, dir, "job", "import", "plain", "--props", plain); !strings.Contains(out, "2 properties") {
 		t.Errorf("headerless form = %s", out)
 	}
 
 	// Columns in an unusual order must still land in the right fields.
 	shuffled := writeFile(t, dir, "shuffled.csv", "example,name,type\nFord,make,string\n")
-	if out := runOK(t, dir, "import", "shuffled", "--props", shuffled); !strings.Contains(out, "1 properties") {
+	if out := runOK(t, dir, "job", "import", "shuffled", "--props", shuffled); !strings.Contains(out, "1 properties") {
 		t.Errorf("header form = %s", out)
 	}
 }
 
 func TestImportNeedsSomethingToDo(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := run(t, dir, "import", "vehicle"); err == nil {
+	if _, err := run(t, dir, "job", "import", "vehicle"); err == nil {
 		t.Error("an import with no files should say so rather than silently do nothing")
 	}
 }
 
 func TestImportReportsAMissingFile(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := run(t, dir, "import", "vehicle", "--urls", filepath.Join(dir, "absent.txt")); err == nil {
+	if _, err := run(t, dir, "job", "import", "vehicle", "--urls", filepath.Join(dir, "absent.txt")); err == nil {
 		t.Error("a missing file should be an error")
 	}
 }
@@ -144,7 +144,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	urls := filepath.Join(dir, "u.txt")
 	domains := filepath.Join(dir, "d.txt")
 	props := filepath.Join(dir, "p.csv")
-	runOK(t, dir, "export", "news", "--urls", urls, "--domains", domains, "--props", props)
+	runOK(t, dir, "job", "export", "news", "--urls", urls, "--domains", domains, "--props", props)
 
 	// The subdomain flag belongs to the row, so it has to survive the file.
 	written, err := os.ReadFile(domains)
@@ -156,7 +156,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 
 	runOK(t, dir, "item", "add", "copy")
-	runOK(t, dir, "import", "copy", "--urls", urls, "--domains", domains, "--props", props)
+	runOK(t, dir, "job", "import", "copy", "--urls", urls, "--domains", domains, "--props", props)
 
 	before := runOK(t, dir, "--json", "item", "ls", "news")
 	after := runOK(t, dir, "--json", "item", "ls", "copy")

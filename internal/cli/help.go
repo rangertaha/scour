@@ -10,12 +10,14 @@ import (
 
 // helpOrder is the order the command groups are printed in.
 //
-// It is the order someone meets them: give scour a list of urls, say what to
-// pull out of them, teach it where that lives, run the search, then put the
-// whole thing on more than one machine. urfave sorts categories alphabetically,
-// which would open the help on SEARCH and close it on URLS, so the order is
-// stated rather than spelled into the names.
-var helpOrder = []string{"URLS", "ITEMS", "TRAIN", "SEARCH", "SERVER"}
+// Three blocks: the nouns scour manages, the shortcuts for what is typed all
+// day, and the two commands that act on the install rather than on any one
+// noun. Within a block the order is registration order, which is the order
+// somebody meets them, so item comes before node and run before top.
+//
+// Stated rather than spelled into the names because urfave sorts categories
+// alphabetically, which would open the help on INSTALL.
+var helpOrder = []string{"MANAGE", "SHORTCUT", "INSTALL"}
 
 // orderedCategories returns the command groups in helpOrder, with anything not
 // named there after them and the ungrouped commands last.

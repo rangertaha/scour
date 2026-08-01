@@ -22,7 +22,7 @@ import (
 )
 
 // ErrNoPages is returned when an item has nothing cached to work from.
-var ErrNoPages = errors.New("no cached pages: run scour start first")
+var ErrNoPages = errors.New("no cached pages: run scour run first")
 
 // Result is a built graph and what went into it.
 type Result struct {

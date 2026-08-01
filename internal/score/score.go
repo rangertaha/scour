@@ -63,7 +63,7 @@ type Config struct {
 // from the configuration.
 
 // Trained is implemented by scorers that can say whether they were fitted to
-// a crawl or are still working from their seed words. `scour start` reports
+// a crawl or are still working from their seed words. `scour run` reports
 // the difference, because a cold scorer's rankings mean much less.
 type Trained interface {
 	Trained() bool

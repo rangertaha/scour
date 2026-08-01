@@ -216,7 +216,7 @@ func TestPropertyTaughtPerDomain(t *testing.T) {
 	runOK(t, dir, "item", "add", "news", "--template", "article")
 
 	out := runOK(t, dir, "item", "add", "news", "-d", "example.com",
-		"-p", "author", "-e", "Hannah McLeod", "-a", "byline")
+		"-p", "author", "-e", "Hannah McLeod", "--alias", "byline")
 	if !strings.Contains(out, "property author on example.com") {
 		t.Errorf("output = %s", out)
 	}
@@ -258,7 +258,7 @@ func TestAddingNothingSaysWhatToAdd(t *testing.T) {
 	dir := t.TempDir()
 	out := runOK(t, dir, "item", "add", "thing")
 
-	for _, want := range []string{"nothing added yet", "scour start thing", "--help"} {
+	for _, want := range []string{"nothing added yet", "scour run thing", "--help"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output does not mention %q:\n%s", want, out)
 		}
@@ -285,8 +285,8 @@ func TestPauseKeepsTheFrontierAndStartResumes(t *testing.T) {
 	dir := t.TempDir()
 	runOK(t, dir, "item", "add", "news", "-d", "example.com")
 
-	out := runOK(t, dir, "pause", "news")
-	if !strings.Contains(out, "frontier kept") || !strings.Contains(out, "scour start news") {
+	out := runOK(t, dir, "job", "pause", "news")
+	if !strings.Contains(out, "frontier kept") || !strings.Contains(out, "scour run news") {
 		t.Errorf("pause did not say what it kept or how to carry on:\n%s", out)
 	}
 
@@ -350,9 +350,9 @@ func TestUnknownItemSuggestsAcrossCommands(t *testing.T) {
 
 	for _, args := range [][]string{
 		{"item", "ls", "vehicel"},
-		{"rules", "vehicel"},
-		{"stream", "vehicel"},
-		{"pause", "vehicel"},
+		{"model", "rules", "vehicel"},
+		{"record", "ls", "vehicel"},
+		{"job", "pause", "vehicel"},
 		{"item", "tag", "vehicel", "-p", "make"},
 	} {
 		_, err := run(t, dir, args...)
@@ -387,8 +387,12 @@ func TestStatusMatchesItemLs(t *testing.T) {
 // help rather than one line of complaint.
 func TestBareCommandShowsItsHelp(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"import", "export", "rules", "stream", "train"} {
-		out, err := run(t, dir, name)
+	for _, args := range [][]string{
+		{"job", "import"}, {"job", "export"},
+		{"model", "rules"}, {"record", "ls"}, {"model", "train"},
+	} {
+		name := args[len(args)-1]
+		out, err := run(t, dir, args...)
 		if err == nil {
 			t.Errorf("bare %q should not succeed", name)
 			continue
@@ -403,7 +407,7 @@ func TestBareCommandShowsItsHelp(t *testing.T) {
 
 	// A wrong count is a different mistake: that one knows what the command is
 	// for and only needs the number, so the help would be noise.
-	out, err := run(t, dir, "rules", "a", "b")
+	out, err := run(t, dir, "model", "rules", "a", "b")
 	if err == nil {
 		t.Fatal("two names should fail")
 	}
@@ -420,7 +424,7 @@ func TestClearingAPropertyDetailKeepsTheProperty(t *testing.T) {
 	runOK(t, dir, "item", "add", "news", "-p", "title", "--prop-type", "string",
 		"-e", "A headline", "--regex", `^.{5,}$`, "--label", `^og:title$`)
 
-	out := runOK(t, dir, "item", "rm", "news", "-p", "title", "--regex")
+	out := runOK(t, dir, "item", "rm", "news", "-p", "title", "--clear", "regex")
 	if !strings.Contains(out, "cleared regex on title") {
 		t.Fatalf("clearing did not say what it did:\n%s", out)
 	}
@@ -431,13 +435,13 @@ func TestClearingAPropertyDetailKeepsTheProperty(t *testing.T) {
 	}
 
 	// Clearing one detail leaves the others, which is the whole point.
-	rules := runOK(t, dir, "item", "rm", "news", "-p", "title", "--label", "--example")
+	rules := runOK(t, dir, "item", "rm", "news", "-p", "title", "--clear", "label", "--clear", "example")
 	if !strings.Contains(rules, "cleared label, example on title") {
 		t.Errorf("unexpected output:\n%s", rules)
 	}
 
 	// Naming a detail without a property is a question, not a whole-item delete.
-	out, err := run(t, dir, "item", "rm", "news", "--regex")
+	out, err := run(t, dir, "item", "rm", "news", "--clear", "regex")
 	if err == nil {
 		t.Fatal("clearing with no --prop must fail rather than delete the item")
 	}

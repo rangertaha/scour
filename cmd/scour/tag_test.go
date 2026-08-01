@@ -9,20 +9,20 @@ import (
 
 func TestTagShowsAppendsAndDeletes(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "item", "add", "news", "-p", "author", "-a", "byline")
+	runOK(t, dir, "item", "add", "news", "-p", "author", "--alias", "byline")
 
 	out := runOK(t, dir, "item", "tag", "news", "-p", "author")
 	if !strings.Contains(out, `"byline"`) {
 		t.Fatalf("the taught word should be listed:\n%s", out)
 	}
 
-	runOK(t, dir, "item", "tag", "news", "-p", "author", "--append", "written by")
+	runOK(t, dir, "item", "tag", "news", "-p", "author", "--add", "written by")
 	out = runOK(t, dir, "item", "tag", "news", "-p", "author")
 	if !strings.Contains(out, `"written by"`) || !strings.Contains(out, `"byline"`) {
 		t.Fatalf("append should add without replacing:\n%s", out)
 	}
 
-	runOK(t, dir, "item", "tag", "news", "-p", "author", "--delete", "byline")
+	runOK(t, dir, "item", "tag", "news", "-p", "author", "--rm", "byline")
 	out = runOK(t, dir, "item", "tag", "news", "-p", "author")
 	if strings.Contains(out, `"byline"`) {
 		t.Fatalf("delete should have removed the word:\n%s", out)
@@ -37,7 +37,7 @@ func TestTagShowsAppendsAndDeletes(t *testing.T) {
 func TestTagKeepsPhrasesWhole(t *testing.T) {
 	dir := t.TempDir()
 	runOK(t, dir, "item", "add", "vehicle", "-p", "kind")
-	runOK(t, dir, "item", "tag", "vehicle", "-p", "kind", "-a", "pickup truck", "-a", "model year")
+	runOK(t, dir, "item", "tag", "vehicle", "-p", "kind", "--add", "pickup truck", "--add", "model year")
 
 	out := runOK(t, dir, "item", "tag", "vehicle", "-p", "kind")
 	if !strings.Contains(out, `"pickup truck"`) || !strings.Contains(out, `"model year"`) {
@@ -50,9 +50,9 @@ func TestTagKeepsPhrasesWhole(t *testing.T) {
 
 func TestTagUpdateReplacesTheSet(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "item", "add", "news", "-p", "author", "-a", "byline", "-a", "reporter")
+	runOK(t, dir, "item", "add", "news", "-p", "author", "--alias", "byline", "--alias", "reporter")
 
-	runOK(t, dir, "item", "tag", "news", "-p", "author", "-u", "author")
+	runOK(t, dir, "item", "tag", "news", "-p", "author", "--set", "author")
 	out := runOK(t, dir, "item", "tag", "news", "-p", "author")
 	if strings.Contains(out, `"byline"`) || strings.Contains(out, `"reporter"`) {
 		t.Fatalf("update should have replaced the whole set:\n%s", out)
@@ -66,12 +66,12 @@ func TestTagUpdateReplacesTheSet(t *testing.T) {
 // they name two different outcomes and the command must not pick one.
 func TestTagUpdateRefusesToCombine(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "item", "add", "news", "-p", "author", "-a", "byline")
+	runOK(t, dir, "item", "add", "news", "-p", "author", "--alias", "byline")
 
-	if _, err := run(t, dir, "item", "tag", "news", "-p", "author", "-u", "x", "-a", "y"); err == nil {
+	if _, err := run(t, dir, "item", "tag", "news", "-p", "author", "--set", "x", "--add", "y"); err == nil {
 		t.Error("--update with --append must fail")
 	}
-	if _, err := run(t, dir, "item", "tag", "news", "-p", "author", "-u", "x", "-d", "byline"); err == nil {
+	if _, err := run(t, dir, "item", "tag", "news", "-p", "author", "--set", "x", "--rm", "byline"); err == nil {
 		t.Error("--update with --delete must fail")
 	}
 
@@ -85,10 +85,10 @@ func TestTagUpdateRefusesToCombine(t *testing.T) {
 // only holds if editing a domain leaves the unscoped set alone.
 func TestTagOnDomainLeavesTheDefaultAlone(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "item", "add", "news", "-p", "author", "-a", "byline")
-	runOK(t, dir, "item", "add", "news", "-d", "example.com", "-p", "author", "-a", "staff reporter")
+	runOK(t, dir, "item", "add", "news", "-p", "author", "--alias", "byline")
+	runOK(t, dir, "item", "add", "news", "-d", "example.com", "-p", "author", "--alias", "staff reporter")
 
-	runOK(t, dir, "item", "tag", "news", "-p", "author", "--on", "example.com", "-u", "our correspondent")
+	runOK(t, dir, "item", "tag", "news", "-p", "author", "--on", "example.com", "--set", "our correspondent")
 
 	scoped := runOK(t, dir, "item", "tag", "news", "-p", "author", "--on", "example.com")
 	if !strings.Contains(scoped, `"our correspondent"`) {
@@ -120,9 +120,9 @@ func TestTagNeedsProp(t *testing.T) {
 // someone believing a crawl has stopped matching it.
 func TestTagDeleteSaysWhenNothingMatched(t *testing.T) {
 	dir := t.TempDir()
-	runOK(t, dir, "item", "add", "news", "-p", "author", "-a", "byline")
+	runOK(t, dir, "item", "add", "news", "-p", "author", "--alias", "byline")
 
-	out := runOK(t, dir, "item", "tag", "news", "-p", "author", "-d", "nosuchword")
+	out := runOK(t, dir, "item", "tag", "news", "-p", "author", "--rm", "nosuchword")
 	if !strings.Contains(out, "was not tagged") {
 		t.Errorf("a removal that removed nothing must say so:\n%s", out)
 	}

@@ -59,7 +59,7 @@ type Crawl struct {
 	Depth        int      `toml:"depth"`
 	// Scheduler is the order the frontier is drained in: best, breadth, depth,
 	// random or warmup. Empty is best, which is what makes a focused crawl
-	// focused. See `scour start --help` for what each means.
+	// focused. See `scour run --help` for what each means.
 	Scheduler string `toml:"scheduler"`
 }
 

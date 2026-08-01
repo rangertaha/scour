@@ -78,7 +78,7 @@ func trained(t *testing.T) (string, *httptest.Server) {
 func TestTrainThenRulesThenSearch(t *testing.T) {
 	dir, _ := trained(t)
 
-	out := runOK(t, dir, "train", "vehicle")
+	out := runOK(t, dir, "model", "train", "vehicle")
 	if !strings.Contains(out, "model written to") {
 		t.Fatalf("train did not report writing a model:\n%s", out)
 	}
@@ -86,7 +86,7 @@ func TestTrainThenRulesThenSearch(t *testing.T) {
 		t.Fatalf("training extracted nothing:\n%s", out)
 	}
 
-	rules := runOK(t, dir, "rules", "vehicle")
+	rules := runOK(t, dir, "model", "rules", "vehicle")
 	for _, want := range []string{"ID", "PID", "HIT", "PROP", "XPATH", "SELECTOR"} {
 		if !strings.Contains(rules, want) {
 			t.Errorf("rules table missing %s:\n%s", want, rules)
@@ -96,7 +96,7 @@ func TestTrainThenRulesThenSearch(t *testing.T) {
 		t.Errorf("no rule was induced for make:\n%s", rules)
 	}
 
-	search := runOK(t, dir, "stream", "vehicle")
+	search := runOK(t, dir, "record", "ls", "vehicle")
 	for _, want := range []string{"ID", "CONF", "FORMAT", "MAKE", "MODEL", "YEAR"} {
 		if !strings.Contains(search, want) {
 			t.Errorf("search table missing %s:\n%s", want, search)
@@ -112,16 +112,16 @@ func TestTrainThenRulesThenSearch(t *testing.T) {
 
 func TestSearchConfidenceFilter(t *testing.T) {
 	dir, _ := trained(t)
-	runOK(t, dir, "train", "vehicle")
+	runOK(t, dir, "model", "train", "vehicle")
 
 	// Nothing scores 1.0, so this filters everything out, and the message has
 	// to say so rather than suggesting a model has not been trained.
-	out := runOK(t, dir, "stream", "vehicle", "--confidence", "1")
+	out := runOK(t, dir, "record", "ls", "vehicle", "--confidence", "1")
 	if !strings.Contains(out, "no records matched") {
 		t.Errorf("expected an empty filtered result:\n%s", out)
 	}
 
-	if _, err := run(t, dir, "stream", "vehicle", "--confidence", "50"); err == nil {
+	if _, err := run(t, dir, "record", "ls", "vehicle", "--confidence", "50"); err == nil {
 		t.Error("--confidence is a probability, so 50 must be rejected")
 	}
 }
@@ -130,7 +130,7 @@ func TestTrainBeforeCrawl(t *testing.T) {
 	dir := crawlDir(t)
 	runOK(t, dir, "item", "add", "vehicle", "-p", "make", "-e", "Ford")
 
-	if _, err := run(t, dir, "train", "vehicle"); err == nil {
+	if _, err := run(t, dir, "model", "train", "vehicle"); err == nil {
 		t.Error("training with nothing cached must fail")
 	}
 }
@@ -139,7 +139,7 @@ func TestTrainWithoutProperties(t *testing.T) {
 	dir, srv := trained(t)
 	runOK(t, dir, "item", "add", "other", "-u", srv.URL+"/")
 
-	if _, err := run(t, dir, "train", "other"); err == nil {
+	if _, err := run(t, dir, "model", "train", "other"); err == nil {
 		t.Error("training an item with no properties must fail")
 	}
 }
@@ -148,8 +148,8 @@ func TestRulesBeforeTraining(t *testing.T) {
 	dir := crawlDir(t)
 	runOK(t, dir, "item", "add", "vehicle")
 
-	out := runOK(t, dir, "rules", "vehicle")
-	if !strings.Contains(out, "scour train") {
+	out := runOK(t, dir, "model", "rules", "vehicle")
+	if !strings.Contains(out, "scour model train") {
 		t.Errorf("rules should say how to produce some:\n%s", out)
 	}
 }
@@ -158,15 +158,15 @@ func TestSearchBeforeTraining(t *testing.T) {
 	dir := crawlDir(t)
 	runOK(t, dir, "item", "add", "vehicle")
 
-	out := runOK(t, dir, "stream", "vehicle")
-	if !strings.Contains(out, "scour train") {
+	out := runOK(t, dir, "record", "ls", "vehicle")
+	if !strings.Contains(out, "scour model train") {
 		t.Errorf("search should say how to produce records:\n%s", out)
 	}
 }
 
 func TestStatusAfterTraining(t *testing.T) {
 	dir, _ := trained(t)
-	runOK(t, dir, "train", "vehicle")
+	runOK(t, dir, "model", "train", "vehicle")
 
 	out := runOK(t, dir, "item", "ls", "vehicle")
 	if strings.Contains(out, "not trained yet") {
@@ -220,7 +220,7 @@ func TestTrainingTheScorerChangesWhatIsCrawled(t *testing.T) {
 		t.Errorf("the first crawl should say it is running on a seeded model:\n%s", cold)
 	}
 
-	out := runOK(t, dir, "train", "vehicle")
+	out := runOK(t, dir, "model", "train", "vehicle")
 	if !strings.Contains(out, "examples") {
 		t.Fatalf("training did not report what the scorer learned from:\n%s", out)
 	}

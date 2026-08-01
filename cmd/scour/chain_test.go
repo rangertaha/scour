@@ -90,7 +90,7 @@ func TestChainImprovesRecordsPerPage(t *testing.T) {
 	withChain := crawlDir(t)
 	setup(withChain)
 	runOK(t, withChain, "crawl", "vehicle", "--depth", "4")
-	trained := runOK(t, withChain, "train", "vehicle")
+	trained := runOK(t, withChain, "model", "train", "vehicle")
 	if !strings.Contains(trained, "roles") {
 		t.Fatalf("training did not decode any roles:\n%s", trained)
 	}
@@ -105,7 +105,7 @@ func TestChainImprovesRecordsPerPage(t *testing.T) {
 	noChain := crawlDir(t)
 	setup(noChain)
 	runOK(t, noChain, "crawl", "vehicle", "--depth", "4")
-	runOK(t, noChain, "train", "vehicle", "--no-chain")
+	runOK(t, noChain, "model", "train", "vehicle", "--no-chain")
 	plain := runOK(t, noChain, "crawl", "vehicle", "--reset", "--depth", "4", "--max-pages", "14")
 	if strings.Contains(plain, "with crawl chain") {
 		t.Fatalf("--no-chain still used the chain:\n%s", plain)

@@ -248,7 +248,7 @@ func (m *Model) Score(f score.Features) float64 {
 }
 
 // Top returns the tokens that most strongly indicate relevance, and the ones
-// that most strongly indicate the opposite. It is what `scour train` prints.
+// that most strongly indicate the opposite. It is what `scour model train` prints.
 func (m *Model) Top(n int) (positive, negative []TokenWeight) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

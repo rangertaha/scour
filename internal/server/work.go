@@ -17,7 +17,7 @@ import (
 	"github.com/rangertaha/scour/internal/train"
 )
 
-// crawlRequest mirrors the flags of `scour start`.
+// crawlRequest mirrors the flags of `scour run`.
 type crawlRequest struct {
 	Depth       int      `json:"depth,omitempty"`
 	MaxPages    int      `json:"max_pages,omitempty"`
@@ -116,7 +116,7 @@ func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*
 	})
 }
 
-// trainRequest mirrors the flags of `scour train`.
+// trainRequest mirrors the flags of `scour model train`.
 type trainRequest struct {
 	Limit   int      `json:"limit,omitempty"`
 	Types   []string `json:"types,omitempty"`

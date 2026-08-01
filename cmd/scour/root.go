@@ -9,11 +9,12 @@ import (
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/cli"
-	"github.com/rangertaha/scour/internal/cli/items"
-	"github.com/rangertaha/scour/internal/cli/learn"
-	"github.com/rangertaha/scour/internal/cli/search"
+	"github.com/rangertaha/scour/internal/cli/item"
+	"github.com/rangertaha/scour/internal/cli/job"
+	"github.com/rangertaha/scour/internal/cli/model"
+	"github.com/rangertaha/scour/internal/cli/node"
+	"github.com/rangertaha/scour/internal/cli/record"
 	"github.com/rangertaha/scour/internal/cli/serve"
-	"github.com/rangertaha/scour/internal/cli/urls"
 	"github.com/rangertaha/scour/internal/config"
 	"github.com/rangertaha/scour/internal/fuzzy"
 	"github.com/rangertaha/scour/internal/version"
@@ -97,21 +98,23 @@ func newRootCmd() *ucli.Command {
 			return ucli.ShowAppHelp(cmd)
 		},
 		Commands: []*ucli.Command{
-			urls.Import(a),
-			urls.Export(a),
-			items.Item(a),
-			items.Stream(a),
-			learn.Rules(a),
-			learn.Train(a),
-			learn.Mark(a),
-			search.Status(a),
-			search.Top(a),
-			search.Start(a),
-			search.Stop(a),
-			search.Pause(a),
-			serve.MCP(a),
+			// The five nouns, in the order you meet them.
+			item.Item(a),
+			job.Job(a),
+			record.Record(a),
+			model.Model(a),
+			node.Node(a),
+
+			// The shortcuts, for what is typed all day. Each is an alias for
+			// one canonical command, so there is one place the behaviour lives.
+			job.Run(a),
+			job.Status(a),
+			node.TopShortcut(a),
+
+			// These act on the install rather than on any one noun, so they
+			// have no noun to sit under.
 			serve.Server(a),
-			serve.Join(a),
+			serve.MCP(a),
 			newVersionCmd(a),
 		},
 	}

@@ -84,7 +84,7 @@ func renderStatus(c context.Context, a *App, name string, st *store.Status) erro
 		line("model", fmt.Sprintf("%s, trained %s, accuracy %s",
 			st.Model.Algorithm, st.Model.TrainedAt.Format("2006-01-02"), accuracy))
 	} else {
-		line("model", "not trained yet: scour train "+name)
+		line("model", "not trained yet: scour model train "+name)
 	}
 	return nil
 }

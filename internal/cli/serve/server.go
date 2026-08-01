@@ -25,7 +25,7 @@ func Server(a *cli.App) *ucli.Command {
 	var listen string
 
 	cmd := &ucli.Command{
-		Category: "SERVER",
+		Category: "INSTALL",
 		Name:     "server",
 		Usage:    "Run as a service, serving the HTTP API and MCP",
 		Description: "Serves the same scour the command line drives: one database, one set of\n" +
@@ -160,7 +160,7 @@ func closed(err error) bool {
 
 func MCP(a *cli.App) *ucli.Command {
 	return &ucli.Command{
-		Category: "SERVER",
+		Category: "INSTALL",
 		Name:     "mcp",
 		Usage:    "Run as an MCP server over stdio",
 		Description: "Speaks the Model Context Protocol on stdin and stdout, which is what a local\n" +

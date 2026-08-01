@@ -41,7 +41,7 @@ type Trainer struct {
 	classified *ClassifyResult
 
 	// meter reports what training produced. Nil measures nothing, which is what
-	// a one-shot `scour train` does.
+	// a one-shot `scour model train` does.
 	meter Meter
 }
 
