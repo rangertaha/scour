@@ -61,18 +61,18 @@ func (s *Server) MCP() *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "crawl",
 		Description: "Start crawling an item's targets. Returns a job id " +
-			"immediately; poll job_status to see how it went.",
+			"immediately; poll run_status to see how it went.",
 	}, s.mcpCrawl)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "train",
 		Description: "Learn extraction rules and a link scoring model from the pages " +
-			"already crawled. Returns a job id; poll job_status.",
+			"already crawled. Returns a run id; poll run_status.",
 	}, s.mcpTrain)
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "job_status",
-		Description: "Check a crawl or training job started earlier.",
+		Name:        "run_status",
+		Description: "Check a crawl or training run started earlier, by its run id.",
 	}, s.mcpJob)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -273,46 +273,46 @@ type crawlIn struct {
 }
 
 type jobOut struct {
-	Job Job `json:"job"`
+	Run store.Run `json:"run"`
 }
 
 func (s *Server) mcpCrawl(ctx context.Context, _ *mcp.CallToolRequest, in crawlIn) (*mcp.CallToolResult, jobOut, error) {
-	job, err := s.crawlJob(ctx, in.Name, crawlRequest{
+	run, err := s.crawlJob(ctx, in.Name, crawlRequest{
 		Depth: in.Depth, MaxPages: in.MaxPages, Browser: in.Browser,
 	})
 	if err != nil {
 		return nil, jobOut{}, err
 	}
-	return text("Crawling %s as job %s. Poll job_status with that id.", in.Name, job.ID),
-		jobOut{Job: *job}, nil
+	return text("Crawling %s as run %d. Poll run_status with that id.", in.Name, run.ID),
+		jobOut{Run: *run}, nil
 }
 
 func (s *Server) mcpTrain(ctx context.Context, _ *mcp.CallToolRequest, in itemName) (*mcp.CallToolResult, jobOut, error) {
-	job, err := s.trainJob(ctx, in.Name, trainRequest{})
+	run, err := s.trainJob(ctx, in.Name, trainRequest{})
 	if err != nil {
 		return nil, jobOut{}, err
 	}
-	return text("Training %s as job %s. Poll job_status with that id.", in.Name, job.ID),
-		jobOut{Job: *job}, nil
+	return text("Training %s as run %d. Poll run_status with that id.", in.Name, run.ID),
+		jobOut{Run: *run}, nil
 }
 
 type jobID struct {
-	ID string `json:"id" jsonschema:"the job id returned by crawl or train"`
+	ID uint `json:"id" jsonschema:"the run id returned by crawl or train"`
 }
 
-func (s *Server) mcpJob(_ context.Context, _ *mcp.CallToolRequest, in jobID) (*mcp.CallToolResult, jobOut, error) {
-	job, ok := s.jobs.Get(in.ID)
-	if !ok {
-		return nil, jobOut{}, fmt.Errorf("no job %q", in.ID)
+func (s *Server) mcpJob(ctx context.Context, _ *mcp.CallToolRequest, in jobID) (*mcp.CallToolResult, jobOut, error) {
+	run, err := s.store.Run(ctx, in.ID)
+	if err != nil {
+		return nil, jobOut{}, err
 	}
 
-	switch job.State {
-	case Running:
-		return text("Job %s is still running, %s so far.", job.ID, job.Elapsed().Round(1e9)), jobOut{Job: job}, nil
-	case Failed:
-		return text("Job %s failed: %s", job.ID, job.Error), jobOut{Job: job}, nil
+	switch run.State {
+	case store.RunRunning:
+		return text("Run %d is still going, %s so far.", run.ID, run.Elapsed().Round(1e9)), jobOut{Run: *run}, nil
+	case store.RunFailed:
+		return text("Run %d failed: %s", run.ID, run.Error), jobOut{Run: *run}, nil
 	default:
-		return text("Job %s finished in %s.", job.ID, job.Elapsed().Round(1e9)), jobOut{Job: job}, nil
+		return text("Run %d ended %s after %s.", run.ID, run.State, run.Elapsed().Round(1e9)), jobOut{Run: *run}, nil
 	}
 }
 

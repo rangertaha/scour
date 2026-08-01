@@ -178,7 +178,9 @@ func TestCrawlingWithoutTargetsFailsImmediately(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 
-	w := do(t, srv, http.MethodPost, "/v1/items/vehicle/crawl", `{}`)
+	// A crawl is a run of a job, and the job named after an item is made on
+	// first use, so this reaches one with no targets rather than no job.
+	w := do(t, srv, http.MethodPost, "/v1/jobs/vehicle/runs", `{}`)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400: %s", w.Code, w.Body)
 	}
@@ -216,13 +218,17 @@ func TestTemplateFillsProperties(t *testing.T) {
 	}
 }
 
-func TestJobNotFound(t *testing.T) {
+func TestRunNotFound(t *testing.T) {
 	srv := newServer(t, nil)
 
-	if w := do(t, srv, http.MethodGet, "/v1/jobs/crawl-999", ""); w.Code != http.StatusNotFound {
+	if w := do(t, srv, http.MethodGet, "/v1/runs/999", ""); w.Code != http.StatusNotFound {
 		t.Errorf("status = %d", w.Code)
 	}
-	if w := do(t, srv, http.MethodGet, "/v1/jobs", ""); w.Code != http.StatusOK {
+	// An id that is not a number is the caller's mistake, not a missing run.
+	if w := do(t, srv, http.MethodGet, "/v1/runs/crawl-1", ""); w.Code != http.StatusBadRequest {
+		t.Errorf("a non-numeric id = %d, want 400", w.Code)
+	}
+	if w := do(t, srv, http.MethodGet, "/v1/runs", ""); w.Code != http.StatusOK {
 		t.Errorf("list = %d", w.Code)
 	}
 }

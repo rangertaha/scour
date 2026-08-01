@@ -45,7 +45,7 @@ func invalid(format string, args ...any) error {
 // Everything that can be rejected is rejected before the job exists, so a bad
 // request comes back on the call that made it rather than as a job that fails
 // a minute later somewhere the caller has to go looking.
-func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*Job, error) {
+func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*store.Run, error) {
 	item, err := s.store.ItemFull(ctx, name)
 	if err != nil {
 		return nil, err
@@ -56,8 +56,18 @@ func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	return s.crawlRun(ctx, item, job, req)
+}
+
+// crawlRun starts a crawl of one named job.
+//
+// The job is passed in rather than found, because an item can have several and
+// finding one by its item would start whichever the store happened to return.
+// That is the whole reason a run hangs off a job in the API: the job is what
+// holds the frontier, so the job is what a run is a run of.
+func (s *Server) crawlRun(ctx context.Context, item *store.Item, job *store.Job, req crawlRequest) (*store.Run, error) {
 	if len(job.Targets) == 0 {
-		return nil, invalid("item %s has no targets: add a domain or url first", name)
+		return nil, invalid("job %s has no targets: add a domain or url first", job.Name)
 	}
 
 	allow := req.Types
@@ -102,14 +112,15 @@ func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*
 		depth = s.cfg.Crawl.Depth
 	}
 
-	return s.jobs.Start("crawl", item.Name, func(jobCtx context.Context) (any, error) {
-		// A crawl started over HTTP is a run like any other. Without this the
-		// history would show only what was started from a terminal, which is
-		// the half nobody needs a history of.
-		run, err := s.store.StartRun(jobCtx, job.ID, item.ID)
-		if err != nil {
-			return nil, err
-		}
+	// The run opens before the work so its id can be handed back: a caller who
+	// started a crawl needs the address of the thing they started, and waiting
+	// for the goroutine to open one would mean answering with nothing to poll.
+	run, err := s.store.StartRun(ctx, job.ID, item.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = s.jobs.Start("crawl", item.Name, func(jobCtx context.Context) (any, error) {
 		crawler := crawl.New(s.cfg, s.store, s.pages)
 		result, err := crawler.Run(jobCtx, crawl.Options{
 			Item:    item,
@@ -128,6 +139,14 @@ func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*
 		}
 		return result, err
 	})
+	if err != nil {
+		// The slot was taken, so this run never began.
+		if derr := s.store.DeleteRun(ctx, run.ID); derr != nil {
+			slog.Warn("could not remove a run that never started", "run", run.ID, "err", derr)
+		}
+		return nil, err
+	}
+	return run, nil
 }
 
 // trainRequest mirrors the flags of `scour model train`.
@@ -138,7 +157,7 @@ type trainRequest struct {
 }
 
 // trainJob validates a training run and starts it.
-func (s *Server) trainJob(ctx context.Context, name string, req trainRequest) (*Job, error) {
+func (s *Server) trainJob(ctx context.Context, name string, req trainRequest) (*store.Run, error) {
 	item, err := s.store.ItemFull(ctx, name)
 	if err != nil {
 		return nil, err
@@ -152,23 +171,27 @@ func (s *Server) trainJob(ctx context.Context, name string, req trainRequest) (*
 		}
 	}
 
-	return s.jobs.Start("train", item.Name, func(jobCtx context.Context) (any, error) {
+	run, err := s.store.StartTrainingRun(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = s.jobs.Start("train", item.Name, func(jobCtx context.Context) (any, error) {
 		trainer := train.New(s.cfg, s.store, s.pages)
 		return trainer.Run(jobCtx, item, train.Options{
 			Limit:   req.Limit,
 			Types:   types,
 			NoChain: req.NoChain,
+			RunID:   run.ID,
 		})
 	})
-}
-
-func (s *Server) startCrawl(w http.ResponseWriter, r *http.Request) {
-	var req crawlRequest
-	if r.ContentLength > 0 && !decode(w, r, &req) {
-		return
+	if err != nil {
+		if derr := s.store.DeleteRun(ctx, run.ID); derr != nil {
+			slog.Warn("could not remove a run that never started", "run", run.ID, "err", derr)
+		}
+		return nil, err
 	}
-	job, err := s.crawlJob(r.Context(), r.PathValue("name"), req)
-	s.accepted(w, r, job, err)
+	return run, nil
 }
 
 func (s *Server) startTrain(w http.ResponseWriter, r *http.Request) {
@@ -180,37 +203,28 @@ func (s *Server) startTrain(w http.ResponseWriter, r *http.Request) {
 	s.accepted(w, r, job, err)
 }
 
-// accepted writes the response for a job that was asked for.
-func (s *Server) accepted(w http.ResponseWriter, r *http.Request, job *Job, err error) {
+// accepted writes the response for work that was asked for.
+//
+// The body is the run, which is the durable thing: a caller who started a crawl
+// gets the address of what they started, and can ask about it tomorrow rather
+// than only for as long as this process happens to live.
+func (s *Server) accepted(w http.ResponseWriter, r *http.Request, run *store.Run, err error) {
 	var busy ErrBusy
 	var bad ErrInvalid
 
 	switch {
 	case errors.As(err, &busy):
 		// Conflict rather than a failure: the caller asked for something
-		// reasonable that is already happening, and the id lets them watch the
-		// one that is.
-		writeJSON(w, http.StatusConflict, map[string]any{"error": busy.Error(), "job": busy.ID})
+		// reasonable that is already happening.
+		writeJSON(w, http.StatusConflict, map[string]any{"error": busy.Error()})
 	case errors.As(err, &bad):
 		s.badRequest(w, bad.Error())
 	case err != nil:
 		s.fail(w, r, err)
 	default:
-		writeJSON(w, http.StatusAccepted, job)
+		w.Header().Set("Location", fmt.Sprintf("/v1/runs/%d", run.ID))
+		writeJSON(w, http.StatusAccepted, map[string]any{runKey: run})
 	}
-}
-
-func (s *Server) listJobs(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"jobs": s.jobs.List()})
-}
-
-func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
-	job, ok := s.jobs.Get(r.PathValue("id"))
-	if !ok {
-		writeError(w, http.StatusNotFound, "no such job")
-		return
-	}
-	writeJSON(w, http.StatusOK, job)
 }
 
 // applyTemplate copies a shipped schema onto an item, as `scour add

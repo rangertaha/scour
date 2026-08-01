@@ -79,11 +79,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/items/{name}/records", s.records)
 	mux.HandleFunc("POST /v1/items/{name}/records/{id}/label", s.label)
 
-	mux.HandleFunc("POST /v1/items/{name}/crawl", s.startCrawl)
-	mux.HandleFunc("POST /v1/items/{name}/train", s.startTrain)
+	// Long work is a run, and a run is the thing you are handed back. Both
+	// verbs used to hang off the item as a sub-path, which said what was being
+	// done rather than what was made; and both were watched through an
+	// in-memory handle that died with the process.
+	mux.HandleFunc("POST /v1/items/{name}/model/runs", s.startTrain)
+	mux.HandleFunc("POST /v1/jobs/{name}/runs", s.startJobRun)
+	mux.HandleFunc("GET /v1/jobs/{name}/runs", s.jobRuns)
 
-	mux.HandleFunc("GET /v1/jobs", s.listJobs)
-	mux.HandleFunc("GET /v1/jobs/{id}", s.getJob)
+	mux.HandleFunc("GET /v1/runs", s.listRuns)
+	mux.HandleFunc("GET /v1/runs/{id}", s.getRun)
+	mux.HandleFunc("GET /v1/runs/{id}/log", s.runLog)
 
 	if path := s.cfg.Server.Metrics; path != "" {
 		mux.HandleFunc("GET "+path, s.metrics)

@@ -51,15 +51,28 @@ leaves something to ask afterwards.
 | `GET` | `/v1/items/{name}/rules` | The learned extraction rules |
 | `GET` | `/v1/items/{name}/records` | Search extracted records |
 | `POST` | `/v1/items/{name}/records/{id}/label` | Mark a record valid or invalid |
-| `POST` | `/v1/items/{name}/crawl` | Start a crawl, returns a job |
-| `POST` | `/v1/items/{name}/train` | Start training, returns a job |
-| `GET` | `/v1/jobs` `/v1/jobs/{id}` | Watch jobs |
+| `POST` | `/v1/items/{name}/model/runs` | Start training, returns the run |
+| `POST` | `/v1/jobs/{name}/runs` | Start a crawl of one job, returns the run |
+| `GET` | `/v1/jobs/{name}/runs` | That job's history |
+| `GET` | `/v1/runs` | Recent runs, of every kind |
+| `GET` | `/v1/runs/{id}` | One run |
+| `GET` | `/v1/runs/{id}/log` | The pages that run fetched |
 | `POST` | `/mcp` | MCP over HTTP |
 | `GET` | `/metrics` | Prometheus metrics |
 
+Long work is a run, and a run is what you are handed back: the response carries
+it and a `Location` header addressing it, so a caller polls `/v1/runs/{id}`
+rather than holding a connection open for minutes. Crawls and trainings are both
+runs, which is why there is one id space and one way to watch either.
+
+The run outlives the process that started it. It is a row rather than a handle
+in memory, so a crawl started last night can still be asked about this morning,
+and a training that finished while nobody was polling is still there.
+
 One item cannot be crawled twice at once, since two crawls would race on the
-frontier and double the load on the site. A second request returns `409` with
-the id of the run already in progress.
+frontier and double the load on the site. A second request returns `409`, and
+the run that was opened for it is removed rather than left in the history: a row
+for work that never began is worse than no row.
 
 > A redesigned surface, sharing the CLI's five nouns so that `scour job ls` and
 > `GET /v1/jobs` are the same question asked twice, is worked out in

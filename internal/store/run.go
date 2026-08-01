@@ -335,3 +335,16 @@ func (s *Store) ItemRuns(ctx context.Context, itemID uint, limit int) ([]Run, er
 	}
 	return runs, nil
 }
+
+// DeleteRun removes a run row.
+//
+// It exists for one case: a run opened so its id could be handed back, where
+// the work was then refused because the same work was already going. That run
+// never began, and a history row for work that did not happen is worse than no
+// row, because the whole point of the history is that every row is an occasion.
+func (s *Store) DeleteRun(ctx context.Context, id uint) error {
+	if err := s.db.WithContext(ctx).Where("id = ?", id).Delete(&Run{}).Error; err != nil {
+		return fmt.Errorf("delete run %d: %w", id, err)
+	}
+	return nil
+}

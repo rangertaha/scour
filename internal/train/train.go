@@ -98,6 +98,11 @@ type Options struct {
 	Limit int
 	// Types restricts which formats are loaded.
 	Types *content.Set
+	// RunID is a history row already opened by the caller, which is how a
+	// training started over HTTP is watched: the server needs the id to hand
+	// back before the work begins, so it opens the run and passes it in rather
+	// than waiting to be told. Zero opens one here.
+	RunID uint
 	// NoChain skips fitting the crawl chain, which leaves scoring to judge
 	// each URL on its own tokens. It exists so the chain's contribution can be
 	// measured rather than assumed.
@@ -121,7 +126,10 @@ func (t *Trainer) Run(ctx context.Context, item *store.Item, opts Options) (*Res
 	// and could not write its own history row still induced the model, and the
 	// model is the thing worth keeping.
 	var run *store.Run
-	if t.store != nil {
+	switch {
+	case opts.RunID != 0:
+		run = &store.Run{ID: opts.RunID}
+	case t.store != nil:
 		opened, err := t.store.StartTrainingRun(ctx, item.ID)
 		if err != nil {
 			slog.Debug("could not open a training run", "item", item.Name, "err", err)
