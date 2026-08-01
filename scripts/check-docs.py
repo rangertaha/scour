@@ -13,6 +13,10 @@ these checks exists because it caught something real.
             internal/config has never had.
   registry  Guards the implementation names in the extension-points table
             against a registry entry being renamed or removed.
+  shorthands  The --type table against internal/content. `feed` was missing
+            from it, which is a whole content type a reader could not know to
+            ask for.
+  routes    The HTTP table against the routes the server registers.
   links     Internal links, images and heading anchors, which rot silently
             when a page is renamed.
   diagrams  Every SVG parses, and none is orphaned.
@@ -171,6 +175,61 @@ def check_registry_names() -> None:
     notes.append(f"registry: {checked} implementation names checked against {len(registered)} registered")
 
 
+def check_shorthands() -> None:
+    """The --type shorthand table against the map it documents.
+
+    `feed` was missing from this table for a while, which is a whole content
+    type a reader would not know they could ask for.
+    """
+    source = ""
+    for path in glob.glob("internal/content/*.go"):
+        text = open(path, encoding="utf-8").read()
+        if "Shorthands = map" in text:
+            source = text
+    block = re.search(r"Shorthands = map\[string\]\[\]string\{(.*?)\n\}", source, re.S)
+    if not block:
+        fail("shorthands", "cannot find the Shorthands map in internal/content")
+        return
+    real = {
+        m.group(1): set(re.findall(r'"([^"]+)"', m.group(2)))
+        for m in re.finditer(r'"([a-z]+)":\s*\{(.*?)\}', block.group(1), re.S)
+    }
+    doc = open(f"{DOCS}/crawl/index.md", encoding="utf-8").read()
+    table = doc[doc.index("| Shorthand |") :]
+    table = table[: table.index("\n\n")]
+    documented = {}
+    for row in table.split("\n")[2:]:
+        cells = [c.strip() for c in row.strip("|").split("|")]
+        if len(cells) == 2:
+            documented[cells[0].strip("`")] = set(re.findall(r"`([^`]+)`", cells[1]))
+    for name in sorted(set(real) - set(documented)):
+        fail("shorthands", f"`{name}` is a --type shorthand and the crawl page does not list it")
+    for name in sorted(set(documented) - set(real)):
+        fail("shorthands", f"the crawl page lists `{name}` and internal/content has no such shorthand")
+    for name in sorted(set(real) & set(documented)):
+        if real[name] != documented[name]:
+            fail("shorthands", f"`{name}` expands to {sorted(real[name])}, documented as {sorted(documented[name])}")
+    notes.append(f"shorthands: {len(real)} content-type shorthands checked")
+
+
+def check_routes() -> None:
+    """The HTTP route table against the routes the server registers."""
+    server = open("internal/server/server.go", encoding="utf-8").read()
+    real = set(re.findall(r'mux\.HandleFunc\("\w+ ([^"+]+)"', server))
+    real |= set(re.findall(r'mux\.Handle\("([^"]+)"', server))
+    real = {p.rstrip("/") or "/" for p in real}
+    doc = open(f"{DOCS}/server/index.md", encoding="utf-8").read()
+    table = doc[doc.index("| Method | Path | Does |") :]
+    table = table[: table.index("\n\n")]
+    documented = {m.rstrip("/") or "/" for m in re.findall(r"`(/[^`]*)`", table)}
+    # The metrics path is configurable, so it is not a literal in the source.
+    for path in sorted(real - documented - {"/metrics"}):
+        fail("routes", f"the server serves {path} and the server page does not list it")
+    for path in sorted(documented - real - {"/metrics"}):
+        fail("routes", f"the server page lists {path} and the server serves no such route")
+    notes.append(f"routes: {len(real)} HTTP routes checked")
+
+
 def check_links() -> None:
     sources = pages() + [f"{DOCS}/_layouts/default.html"]
     used_images: set[str] = set()
@@ -235,6 +294,8 @@ def main() -> int:
     check_commands(binary)
     check_config_keys()
     check_registry_names()
+    check_shorthands()
+    check_routes()
     check_links()
     check_diagrams()
     check_pager()
