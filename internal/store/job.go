@@ -267,3 +267,17 @@ func (s *Store) DeleteContentType(ctx context.Context, jobID uint, typ string) e
 	}
 	return nil
 }
+
+// JobByID returns a job by its id, for the paths that hold one rather than a
+// name, such as a dispatcher walking the frontier.
+func (s *Store) JobByID(ctx context.Context, id uint) (*Job, error) {
+	var j Job
+	err := s.db.WithContext(ctx).Where("id = ?", id).First(&j).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("job %d: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get job %d: %w", id, err)
+	}
+	return &j, nil
+}
