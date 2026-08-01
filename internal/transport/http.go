@@ -26,9 +26,12 @@ func NewHTTP(cfg Config) (http.RoundTripper, error) {
 		base.Proxy = http.ProxyURL(u)
 	}
 
-	if cfg.Timeout > 0 {
-		base.ResponseHeaderTimeout = cfg.Timeout
-	}
+	// Always bounded. A config carrying no timeout, or one where somebody wrote
+	// timeout = "0s", otherwise leaves ResponseHeaderTimeout at zero, which is
+	// not "the default" but "wait forever": a server that accepts the
+	// connection and never answers holds a crawler thread until the process
+	// ends. The fallback existed for this and was never called.
+	base.ResponseHeaderTimeout = cfg.timeout()
 	base.MaxIdleConnsPerHost = 8
 
 	return base, nil

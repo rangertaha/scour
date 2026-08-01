@@ -435,18 +435,6 @@ func valuesOf(rec wom.Record) map[string]string {
 	return values
 }
 
-// confidence is the probability of the strongest item, which is the closest
-// thing a model has to a single quality number.
-func confidence(items []wom.Item) float64 {
-	var best float64
-	for _, item := range items {
-		if item.Probability > best {
-			best = item.Probability
-		}
-	}
-	return best
-}
-
 // confidenceFor returns the induced probability for one named item.
 func confidenceFor(items []wom.Item, name string) float64 {
 	for _, item := range items {

@@ -123,13 +123,13 @@ news-feeds: news-feeds-import news-feeds-crawl news-feeds-train news-feeds-expor
 .PHONY: news-feeds-import
 news-feeds-import: build ## Load the feed list and give it an article schema
 	@test -f '$(FEED_LIST)' || { echo "no feed list at $(FEED_LIST); set FEED_LIST="; exit 1; }
-	$(SCOUR) add $(FEED_ITEM) --template article
-	$(SCOUR) add $(FEED_ITEM) --type feed --type xml
+	$(SCOUR) item add $(FEED_ITEM) --template article
+	$(SCOUR) item add $(FEED_ITEM) --type feed --type xml
 	$(SCOUR) import $(FEED_ITEM) --urls '$(FEED_LIST)'
 
 .PHONY: news-feeds-crawl
 news-feeds-crawl: build ## Fetch the feeds, one level deep
-	$(SCOUR) crawl $(FEED_ITEM) --depth 1 \
+	$(SCOUR) start $(FEED_ITEM) --depth 1 \
 		--max-pages $(FEED_PAGES) --max-time $(FEED_TIME)
 
 .PHONY: news-feeds-train
@@ -138,7 +138,7 @@ news-feeds-train: build ## Learn where an article's fields live inside a feed
 
 .PHONY: news-feeds-export
 news-feeds-export: build ## Write the articles out, one file per domain
-	$(SCOUR) export $(FEED_ITEM) --format $(EXPORT_FORMAT)
+	$(SCOUR) stream $(FEED_ITEM) --write $(EXPORT_FORMAT)
 
 .PHONY: news-articles
 news-articles: news-articles-import news-articles-crawl news-articles-train news-articles-export ## Import, crawl, train and export the news sites
@@ -146,13 +146,13 @@ news-articles: news-articles-import news-articles-crawl news-articles-train news
 .PHONY: news-articles-import
 news-articles-import: build ## Load the site list and give it an article schema
 	@test -f '$(SITE_LIST)' || { echo "no site list at $(SITE_LIST); set SITE_LIST="; exit 1; }
-	$(SCOUR) add $(SITE_ITEM) --template article
-	$(SCOUR) add $(SITE_ITEM) --type html
+	$(SCOUR) item add $(SITE_ITEM) --template article
+	$(SCOUR) item add $(SITE_ITEM) --type html
 	$(SCOUR) import $(SITE_ITEM) --urls '$(SITE_LIST)'
 
 .PHONY: news-articles-crawl
 news-articles-crawl: build ## Crawl the news sites, bounded by pages and time
-	$(SCOUR) crawl $(SITE_ITEM) --depth $(SITE_DEPTH) \
+	$(SCOUR) start $(SITE_ITEM) --depth $(SITE_DEPTH) \
 		--max-pages $(SITE_PAGES) --max-time $(SITE_TIME)
 
 .PHONY: news-articles-train
@@ -161,7 +161,7 @@ news-articles-train: build ## Learn where an article's fields live on a page
 
 .PHONY: news-articles-export
 news-articles-export: build ## Write the articles out, one file per domain
-	$(SCOUR) export $(SITE_ITEM) --format $(EXPORT_FORMAT)
+	$(SCOUR) stream $(SITE_ITEM) --write $(EXPORT_FORMAT)
 
 # Microdata is the third shape, and the easiest one. A page carrying schema.org
 # attributes or OpenGraph tags has already declared what it is, so extraction
@@ -181,13 +181,13 @@ news-microdata: news-microdata-import news-microdata-crawl news-microdata-train 
 .PHONY: news-microdata-import
 news-microdata-import: build ## Load the site list with a schema.org and OpenGraph schema
 	@test -f '$(SITE_LIST)' || { echo "no site list at $(SITE_LIST); set SITE_LIST="; exit 1; }
-	$(SCOUR) add $(MICRO_ITEM) --template microdata
-	$(SCOUR) add $(MICRO_ITEM) --type html
+	$(SCOUR) item add $(MICRO_ITEM) --template microdata
+	$(SCOUR) item add $(MICRO_ITEM) --type html
 	$(SCOUR) import $(MICRO_ITEM) --urls '$(SITE_LIST)'
 
 .PHONY: news-microdata-crawl
 news-microdata-crawl: build ## Crawl for pages that declare their own structure
-	$(SCOUR) crawl $(MICRO_ITEM) --depth $(MICRO_DEPTH) \
+	$(SCOUR) start $(MICRO_ITEM) --depth $(MICRO_DEPTH) \
 		--max-pages $(MICRO_PAGES) --max-time $(MICRO_TIME)
 
 .PHONY: news-microdata-train
@@ -196,7 +196,7 @@ news-microdata-train: build ## Learn where the declared fields live
 
 .PHONY: news-microdata-export
 news-microdata-export: build ## Write the declared data out, one file per domain
-	$(SCOUR) export $(MICRO_ITEM) --format $(EXPORT_FORMAT)
+	$(SCOUR) stream $(MICRO_ITEM) --write $(EXPORT_FORMAT)
 
 .PHONY: news-status
 news-status: build ## Show both corpora side by side
@@ -204,9 +204,9 @@ news-status: build ## Show both corpora side by side
 
 .PHONY: news-clean
 news-clean: build ## Delete the news items and everything crawled for them
-	-$(SCOUR) remove $(FEED_ITEM)
-	-$(SCOUR) remove $(SITE_ITEM)
-	-$(SCOUR) remove $(MICRO_ITEM)
+	-$(SCOUR) item rm $(FEED_ITEM)
+	-$(SCOUR) item rm $(SITE_ITEM)
+	-$(SCOUR) item rm $(MICRO_ITEM)
 
 .PHONY: news
 news: news-feeds news-articles news-microdata ## Run all three news pipelines end to end

@@ -23,7 +23,6 @@ type exportFlags struct {
 	confidence float64
 	label      string
 	limit      int
-	stamp      string
 }
 
 func runExport(c context.Context, a *cli.App, name string, f exportFlags) error {
@@ -60,10 +59,8 @@ func runExport(c context.Context, a *cli.App, name string, f exportFlags) error 
 		return nil
 	}
 
-	stamp := f.stamp
-	if stamp == "" {
-		stamp = time.Now().UTC().Format("2006-01-02")
-	}
+	// One file per day, so re-running overwrites rather than accumulating.
+	stamp := time.Now().UTC().Format("2006-01-02")
 
 	// --to means a directory for file formats and a URL for the webhook, so
 	// only one of them may take it.

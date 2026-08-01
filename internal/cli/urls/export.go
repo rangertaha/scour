@@ -19,11 +19,10 @@ import (
 )
 
 type urlExportFlags struct {
-	urls     string
-	domains  string
-	props    string
-	aliases  string
-	toStdout bool
+	urls    string
+	domains string
+	props   string
+	aliases string
 }
 
 // Export is the other half of import.

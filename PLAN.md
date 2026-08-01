@@ -206,7 +206,7 @@ func Register(name string, f func(Config) (http.RoundTripper, error))
 | score | `Scorer` | bayes, embed, hmm | `[model] scorer = "hmm"` |
 | matcher | `wom.Matcher` | heuristic, llm | `[model] matcher = "heuristic"` |
 | store | gorm dialector | sqlite, postgres, mysql | `[store] driver` |
-| export | `Exporter` | csv, json, webhook | `scour export --to` |
+| export | `Exporter` | csv, json, webhook | `scour stream --write` |
 
 A third-party build is then:
 
@@ -963,10 +963,13 @@ Same files as wom, same targets, so muscle memory carries over:
    cache would make the whole pipeline testable without a network and would let
    `scour train` re-run induction without re-crawling. The question is whether
    it belongs in the transport registry or one layer up, at the parser.
-2. **Page cache location.** Filesystem under `/var/cache/scour` is simple and
-   restartable; a NATS object store would let remote crawlers hand bodies to
-   remote parsers without shared disk. Start with the filesystem, keep the
-   interface narrow enough to swap.
+2. **Page cache location.** *(settled)* The interface was kept narrow and the
+   swap happened: `internal/cache` is a driver registry, local by default, with
+   s3 and gcs behind the `cloud` build tag. A crawler and a trainer on different
+   machines now share bodies through object storage rather than a disk, which
+   was the point. What is still open is whether the same interface should carry
+   NATS object store, which would avoid a second dependency for a fleet that
+   already has a broker.
 3. **How far wom's boundary should hold.** wom is scour's own code and is
    edited in place like any other package, but it deliberately knows nothing
    about crawling, scoring, queues or storage. That ignorance is what keeps

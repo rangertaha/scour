@@ -182,7 +182,7 @@ Declaring properties a site does not publish is fine. They simply go unfilled,
 and the fields that are present are still found.
 
 Teach a property the other words a page might label it with. `scour item add -a` only
-ever adds one; `scour tag` shows the set and edits it:
+ever adds one; `scour item tag` shows the set and edits it:
 
 ```
 scour item tag vehicle -p make
@@ -472,17 +472,26 @@ The definition and the cached page bodies survive all three. What `stop`
 discards is the work of deciding what to fetch next, which on a large site is
 hours of it.
 
-### Exporting
+### Getting the records out
 
 The records are the product, so they belong wherever the rest of your pipeline
-reads. Records are grouped by the domain they came from, one file per site, so
-an export is diffable and a site that changed is a changed file:
+reads. `scour stream` prints them, follows them as they are extracted, or writes
+them out:
 
 ```
-scour export vehicle
-scour export vehicle --format json
-scour export vehicle --label valid --confidence 0.8
-scour export vehicle --format webhook --to https://example.com/ingest
+scour stream vehicle
+scour stream vehicle --follow
+scour --json stream vehicle --follow | jq .
+```
+
+Written out, records are grouped by the domain they came from, one file per
+site, so an export is diffable and a site that changed is a changed file:
+
+```
+scour stream vehicle --write csv
+scour stream vehicle --write json --to ./out
+scour stream vehicle --write csv --confidence 0.8
+scour stream vehicle --write webhook --to https://example.com/ingest
 ```
 
 ```
@@ -500,6 +509,18 @@ record, because an export is also how records get corrected outside scour.
 Re-running on the same day overwrites rather than accumulating. The webhook
 posts in batches and reports what it delivered before any failure, so a retry
 does not double-deliver.
+
+`scour export` is a different job, and the other half of `import`: it writes the
+domains and urls an item was built from, so a list assembled over a long crawl
+can be moved between databases or kept under version control.
+
+```
+scour export vehicle --domains domains.txt --urls urls.txt
+scour import other --domains domains.txt --urls urls.txt
+```
+
+A domain that covers its subdomains is written `*.example.com`, which is how
+import reads it back, so a round trip does not quietly narrow the target.
 
 ### Budgets
 
