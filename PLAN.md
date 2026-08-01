@@ -959,6 +959,40 @@ Same files as wom, same targets, so muscle memory carries over:
 
 ## 11. Open decisions
 
+0. **Where a data assumption is allowed to live.** *(decided)* scour is a
+   generic crawler, so the engine does not get to believe things about the
+   content. What specializes it is trained: the schema, the examples, the
+   aliases, the value and name patterns, the per-domain overrides, and the
+   marks a person puts on records. Anything that cannot be expressed that way
+   and still changes the answer is an assumption in the wrong place.
+
+   Entries like `semanticTags` are allowed because their meaning is fixed by
+   the HTML specification rather than by a corpus: `<time>` is a date on a Greek
+   page as much as an English one.
+
+   Deciding whether a page holds records is a classification, and it belongs at
+   the URL level, on the crawl graph, not on the HTML. The classifier already
+   exists: `internal/score/hmm` decodes six roles over the parent path of every
+   URL, seed, hub, pagination, detail, boilerplate and dead, stores them in
+   `page_roles`, and reports them in `scour item ls`. Detail is the role that
+   means "this page holds the records".
+
+   Nothing reads it. Outside the hmm package, `hmm.Detail` has no callers, so
+   extraction runs over every fetched page whatever the crawl graph concluded
+   about it. That is why 118 of 867 titles on the second corpus are `"Page A1"`,
+   `"Ads"`, `"Community"`: index and section URLs producing records because
+   nobody asked the classifier which pages were record pages. Fixing it is
+   reading a decision that is already made and already stored.
+
+   Inference does some of this work instead, in the wrong place. `variety`
+   halves a location whose value never changes, which is what caught `section`
+   resolving to a related-articles heading. It is a statement about content, and
+   corpora break it: a shop selling one make publishes the same brand on every
+   page, and brand is a real field of every product. It survives today only
+   because a field the markup names outright outscores the discount, and there
+   is a test holding that. The discount is classification reasoning deciding a
+   field's fate inside the scorer, and it should move once the role gate exists.
+
 1. **Offline replay through the transport.** `transport/replay` serving the page
    cache would make the whole pipeline testable without a network and would let
    `scour train` re-run induction without re-crawling. The question is whether
