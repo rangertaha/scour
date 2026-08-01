@@ -67,6 +67,8 @@ they are built from, and in nothing else, so they share one implementation in
 | nodeclass | `Classifier` | `recency`*, `topic`* | not yet wired |
 | cache | `Store` | `local`, `s3`†, `gcs`† | `[cache] driver` |
 | export | `Exporter` | `csv`, `json`, `webhook` | `scour stream --write` |
+| schedule | `Policy` | `best`, `breadth`, `depth`, `random`, `warmup` | `[crawl] scheduler` |
+| refresh | `Refresh` | `cron`* | `[crawl] refresh` |
 | ai | provider | `anthropic`, `ollama` | `[[ai]] provider` |
 
 \* registered, not written yet: they answer `ErrNotImplemented` so a name in a
@@ -131,6 +133,31 @@ extraction runs over every fetched page whatever the crawl graph concluded. That
 is why 118 of 867 titles on the second corpus are `"Page A1"`, `"Ads"`,
 `"Community"`. Moving that decoder behind `nodeclass` and reading its answer is
 the next piece of work, and it is reading a decision already made.
+
+## Scheduling, which is two questions
+
+A crawl has more URLs waiting than it will ever fetch, so the order they come
+out in is most of what a crawl is. That is one question. The other is when a URL
+goes back in: a front page carries something different every hour, an archived
+article never changes again, and crawling them at one rate is either wasteful at
+one end or stale at the other.
+
+They are separate registries because they are separate decisions. `Policy`
+orders what is already waiting; `Refresh` decides what is due. Splitting them is
+what lets a site be crawled once and then kept current cheaply, which is a
+different job from crawling it the first time.
+
+A `Policy` returns an order from a closed set rather than a SQL fragment. The
+frontier is a table with a hundred thousand rows in it, so the choice has to be
+made by the database, and taking SQL from a policy would be taking an injection
+point and a dependency on the schema at once. It is asked once per lease rather
+than once per crawl, so `warmup` can crawl broadly until a model exists and
+best first after that: before there is a model every score is equal, and
+ordering by score is ordering by noise.
+
+Neither decides politeness. Which hosts are cooling is worked out from when each
+was last fetched, and a policy that could override that could hammer a server by
+choosing badly.
 
 ## What is not extensible, and why
 

@@ -207,6 +207,8 @@ func Register(name string, f func(Config) (http.RoundTripper, error))
 | matcher | `wom.Matcher` | heuristic, llm | `[model] matcher = "heuristic"` |
 | store | gorm dialector | sqlite, postgres, mysql | `[store] driver` |
 | export | `Exporter` | csv, json, webhook | `scour stream --write` |
+| schedule | `Policy` | best, breadth, depth, random, warmup | `[crawl] scheduler` |
+| refresh | `Refresh` | cron (planned) | `[crawl] refresh` |
 | classify | `Classifier` | llm | `[model] classifier` |
 | cache | `Store` | local, s3, gcs | `[cache] driver` |
 | nodeclass | `Classifier` | recency, topic (both planned) | not yet wired |

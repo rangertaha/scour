@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-type cfg struct{ n int }
+type cfg struct{}
 type thing struct{ made string }
 
 func TestRegistryBuildsWhatWasRegistered(t *testing.T) {

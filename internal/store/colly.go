@@ -13,6 +13,8 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"github.com/rangertaha/scour/internal/schedule"
 )
 
 // ErrQueueEmpty is returned by [Store.PopQueue] when there is nothing left to
@@ -172,6 +174,33 @@ func (s *Store) LeaseQueue(ctx context.Context, itemID uint, lease time.Duration
 // component handing out every URL, so pacing here bounds what a site actually
 // receives however many crawlers there are.
 func (s *Store) LeaseQueueSkipping(ctx context.Context, itemID uint, lease time.Duration, cooling []string) ([]byte, error) {
+	return s.LeaseQueueOrdered(ctx, itemID, lease, cooling, schedule.ByScore)
+}
+
+// orderBy turns a scheduling order into the clause that implements it.
+//
+// A closed set rather than a string from the caller: the frontier is a table
+// with a hundred thousand rows in it, so the choice has to be made by the
+// database, and taking SQL from a policy would be taking an injection point and
+// a dependency on the schema at once.
+func orderBy(o schedule.Order) string {
+	switch o {
+	case schedule.Breadth:
+		return "id ASC"
+	case schedule.Depth:
+		return "id DESC"
+	case schedule.Random:
+		return "RANDOM()"
+	default:
+		// Highest score first, ties by insertion order, which is what a
+		// focused crawl means.
+		return "score DESC, id ASC"
+	}
+}
+
+// LeaseQueueOrdered is LeaseQueueSkipping with the order chosen by a scheduling
+// policy rather than fixed.
+func (s *Store) LeaseQueueOrdered(ctx context.Context, itemID uint, lease time.Duration, cooling []string, order schedule.Order) ([]byte, error) {
 	if lease <= 0 {
 		lease = DefaultLease
 	}
@@ -189,7 +218,7 @@ func (s *Store) LeaseQueueSkipping(ctx context.Context, itemID uint, lease time.
 			q = q.Where("host = '' OR host NOT IN ?", cooling)
 		}
 		err := q.
-			Order("score DESC, id ASC").
+			Order(orderBy(order)).
 			First(&item).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrQueueEmpty

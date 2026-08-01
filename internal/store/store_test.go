@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/rangertaha/scour/internal/schedule"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -876,5 +877,97 @@ func TestTeachingOneDetailKeepsTheRest(t *testing.T) {
 		if tc.got != tc.want {
 			t.Errorf("%s = %q, want %q", tc.what, tc.got, tc.want)
 		}
+	}
+}
+
+// The scheduling order has to reach the query, or a pluggable scheduler is a
+// setting that changes nothing.
+func TestLeaseOrderFollowsTheSchedulingPolicy(t *testing.T) {
+	ctx := context.Background()
+
+	// A frontier each: leasing consumes, since ReleaseQueue means the URL is
+	// done rather than put back, so one queue cannot answer three questions.
+	for _, tc := range []struct {
+		order schedule.Order
+		want  string
+	}{
+		{schedule.ByScore, "http://example.com/best"},
+		{schedule.Breadth, "http://example.com/first"},
+		{schedule.Depth, "http://example.com/best"},
+	} {
+		t.Run(tc.order.String(), func(t *testing.T) {
+			s := open(t)
+			e, err := s.CreateItem(ctx, "vehicle")
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Queued oldest first with the best score last, so insertion order
+			// and score order disagree and the answer says which was used.
+			for _, q := range []struct {
+				url   string
+				score float64
+			}{
+				{"http://example.com/first", 0.1},
+				{"http://example.com/second", 0.5},
+				{"http://example.com/best", 0.9},
+			} {
+				data, err := json.Marshal(map[string]any{"URL": q.url})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := s.PushQueue(ctx, e.ID, q.score, URLHash(e.ID, q.url), data); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			data, err := s.LeaseQueueOrdered(ctx, e.ID, time.Minute, nil, tc.order)
+			if err != nil {
+				t.Fatalf("lease: %v", err)
+			}
+			var got struct{ URL string }
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.URL != tc.want {
+				t.Errorf("%s handed out %s, want %s", tc.order, got.URL, tc.want)
+			}
+		})
+	}
+}
+
+// The unchanged entry point must still mean what it always did, or every crawl
+// changes behaviour on upgrade.
+func TestLeaseQueueStillMeansBestFirst(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	e, err := s.CreateItem(ctx, "vehicle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []struct {
+		url   string
+		score float64
+	}{
+		{"http://example.com/first", 0.1},
+		{"http://example.com/best", 0.9},
+	} {
+		data, err := json.Marshal(map[string]any{"URL": q.url})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.PushQueue(ctx, e.ID, q.score, URLHash(e.ID, q.url), data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := s.LeaseQueue(ctx, e.ID, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct{ URL string }
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.URL != "http://example.com/best" {
+		t.Errorf("LeaseQueue handed out %s, want the highest score", got.URL)
 	}
 }

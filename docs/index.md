@@ -14,6 +14,7 @@ Instead of scraping whole sites and filtering afterwards, you get a ranked
 frontier and spend your crawl budget on the pages most likely to pay off.
 
 - **[The engine](engine.html)**: what the parts are, and how to extend them.
+- **[The hierarchies](hierarchy.html)**: what an item owns, what a schema becomes, what the crawl discovers.
 - **[Measured results](results.html)**: what it extracts, on live corpora.
 
 ## The loop
