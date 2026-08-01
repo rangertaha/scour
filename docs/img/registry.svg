@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 340" role="img"
+     aria-label="One generic registry underlies eight extension points: transport, score, matcher, classify, nodeclass, cache, export and ai. Each lists the implementations that ship with it.">
+  <style>
+    .core  { fill: #ddf4ff; stroke: #0969da; stroke-width: 2; rx: 6; }
+    .point { fill: #f6f8fa; stroke: #57606a; stroke-width: 1.5; rx: 6; }
+    .plan  { fill: #f6f8fa; stroke: #57606a; stroke-width: 1.5; stroke-dasharray: 4 3; rx: 6; }
+    .label { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #1f2328; }
+    .impl  { font: 10.5px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #57606a; }
+    .note  { font: 11px -apple-system, system-ui, sans-serif; fill: #57606a; }
+    .tie   { stroke: #0969da; stroke-width: 1; fill: none; opacity: .55; }
+    @media (prefers-color-scheme: dark) {
+      .core  { fill: #0d2d4d; stroke: #58a6ff; }
+      .point, .plan { fill: #21262d; stroke: #8b949e; }
+      .label { fill: #e6edf3; }
+      .impl, .note { fill: #8b949e; }
+      .tie   { stroke: #58a6ff; }
+    }
+  </style>
+
+  <rect class="core" x="330" y="140" width="200" height="56"/>
+  <text class="label" x="430" y="163" text-anchor="middle">internal/registry</text>
+  <text class="note"  x="430" y="181" text-anchor="middle">Register · New · Names · Has</text>
+
+  <g>
+    <rect class="point" x="20"  y="20" width="150" height="52"/>
+    <text class="label" x="95"  y="40" text-anchor="middle">transport</text>
+    <text class="impl"  x="95"  y="58" text-anchor="middle">http · webdriver</text>
+
+    <rect class="point" x="200" y="20" width="150" height="52"/>
+    <text class="label" x="275" y="40" text-anchor="middle">score</text>
+    <text class="impl"  x="275" y="58" text-anchor="middle">bayes · embed</text>
+
+    <rect class="point" x="510" y="20" width="150" height="52"/>
+    <text class="label" x="585" y="40" text-anchor="middle">matcher</text>
+    <text class="impl"  x="585" y="58" text-anchor="middle">heuristic · llm</text>
+
+    <rect class="point" x="690" y="20" width="150" height="52"/>
+    <text class="label" x="765" y="40" text-anchor="middle">classify</text>
+    <text class="impl"  x="765" y="58" text-anchor="middle">llm</text>
+
+    <rect class="point" x="20"  y="264" width="150" height="52"/>
+    <text class="label" x="95"  y="284" text-anchor="middle">cache</text>
+    <text class="impl"  x="95"  y="302" text-anchor="middle">local · s3 · gcs</text>
+
+    <rect class="point" x="200" y="264" width="150" height="52"/>
+    <text class="label" x="275" y="284" text-anchor="middle">export</text>
+    <text class="impl"  x="275" y="302" text-anchor="middle">csv · json · webhook</text>
+
+    <rect class="point" x="690" y="264" width="150" height="52"/>
+    <text class="label" x="765" y="284" text-anchor="middle">ai</text>
+    <text class="impl"  x="765" y="302" text-anchor="middle">anthropic · ollama</text>
+
+    <rect class="plan"  x="510" y="264" width="150" height="52"/>
+    <text class="label" x="585" y="284" text-anchor="middle">nodeclass</text>
+    <text class="impl"  x="585" y="302" text-anchor="middle">recency · topic</text>
+  </g>
+
+  <path class="tie" d="M95,72   C95,120 330,130 330,158"/>
+  <path class="tie" d="M275,72  C275,120 340,130 350,150"/>
+  <path class="tie" d="M585,72  C585,120 520,130 510,150"/>
+  <path class="tie" d="M765,72  C765,120 530,130 530,158"/>
+  <path class="tie" d="M95,264  C95,215 330,205 330,178"/>
+  <path class="tie" d="M275,264 C275,215 340,205 350,186"/>
+  <path class="tie" d="M585,264 C585,215 520,205 510,186"/>
+  <path class="tie" d="M765,264 C765,215 530,205 530,178"/>
+
+  <text class="note" x="430" y="222" text-anchor="middle">dashed: registered, not written yet</text>
+</svg>

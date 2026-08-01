@@ -1,0 +1,10 @@
+title: scour
+description: A focused web crawler that ranks links by how likely they are to hold what you want
+theme: jekyll-theme-primer
+show_downloads: false
+
+# GitHub Pages serves this directory from the default branch. Nothing here is
+# generated from the Go source, so a doc that drifts is a doc somebody has to
+# fix by hand; every command shown is checked against the binary before release.
+exclude:
+  - README.md

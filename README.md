@@ -13,6 +13,8 @@ every discovered URL a probability that it holds a match. Instead of scraping
 whole sites and filtering afterwards, you get a ranked frontier and spend your
 crawl budget on the pages most likely to pay off.
 
+Documentation, with diagrams: **https://rangertaha.github.io/scour/**
+
 ## Status
 
 Early development. Expect commands and flags to change. The module is not
