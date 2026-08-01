@@ -42,6 +42,3 @@ bin/
 
 # Coverage report
 coverage.html
-
-# Working design notes, kept out of the repository.
-/PLAN.md
