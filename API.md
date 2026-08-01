@@ -122,15 +122,21 @@ done and the body says with what:
 | `GET` | Read it |
 | `POST` | Add one member to this collection, or several |
 | `PATCH` | Change some fields of this resource |
-| `PUT` | Replace this resource, or declare a whole set |
+| `PUT` | Declare a whole set, replacing what was there |
 | `DELETE` | Remove it |
 
 `POST` and `PATCH` are the two that need care, because they are the two the CLI
 distinguishes. `POST /v1/jobs/{job}/targets` adds a target and leaves the rest,
 which is `scour job add`. `PATCH /v1/jobs/{job}` overwrites the fields it
-carries, which is `scour job set`. `PUT` on a collection declares it whole,
-which is what `scour item tag --set` does. The verbs mean here exactly what
-they mean there.
+carries and leaves the fields it does not, which is `scour job set`. `PUT` is
+only ever used on a collection, to say that these are its members and nothing
+else is, which is `scour item tag --set`. The methods mean here exactly what
+the verbs mean there.
+
+Nothing takes a `PUT` on a single resource, because CLI.md is explicit that
+teaching writes only what you give it: adding a label must not cost a property
+the example it was taught with. That is `PATCH` semantics, and a `PUT` that
+merged instead of replacing would be lying about which method it was.
 
 Three paths sit outside `/v1` because they are not resources: `/healthz`,
 the configured metrics path, and `/mcp`.
@@ -346,6 +352,34 @@ nine back, and would lose the difference between `add` and `set` that the CLI
 is careful about. An exclusion is a type with `"exclude": true`, so one
 collection carries both rather than two collections that can disagree.
 
+### Runs
+
+```json
+{
+  "id": "r-41",
+  "kind": "crawl",
+  "job": "vehicle",
+  "item": "vehicle",
+  "state": "budget",
+  "started": "2026-03-14T09:12:04Z",
+  "finished": "2026-03-14T09:41:55Z",
+  "pages": 5000,
+  "records": 318,
+  "error": null
+}
+```
+
+`kind` is `crawl` or `train`. A crawl run carries `job` and the `item` that job
+names; a training run carries `item` with `job` null, because a model is
+trained from every page every job of that item cached and belongs to no single
+one of them. `error` is set only when `state` is `failed`, and is the message
+CLI.md's `failed` state refers to.
+
+`pages` and `records` are counters rather than a result, so a client polling a
+running crawl sees them climb. There is no `result` blob: everything a run
+produced is readable through the item it produced it for, and a copy hanging
+off the run would be a second place for the same rows to disagree.
+
 ### Records
 
 ```json
@@ -364,6 +398,51 @@ Extracted values live under `fields` rather than at the top level, so a
 property called `id`, `url` or `verdict` cannot collide with the record's own
 metadata. The CSV export flattens them, because a file has one row of headers
 and no room for the distinction; JSON has room, so it keeps it.
+
+### Models
+
+```json
+{
+  "item": "vehicle",
+  "trained": "2026-03-14T10:02:11Z",
+  "pages": 6267,
+  "marked": 412,
+  "properties": {"make": 0.94, "model": 0.91, "price": 0.88},
+  "stale": true
+}
+```
+
+`pages` is how much the model was trained from and `marked` how many of its
+records carry a verdict, which is the supervision it had. `properties` is the
+model's confidence per property, which is what says whether another round of
+marking is worth anybody's time. `stale` is true when pages
+have been cached or records marked since `trained`, so a client can tell that
+retraining would use evidence the current model has never seen. The rules
+themselves are a collection of their own, because there are many per property
+and per site.
+
+### Nodes
+
+```json
+{
+  "name": "worker-3",
+  "role": "worker",
+  "state": "up",
+  "queue": 1842,
+  "rate": 4.7,
+  "seen": "2026-03-14T10:31:02Z"
+}
+```
+
+A node is `up`, `draining` or `down`. `draining` is what `scour node leave`
+puts it in, finishing the pages it already holds and accepting no more, which
+is why CLI.md says leaving drains first. `down` is a node whose heartbeat has
+aged out rather than one that said goodbye.
+
+`rate` is pages a second and `queue` is what this node has left to fetch, which
+together are what `scour top` draws. `seen` is the last heartbeat, so a node
+that has gone away is visible as a stale timestamp rather than by vanishing
+from the list, which would make a partition look like a clean shutdown.
 
 ### Errors
 
@@ -526,7 +605,8 @@ appears here.
 | --- | --- | --- |
 | `item add <n>` | `POST /v1/items` | `item_add` |
 | `item add <n> --template <t>` | `POST /v1/items` | `item_add` |
-| `item add <n> -p <p> -e <v>` | `PUT /v1/items/{n}/properties/{p}` | `item_add` |
+| `item add <n> -p <p> -e <v>`, new | `POST /v1/items/{n}/properties` | `item_add` |
+| `item add <n> -p <p> -e <v>`, existing | `PATCH /v1/items/{n}/properties/{p}` | `item_add` |
 | `item tag <n>` | `GET /v1/items/{n}/aliases` | `item_tag` |
 | `item tag <n> --add <w>` | `POST /v1/items/{n}/aliases` | `item_tag` |
 | `item tag <n> --rm <w>` | `DELETE /v1/items/{n}/aliases/{w}` | `item_tag` |
