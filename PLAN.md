@@ -207,6 +207,9 @@ func Register(name string, f func(Config) (http.RoundTripper, error))
 | matcher | `wom.Matcher` | heuristic, llm | `[model] matcher = "heuristic"` |
 | store | gorm dialector | sqlite, postgres, mysql | `[store] driver` |
 | export | `Exporter` | csv, json, webhook | `scour stream --write` |
+| classify | `Classifier` | llm | `[model] classifier` |
+| cache | `Store` | local, s3, gcs | `[cache] driver` |
+| nodeclass | `Classifier` | recency, topic (both planned) | not yet wired |
 
 A third-party build is then:
 
@@ -216,6 +219,16 @@ import (
     _ "github.com/example/scour-transport-splash"
 )
 ```
+
+All of them are one type. `internal/registry` holds the generic registry the
+six older points used to each carry a copy of, and `ENGINE.md` documents how to
+add an implementation and how to add a kind.
+
+`nodeclass` is the seat for classifying nodes of the crawl graph: what role a
+URL plays, what it is about, how fresh it is. The role question already has a
+decoder in `internal/score/hmm` whose answer nothing reads; moving it behind
+this point and reading it is what closes the section-pages-as-records fault.
+
 
 ## 5. AI models
 

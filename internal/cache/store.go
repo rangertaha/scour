@@ -4,9 +4,8 @@ package cache
 
 import (
 	"context"
-	"fmt"
-	"sort"
-	"sync"
+
+	"github.com/rangertaha/scour/internal/registry"
 )
 
 // Store is where fetched bodies are kept.
@@ -48,53 +47,18 @@ type Config struct {
 	Options map[string]string
 }
 
-// Factory builds a store.
-type Factory func(Config) (Store, error)
+// reg holds the implementations. See internal/registry for the shape every
+// extension point in scour shares, and for how to add one.
+var reg = registry.New[Config, Store]("cache driver").Default(driverLocal)
 
-var (
-	mu       sync.RWMutex
-	registry = map[string]Factory{}
-)
+// Register adds an implementation, from init.
+func Register(name string, f registry.Factory[Config, Store]) { reg.Register(name, f) }
 
-// Register adds an implementation, from init, so a driver is a blank import.
-func Register(name string, f Factory) {
-	mu.Lock()
-	defer mu.Unlock()
-	registry[name] = f
-}
+// New builds a registered implementation.
+func New(name string, cfg Config) (Store, error) { return reg.New(name, cfg) }
 
-// New builds a registered store. An empty name is the local one, which is what
-// an unconfigured scour uses and what everything else is compared against.
-func New(name string, cfg Config) (Store, error) {
-	if name == "" {
-		name = driverLocal
-	}
-	mu.RLock()
-	f, ok := registry[name]
-	mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("unknown cache driver %q, have %v", name, Names())
-	}
-	return f(cfg)
-}
+// Names lists what is registered.
+func Names() []string { return reg.Names() }
 
-// Names lists the registered drivers.
-func Names() []string {
-	mu.RLock()
-	defer mu.RUnlock()
-	out := make([]string, 0, len(registry))
-	for name := range registry {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// Has reports whether a driver is registered, so a bad name fails where it is
-// configured rather than on the first page fetched.
-func Has(name string) bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	_, ok := registry[name]
-	return ok
-}
+// Has reports whether a name is registered.
+func Has(name string) bool { return reg.Has(name) }

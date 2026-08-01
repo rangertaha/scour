@@ -14,11 +14,11 @@ package export
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"sort"
 	"strings"
-	"sync"
+
+	"github.com/rangertaha/scour/internal/registry"
 
 	"github.com/rangertaha/scour/internal/store"
 )
@@ -56,58 +56,24 @@ type Exporter interface {
 	Export(ctx context.Context, item string, rows []store.RecordRow) (*Result, error)
 }
 
-// Factory builds an exporter.
-type Factory func(Config) (Exporter, error)
-
-var (
-	mu       sync.RWMutex
-	registry = map[string]Factory{}
-)
-
-// Register adds a format, from init.
-func Register(name string, f Factory) {
-	mu.Lock()
-	defer mu.Unlock()
-	registry[name] = f
-}
-
-// Default is the format used when none is named.
+// Default is the format an export writes when none is named.
 const Default = "csv"
 
-// New builds a registered exporter. An empty name is [Default].
-func New(name string, cfg Config) (Exporter, error) {
-	if name == "" {
-		name = Default
-	}
+// reg holds the implementations. See internal/registry for the shape every
+// extension point in scour shares, and for how to add one.
+var reg = registry.New[Config, Exporter]("exporter").Default(Default)
 
-	mu.RLock()
-	f, ok := registry[name]
-	mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("unknown export format %q, have %s", name, strings.Join(Names(), ", "))
-	}
-	return f(cfg)
-}
+// Register adds an implementation, from init.
+func Register(name string, f registry.Factory[Config, Exporter]) { reg.Register(name, f) }
 
-// Names lists the registered formats.
-func Names() []string {
-	mu.RLock()
-	defer mu.RUnlock()
-	out := make([]string, 0, len(registry))
-	for name := range registry {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
+// New builds a registered implementation.
+func New(name string, cfg Config) (Exporter, error) { return reg.New(name, cfg) }
 
-// Has reports whether a format is registered.
-func Has(name string) bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	_, ok := registry[name]
-	return ok
-}
+// Names lists what is registered.
+func Names() []string { return reg.Names() }
+
+// Has reports whether a name is registered.
+func Has(name string) bool { return reg.Has(name) }
 
 // byDomain groups records by the host they were extracted from.
 //

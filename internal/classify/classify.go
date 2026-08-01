@@ -15,10 +15,10 @@ package classify
 
 import (
 	"context"
-	"fmt"
-	"sort"
 	"strings"
 	"sync"
+
+	"github.com/rangertaha/scour/internal/registry"
 )
 
 // Category is what a page turned out to be about.
@@ -138,51 +138,21 @@ type Cache interface {
 	Remember(ctx context.Context, key, model, verdict string) error
 }
 
-// Factory builds a classifier.
-type Factory func(Config) (Classifier, error)
-
-var (
-	mu       sync.RWMutex
-	registry = map[string]Factory{}
-)
+// reg holds the implementations. See internal/registry for the shape every
+// extension point in scour shares, and for how to add one.
+var reg = registry.New[Config, Classifier]("classifier")
 
 // Register adds an implementation, from init.
-func Register(name string, f Factory) {
-	mu.Lock()
-	defer mu.Unlock()
-	registry[name] = f
-}
+func Register(name string, f registry.Factory[Config, Classifier]) { reg.Register(name, f) }
 
-// New builds a registered classifier by name.
-func New(name string, cfg Config) (Classifier, error) {
-	mu.RLock()
-	f, ok := registry[name]
-	mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("unknown classifier %q, have %s", name, strings.Join(Names(), ", "))
-	}
-	return f(cfg)
-}
+// New builds a registered implementation.
+func New(name string, cfg Config) (Classifier, error) { return reg.New(name, cfg) }
 
-// Names lists the registered classifiers.
-func Names() []string {
-	mu.RLock()
-	defer mu.RUnlock()
-	out := make([]string, 0, len(registry))
-	for name := range registry {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
+// Names lists what is registered.
+func Names() []string { return reg.Names() }
 
-// Has reports whether a classifier is registered.
-func Has(name string) bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	_, ok := registry[name]
-	return ok
-}
+// Has reports whether a name is registered.
+func Has(name string) bool { return reg.Has(name) }
 
 // MemoryCache is a Cache that lives for one run.
 type MemoryCache struct {

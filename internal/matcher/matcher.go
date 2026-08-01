@@ -11,9 +11,9 @@ package matcher
 
 import (
 	"context"
-	"fmt"
-	"sort"
 	"sync"
+
+	"github.com/rangertaha/scour/internal/registry"
 
 	"github.com/rangertaha/scour/internal/ai"
 	"github.com/rangertaha/scour/internal/wom"
@@ -38,56 +38,21 @@ type Config struct {
 	Floor, Ceiling float64
 }
 
-// Factory builds a matcher.
-type Factory func(Config) (wom.Matcher, error)
-
-var (
-	mu       sync.RWMutex
-	registry = map[string]Factory{}
-)
+// reg holds the implementations. See internal/registry for the shape every
+// extension point in scour shares, and for how to add one.
+var reg = registry.New[Config, wom.Matcher]("matcher").Default("heuristic")
 
 // Register adds an implementation, from init.
-func Register(name string, f Factory) {
-	mu.Lock()
-	defer mu.Unlock()
-	registry[name] = f
-}
+func Register(name string, f registry.Factory[Config, wom.Matcher]) { reg.Register(name, f) }
 
-// New builds a registered matcher. An empty name is the heuristic, which is
-// what an unconfigured scour uses and what everything else is compared to.
-func New(name string, cfg Config) (wom.Matcher, error) {
-	if name == "" {
-		name = "heuristic"
-	}
+// New builds a registered implementation.
+func New(name string, cfg Config) (wom.Matcher, error) { return reg.New(name, cfg) }
 
-	mu.RLock()
-	f, ok := registry[name]
-	mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("unknown matcher %q, have %v", name, Names())
-	}
-	return f(cfg)
-}
+// Names lists what is registered.
+func Names() []string { return reg.Names() }
 
-// Names lists the registered matchers.
-func Names() []string {
-	mu.RLock()
-	defer mu.RUnlock()
-	out := make([]string, 0, len(registry))
-	for name := range registry {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// Has reports whether a matcher is registered.
-func Has(name string) bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	_, ok := registry[name]
-	return ok
-}
+// Has reports whether a name is registered.
+func Has(name string) bool { return reg.Has(name) }
 
 // Cache remembers what a model said about a node, keyed by a hash of the
 // question rather than by identity.

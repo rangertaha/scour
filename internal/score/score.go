@@ -9,14 +9,13 @@
 package score
 
 import (
-	"fmt"
 	"net/url"
 	"path"
-	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"unicode"
+
+	"github.com/rangertaha/scour/internal/registry"
 )
 
 // Features are what a scorer sees about a link. It is deliberately everything
@@ -62,7 +61,6 @@ type Config struct {
 
 // Factory builds a scorer. Registered implementations are selected by name
 // from the configuration.
-type Factory func(Config) (Scorer, error)
 
 // Trained is implemented by scorers that can say whether they were fitted to
 // a crawl or are still working from their seed words. `scour start` reports
@@ -71,57 +69,25 @@ type Trained interface {
 	Trained() bool
 }
 
-var (
-	mu       sync.RWMutex
-	registry = map[string]Factory{}
-)
-
-// Register adds an implementation. It is called from init, so a plugin is a
-// blank import.
-func Register(name string, f Factory) {
-	mu.Lock()
-	defer mu.Unlock()
-	registry[name] = f
-}
-
-// New builds a registered scorer by name. An empty name is the default.
-func New(name string, cfg Config) (Scorer, error) {
-	if name == "" {
-		name = Default
-	}
-
-	mu.RLock()
-	f, ok := registry[name]
-	mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("unknown scorer %q, have %s", name, strings.Join(Names(), ", "))
-	}
-	return f(cfg)
-}
-
-// Default is the scorer used when configuration names none. It needs no model
-// file, no vectors and no network, which is what makes it the right default.
+// Default is the scorer an unconfigured scour uses, and what everything else
+// is compared against.
 const Default = "bayes"
 
-// Has reports whether a scorer is registered.
-func Has(name string) bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	_, ok := registry[name]
-	return ok
-}
+// reg holds the implementations. See internal/registry for the shape every
+// extension point in scour shares, and for how to add one.
+var reg = registry.New[Config, Scorer]("scorer").Default(Default)
 
-// Names lists the registered scorers.
-func Names() []string {
-	mu.RLock()
-	defer mu.RUnlock()
-	out := make([]string, 0, len(registry))
-	for name := range registry {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
+// Register adds an implementation, from init.
+func Register(name string, f registry.Factory[Config, Scorer]) { reg.Register(name, f) }
+
+// New builds a registered implementation.
+func New(name string, cfg Config) (Scorer, error) { return reg.New(name, cfg) }
+
+// Names lists what is registered.
+func Names() []string { return reg.Names() }
+
+// Has reports whether a name is registered.
+func Has(name string) bool { return reg.Has(name) }
 
 // Fixed gives every URL the same score. It is what a crawl uses when scoring
 // is switched off, and keeping it named is what stops an unscored crawl from

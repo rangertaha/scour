@@ -4,7 +4,11 @@
 
 package cache
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rangertaha/scour/internal/registry"
+)
 
 // The object stores are compiled in only with -tags cloud, because linking the
 // AWS and Google SDKs costs 41MB and most crawls keep their pages in a
@@ -19,7 +23,7 @@ func init() {
 	}
 }
 
-func missingDriver(name string) Factory {
+func missingDriver(name string) registry.Factory[Config, Store] {
 	return func(Config) (Store, error) {
 		return nil, fmt.Errorf(
 			"cache driver %q needs a build with the object stores: go build -tags cloud", name)

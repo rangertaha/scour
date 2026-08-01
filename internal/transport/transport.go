@@ -11,12 +11,10 @@
 package transport
 
 import (
-	"fmt"
 	"net/http"
-	"sort"
-	"strings"
-	"sync"
 	"time"
+
+	"github.com/rangertaha/scour/internal/registry"
 )
 
 // Config is what a transport is built from.
@@ -47,54 +45,18 @@ type BrowserConfig struct {
 	ExecPath string
 }
 
-// Factory builds a transport.
-type Factory func(Config) (http.RoundTripper, error)
+// reg holds the implementations. See internal/registry for the shape every
+// extension point in scour shares, and for how to add one.
+var reg = registry.New[Config, http.RoundTripper]("transport").Default("http")
 
-var (
-	mu       sync.RWMutex
-	registry = map[string]Factory{}
-)
+// Register adds an implementation, from init.
+func Register(name string, f registry.Factory[Config, http.RoundTripper]) { reg.Register(name, f) }
 
-// Register adds an implementation, from init, so a plugin is a blank import.
-func Register(name string, f Factory) {
-	mu.Lock()
-	defer mu.Unlock()
-	registry[name] = f
-}
+// New builds a registered implementation.
+func New(name string, cfg Config) (http.RoundTripper, error) { return reg.New(name, cfg) }
 
-// New builds a registered transport by name. An empty name is the plain HTTP
-// one, which is what a host with no policy of its own gets.
-func New(name string, cfg Config) (http.RoundTripper, error) {
-	if name == "" {
-		name = "http"
-	}
+// Names lists what is registered.
+func Names() []string { return reg.Names() }
 
-	mu.RLock()
-	f, ok := registry[name]
-	mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("unknown transport %q, have %s", name, strings.Join(Names(), ", "))
-	}
-	return f(cfg)
-}
-
-// Names lists the registered transports.
-func Names() []string {
-	mu.RLock()
-	defer mu.RUnlock()
-	out := make([]string, 0, len(registry))
-	for name := range registry {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// Has reports whether a transport is registered, so a caller can fall back
-// rather than fail when an optional one was left out of the build.
-func Has(name string) bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	_, ok := registry[name]
-	return ok
-}
+// Has reports whether a name is registered.
+func Has(name string) bool { return reg.Has(name) }
