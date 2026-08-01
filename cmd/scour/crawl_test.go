@@ -218,7 +218,7 @@ func TestStopNeedsForceAndThenDiscards(t *testing.T) {
 		t.Errorf("a refused stop changed something:\n%s\n%s", before, after)
 	}
 
-	visitedBefore := visitedCount(t, dir)
+	visitedBefore := visitedCount(t, dir, "vehicle")
 
 	out := runOK(t, dir, "job", "stop", "vehicle", "--force")
 	if !strings.Contains(out, "discarded") {
@@ -229,7 +229,7 @@ func TestStopNeedsForceAndThenDiscards(t *testing.T) {
 	}
 	// The pages are the item's corpus, and stop is documented as keeping them.
 	// Discarding them here is how a stop costs a refetch of the whole site.
-	if got := visitedCount(t, dir); got != visitedBefore {
+	if got := visitedCount(t, dir, "vehicle"); got != visitedBefore {
 		t.Errorf("stop discarded %d visited pages, want the corpus kept at %d",
 			visitedBefore-got, visitedBefore)
 	}
@@ -237,9 +237,9 @@ func TestStopNeedsForceAndThenDiscards(t *testing.T) {
 
 // visitedCount reads the pages fetched from `scour item show`, which reports
 // them as "<queued> queued / <visited> visited".
-func visitedCount(t *testing.T, dir string) int {
+func visitedCount(t *testing.T, dir string, item string) int {
 	t.Helper()
-	for _, line := range strings.Split(runOK(t, dir, "item", "show", "vehicle"), "\n") {
+	for _, line := range strings.Split(runOK(t, dir, "item", "show", item), "\n") {
 		_, rest, ok := strings.Cut(line, " / ")
 		if !ok || !strings.Contains(line, "queued") {
 			continue
@@ -250,7 +250,7 @@ func visitedCount(t *testing.T, dir string) int {
 		}
 		return n
 	}
-	t.Fatalf("no frontier line in item show:\n%s", runOK(t, dir, "item", "show", "vehicle"))
+	t.Fatalf("no frontier line in item show:\n%s", runOK(t, dir, "item", "show", item))
 	return 0
 }
 

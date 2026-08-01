@@ -2,7 +2,10 @@
 
 package content
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func set(t *testing.T, allow, deny []string) *Set {
 	t.Helper()
@@ -160,12 +163,35 @@ func TestFeedTypes(t *testing.T) {
 }
 
 func TestFeedExtensions(t *testing.T) {
-	for ext, want := range map[string]string{
-		".rss": "feed", ".atom": "feed", ".rdf": "feed", ".xml": "xml",
+	for ext, want := range map[string][]string{
+		".rss": {"feed"}, ".atom": {"feed"}, ".rdf": {"feed"},
+		// .xml is both, and must be, because feed.xml is how the web
+		// overwhelmingly publishes feeds.
+		".xml": {"xml", "feed"},
 	} {
-		if got := extensions[ext]; got != want {
+		if got := extensions[ext]; !slices.Equal(got, want) {
 			t.Errorf("%s maps to %q, want %q", ext, got, want)
 		}
+	}
+}
+
+// feed.xml is the single most common feed URL on the web. A crawl asked for
+// feeds that skips it by its filename, before ever seeing a Content-Type,
+// fetches nothing at all.
+func TestAFeedDotXMLIsNotSkippedByItsExtension(t *testing.T) {
+	feeds := set(t, []string{"feed"}, nil)
+	for _, p := range []string{"/feed.xml", "/rss.xml", "/atom.xml", "/blog/index.xml"} {
+		if !feeds.AllowsPath(p) {
+			t.Errorf("a crawl asked for feeds skipped %s by its extension", p)
+		}
+	}
+}
+
+// The ambiguity must not become a hole: asked only for html, an .xml URL is
+// still certainly unwanted.
+func TestAnXMLPathIsStillSkippedWhenNeitherTypeIsWanted(t *testing.T) {
+	if set(t, []string{"html"}, nil).AllowsPath("/feed.xml") {
+		t.Error("a crawl asked only for html did not skip /feed.xml")
 	}
 }
 

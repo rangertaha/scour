@@ -725,8 +725,13 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 
 	// Link discovery. Scoring happens here, before the link is queued, so
 	// colly's depth and domain rules still apply on top of our decision.
-	collector.OnHTML("a[href]", func(e *colly.HTMLElement) {
-		link := e.Request.AbsoluteURL(e.Attr("href"))
+	//
+	// The href and the anchor are passed in rather than read from an element,
+	// because a link is not always an <a>. A feed names its articles in <link>
+	// elements and carries their headlines in a sibling <title>, which is a
+	// better anchor than most pages manage.
+	discover := func(r *colly.Request, href, anchor string) {
+		link := r.AbsoluteURL(href)
 		if link == "" {
 			return
 		}
@@ -734,9 +739,9 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 
 		predicted := opts.Scorer.Score(score.Features{
 			URL:    link,
-			Anchor: strings.TrimSpace(e.Text),
-			Depth:  e.Request.Depth + 1,
-			Parent: e.Request.URL.String(),
+			Anchor: strings.TrimSpace(anchor),
+			Depth:  r.Depth + 1,
+			Parent: r.URL.String(),
 		})
 		if predicted < c.cfg.Model.MinScore {
 			slog.Debug("link below cutoff", "url", link, "score", predicted)
@@ -750,28 +755,46 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 			return
 		}
 
-		if err := c.sink.Discovered(ctx, itemID, link, e.Request.URL.String(), e.Request.Depth+1, predicted); err != nil {
+		if err := c.sink.Discovered(ctx, itemID, link, r.URL.String(), r.Depth+1, predicted); err != nil {
 			slog.Error("record discovered failed", "url", link, "err", err)
 		}
 
 		// Queue rather than visit directly, so every URL goes through the one
 		// scheduler and survives a restart. colly still applies its depth,
 		// domain and revisit rules when the request comes back out.
-		req, err := e.Request.New("GET", link, nil)
+		req, err := r.New("GET", link, nil)
 		if err != nil {
 			slog.Debug("not queued", "url", link, "err", err)
 			return
 		}
 		// A fresh context: Request.New shares the parent's, and mutating that
 		// would leak this link's score and lineage to its siblings.
-		req.Depth = e.Request.Depth + 1
+		req.Depth = r.Depth + 1
 		req.Ctx = colly.NewContext()
 		req.Ctx.Put(ctxScore, formatScore(predicted))
-		req.Ctx.Put(ctxParent, e.Request.URL.String())
+		req.Ctx.Put(ctxParent, r.URL.String())
 
 		if err := enqueue(pending, sc, req); err != nil {
 			slog.Error("queue link failed", "url", link, "err", err)
 		}
+	}
+
+	collector.OnHTML("a[href]", func(e *colly.HTMLElement) {
+		discover(e.Request, e.Attr("href"), e.Text)
+	})
+
+	// A feed is a list of URLs, and it is the one document type where reading
+	// only <a href> finds nothing at all. Pointing a crawl at a news site's
+	// feed is the ordinary way to use one, and it fetched the feed and stopped.
+	//
+	// RSS and RDF put the article in a <link> element's text; Atom puts it in
+	// that element's href. Both carry the headline in a sibling <title>, which
+	// makes a better anchor for scoring than the link text on most pages.
+	collector.OnXML("//item", func(e *colly.XMLElement) {
+		discover(e.Request, strings.TrimSpace(e.ChildText("link")), e.ChildText("title"))
+	})
+	collector.OnXML("//entry", func(e *colly.XMLElement) {
+		discover(e.Request, strings.TrimSpace(e.ChildAttr("link", "href")), e.ChildText("title"))
 	})
 
 	collector.OnError(func(r *colly.Response, err error) {

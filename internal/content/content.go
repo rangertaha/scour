@@ -39,20 +39,27 @@ var Shorthands = map[string][]string{
 	},
 }
 
-// extensions maps a file extension to the shorthand it belongs to. It is used
-// only to skip a request that is certain to be unwanted; an unknown extension
-// is never grounds for skipping, since the header is the authority.
-var extensions = map[string]string{
-	".html": "html", ".htm": "html", ".xhtml": "html",
-	".pdf":  "pdf",
-	".json": "json", ".jsonl": "json", ".ndjson": "json",
-	".xml": "xml", ".rss": "feed", ".atom": "feed", ".rdf": "feed",
-	".txt": "text", ".md": "text", ".csv": "text",
-	".jpg": "image", ".jpeg": "image", ".png": "image", ".gif": "image",
-	".webp": "image", ".bmp": "image", ".ico": "image", ".svg": "image",
-	".css": "css", ".js": "js", ".mjs": "js",
-	".zip": "archive", ".gz": "archive", ".tar": "archive",
-	".mp4": "video", ".webm": "video", ".mp3": "audio",
+// extensions maps a file extension to the shorthands it could belong to. It is
+// used only to skip a request that is certain to be unwanted; an unknown
+// extension is never grounds for skipping, since the header is the authority.
+//
+// Most extensions name one type. .xml names two, and getting that wrong costs
+// more than anywhere else on this list: feed.xml, rss.xml, atom.xml and
+// index.xml are how the web actually publishes feeds, and reading .xml as
+// plain xml alone meant a crawl asked for feeds skipped them by their filename
+// before it ever saw a Content-Type saying application/rss+xml. That is the
+// same mistake the feed shorthand exists to correct, made one layer earlier.
+var extensions = map[string][]string{
+	".html": {"html"}, ".htm": {"html"}, ".xhtml": {"html"},
+	".pdf":  {"pdf"},
+	".json": {"json"}, ".jsonl": {"json"}, ".ndjson": {"json"},
+	".xml": {"xml", "feed"}, ".rss": {"feed"}, ".atom": {"feed"}, ".rdf": {"feed"},
+	".txt": {"text"}, ".md": {"text"}, ".csv": {"text"},
+	".jpg": {"image"}, ".jpeg": {"image"}, ".png": {"image"}, ".gif": {"image"},
+	".webp": {"image"}, ".bmp": {"image"}, ".ico": {"image"}, ".svg": {"image"},
+	".css": {"css"}, ".js": {"js"}, ".mjs": {"js"},
+	".zip": {"archive"}, ".gz": {"archive"}, ".tar": {"archive"},
+	".mp4": {"video"}, ".webm": {"video"}, ".mp3": {"audio"},
 }
 
 // Extractable lists the shorthands scour can pull text out of. Types outside
@@ -190,20 +197,31 @@ func (s *Set) AllowsPath(urlPath string) bool {
 	if ext == "" {
 		return true
 	}
-	shorthand, known := extensions[ext]
+	shorthands, known := extensions[ext]
 	if !known {
 		return true
 	}
-	mimes, ok := Shorthands[shorthand]
-	if !ok {
+
+	// An extension that could be more than one type is ruled out only when
+	// every type it could be is unwanted. Skipping on the strength of the
+	// likelier reading would drop the case the ambiguity exists for.
+	var crawlable bool
+	for _, shorthand := range shorthands {
+		mimes, ok := Shorthands[shorthand]
+		if !ok {
+			continue
+		}
+		crawlable = true
+		for _, m := range mimes {
+			if s.AllowsMIME(m) {
+				return true
+			}
+		}
+	}
+	if !crawlable {
 		// A type we recognise but never crawl, such as css or an archive.
 		// Allowed only if the operator asked for it by MIME type.
 		return len(s.allow) == 0
-	}
-	for _, m := range mimes {
-		if s.AllowsMIME(m) {
-			return true
-		}
 	}
 	return false
 }
