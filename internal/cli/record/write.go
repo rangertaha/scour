@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rangertaha/scour/internal/cli"
+	"github.com/rangertaha/scour/internal/query"
 
 	"github.com/rangertaha/scour/internal/export"
 	"github.com/rangertaha/scour/internal/store"
@@ -23,6 +24,10 @@ type exportFlags struct {
 	confidence float64
 	label      string
 	limit      int
+
+	// terms is the search a listing was narrowed by, so exporting what is on
+	// screen does not mean restating it as filter flags.
+	terms []string
 }
 
 func runExport(c context.Context, a *cli.App, name string, f exportFlags) error {
@@ -31,7 +36,12 @@ func runExport(c context.Context, a *cli.App, name string, f exportFlags) error 
 		return err
 	}
 
-	item, err := s.Item(c, name)
+	item, err := s.ItemFull(c, name)
+	if err != nil {
+		return err
+	}
+
+	q, err := query.Parse(f.terms, propNames(item))
 	if err != nil {
 		return err
 	}
@@ -45,6 +55,7 @@ func runExport(c context.Context, a *cli.App, name string, f exportFlags) error 
 	}
 
 	rows, total, err := s.SearchRecords(c, item.ID, store.RecordQuery{
+		Terms:         q.Terms,
 		MinConfidence: f.confidence,
 		Label:         store.Label(f.label),
 		Limit:         f.limit,

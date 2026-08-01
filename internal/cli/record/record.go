@@ -19,10 +19,11 @@ func Record(a *cli.App) *ucli.Command {
 		Usage:    "Read, mark and export what was found",
 		Description: "The records are the product. This is where you read them, tell the model\n" +
 			"which ones it got wrong, and take the rest out.",
-		UsageText: "  scour record ls vehicle\n" +
+		UsageText: "  scour record search vehicle make:Ford\n" +
+			"  scour record ls vehicle\n" +
 			"  scour record ls vehicle --follow\n" +
 			"  scour record mark vehicle 1042 --verdict invalid\n" +
 			"  scour record write vehicle --format csv --to ./out",
-		Commands: []*ucli.Command{List(a), Mark(a)},
+		Commands: []*ucli.Command{Search(a), List(a), Mark(a)},
 	})
 }

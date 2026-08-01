@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"testing"
+
+	"github.com/rangertaha/scour/internal/query"
 )
 
 // SinceID is what a follower asks with: it has already seen everything below
@@ -155,5 +157,217 @@ func TestLabelRecordsIgnoresUnknownIDs(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("labelled %d unknown records, want 0", n)
+	}
+}
+
+// seedRecords writes records with values and urls, which is what a search runs
+// over. Built through the store rather than by hand so the test exercises the
+// same rows the extractor writes.
+func seedRecords(t *testing.T, s *Store, item *Item) {
+	t.Helper()
+	ctx := context.Background()
+	rows := []struct {
+		url    string
+		conf   float64
+		values map[string]string
+	}{
+		{"https://example.com/trucks/f-150", 0.9, map[string]string{"make": "Ford", "model": "F-150 crew cab", "year": "2026"}},
+		{"https://example.com/cars/focus", 0.8, map[string]string{"make": "Ford", "model": "Focus", "year": "2019"}},
+		{"https://other.com/trucks/tundra", 0.7, map[string]string{"make": "Toyota", "model": "Tundra", "year": "2026"}},
+		{"https://other.com/blog/ford-history", 0.6, map[string]string{"make": "Various", "model": "A history of Ford", "year": "2020"}},
+	}
+	for i, r := range rows {
+		if err := s.Discovered(ctx, item.ID, r.url, "", 0, 1); err != nil {
+			t.Fatal(err)
+		}
+		u, err := s.urlID(ctx, item.ID, r.url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := Record{
+			ItemID: item.ID, URLID: u, Confidence: r.conf,
+			Fingerprint: fmt.Sprintf("fp-%d", i), Format: "html",
+		}
+		for p, v := range r.values {
+			rec.Values = append(rec.Values, Value{Prop: p, Text: v})
+		}
+		if err := s.DB().Create(&rec).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A search is not a listing: it takes a query, every term narrows, and the
+// order is how well each row answers it.
+func TestSearchRecordsByQuery(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "vehicle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRecords(t, s, item)
+	props := []string{"make", "model", "year"}
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"a bare word reaches every field", []string{"Ford"}, 3},
+		{"a field term looks only there", []string{"make:Ford"}, 2},
+		{"terms narrow", []string{"make:Ford", "year:2026"}, 1},
+		{"the url is searchable", []string{"url:other.com"}, 2},
+		{"a bare word reaches the url", []string{"trucks"}, 2},
+		{"no match is not an error", []string{"make:Honda"}, 0},
+		{"matching is case insensitive", []string{"make:ford"}, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q, err := query.Parse(tc.args, props)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows, _, err := s.SearchRecords(ctx, item.ID, RecordQuery{Terms: q.Terms})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != tc.want {
+				got := make([]string, 0, len(rows))
+				for _, r := range rows {
+					got = append(got, r.Values["make"]+"/"+r.Values["model"])
+				}
+				t.Errorf("%v matched %d rows %v, want %d", tc.args, len(rows), got, tc.want)
+			}
+		})
+	}
+}
+
+// The ordering is what makes search worth having: the record whose field is the
+// word comes above the one that merely mentions it, whatever their confidence.
+func TestSearchRanksTheDirectAnswerFirst(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "vehicle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRecords(t, s, item)
+
+	q, err := query.Parse([]string{"Ford"}, []string{"make", "model", "year"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, _, err := s.SearchRecords(ctx, item.ID, RecordQuery{Terms: q.Terms})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) < 3 {
+		t.Fatalf("got %d rows, want the three mentioning Ford", len(rows))
+	}
+	if rows[0].Values["make"] != "Ford" {
+		t.Errorf("first row is %q, want one whose make is exactly Ford", rows[0].Values["make"])
+	}
+	// The blog post has Ford inside a longer value, so it comes last however
+	// its confidence compares.
+	last := rows[len(rows)-1]
+	if last.Values["model"] != "A history of Ford" {
+		t.Errorf("last row is %q, want the one that only mentions Ford", last.Values["model"])
+	}
+	if len(rows[0].Matched) == 0 || rows[0].Matched[0] != "make" {
+		t.Errorf("matched on %v, want make named first", rows[0].Matched)
+	}
+	if rows[0].Rank <= last.Rank {
+		t.Errorf("ranks are %v and %v, want the direct answer above", rows[0].Rank, last.Rank)
+	}
+}
+
+// The limit has to come after the ranking, or a search returns an arbitrary
+// slice of the matches and calls it the best.
+func TestSearchLimitsAfterRanking(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "vehicle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRecords(t, s, item)
+
+	q, err := query.Parse([]string{"Ford"}, []string{"make", "model", "year"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, total, err := s.SearchRecords(ctx, item.ID, RecordQuery{Terms: q.Terms, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if total != 3 {
+		t.Errorf("total = %d, want the 3 that matched rather than the page size", total)
+	}
+	if rows[0].Values["make"] != "Ford" {
+		t.Errorf("the one row kept is %q, want the best match", rows[0].Values["make"])
+	}
+}
+
+// A wildcard in a term is a character to look for, not a pattern. Without
+// escaping, searching for a percent sign returns everything.
+func TestSearchTreatsWildcardsAsText(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "vehicle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRecords(t, s, item)
+
+	for _, term := range []string{"%", "_"} {
+		q, err := query.Parse([]string{term}, []string{"make"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, _, err := s.SearchRecords(ctx, item.ID, RecordQuery{Terms: q.Terms})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 0 {
+			t.Errorf("%q matched %d rows, want 0: it is a character, not a wildcard", term, len(rows))
+		}
+	}
+}
+
+// A follower wants what landed after its mark, in the order it landed. Ranking
+// a poll would print the stream out of sequence.
+func TestSearchFollowKeepsArrivalOrder(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "vehicle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRecords(t, s, item)
+
+	q, err := query.Parse([]string{"Ford"}, []string{"make", "model", "year"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, _, err := s.SearchRecords(ctx, item.ID, RecordQuery{Terms: q.Terms, SinceID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) < 2 {
+		t.Fatalf("got %d rows after the mark, want at least 2", len(rows))
+	}
+	for i := 1; i < len(rows); i++ {
+		if rows[i].ID <= rows[i-1].ID {
+			t.Fatalf("ids came back %d then %d, want ascending", rows[i-1].ID, rows[i].ID)
+		}
+	}
+	// And the query still narrows: the Toyota must not appear.
+	for _, r := range rows {
+		if r.Values["make"] == "Toyota" {
+			t.Error("a follower was given a record the query excludes")
+		}
 	}
 }

@@ -54,55 +54,7 @@ func List(a *cli.App) *ucli.Command {
 			"Write them out instead of printing them:\n" +
 			"  scour record ls vehicle --write csv --to ./out\n" +
 			"  scour record ls vehicle --write webhook --to https://example.com/ingest",
-		Flags: []ucli.Flag{
-			&ucli.FloatFlag{
-				Name:        "confidence",
-				Usage:       "only records at or above this confidence, 0 to 1",
-				Destination: &f.confidence,
-			},
-			&ucli.StringSliceFlag{
-				Name:        "type",
-				Usage:       "only records extracted from a content type (repeatable)",
-				Destination: &f.types,
-			},
-			&ucli.StringSliceFlag{
-				Name:        "exclude-type",
-				Usage:       "skip records from a content type (repeatable)",
-				Destination: &f.excludeType,
-			},
-			&ucli.StringFlag{
-				Name:        "verdict",
-				Aliases:     []string{"marked", "label"},
-				Usage:       "only records carrying this `verdict`: valid, invalid, none",
-				Destination: &f.label,
-			},
-			&ucli.StringSliceFlag{
-				Name:        "format",
-				Usage:       "alias for --type",
-				Destination: &f.types,
-			},
-			&ucli.BoolFlag{
-				Name:        "follow",
-				Aliases:     []string{"f"},
-				Usage:       "keep printing records as they are extracted",
-				Destination: &f.follow,
-			},
-			&ucli.StringFlag{
-				Name:        "write",
-				Usage:       "write the records out instead of printing them: " + exportFormats(),
-				Destination: &f.out.format,
-			},
-			&ucli.StringFlag{
-				Name:        "to",
-				Usage:       "`destination` for --write: a directory, or a URL for the webhook format",
-				Destination: &f.out.to,
-			},
-			&ucli.StringFlag{
-				Name:        "token-env",
-				Usage:       "environment `variable` holding the webhook bearer token",
-				Destination: &f.out.tokenEnv,
-			},
-		},
+		Flags: searchFlags(&f),
 		Action: func(c context.Context, cmd *ucli.Command) error {
 			args, err := cli.Need(cmd, 1, "one item name")
 			if err != nil {
@@ -333,5 +285,62 @@ func parseLabel(s string) (store.Label, error) {
 		return store.Unlabelled, nil
 	default:
 		return "", fmt.Errorf("unknown label %q: use valid, invalid or unlabelled", s)
+	}
+}
+
+// searchFlags are the filters record ls and record search share.
+//
+// One list rather than two, because the design's rule is that every ls filter
+// works on a search as well: a search can be pinned to one content type, one
+// confidence, or one verdict without learning a second set of names.
+func searchFlags(f *streamFlags) []ucli.Flag {
+	return []ucli.Flag{
+		&ucli.FloatFlag{
+			Name:        "confidence",
+			Usage:       "only records at or above this confidence, 0 to 1",
+			Destination: &f.confidence,
+		},
+		&ucli.StringSliceFlag{
+			Name:        "type",
+			Usage:       "only records extracted from a content type (repeatable)",
+			Destination: &f.types,
+		},
+		&ucli.StringSliceFlag{
+			Name:        "exclude-type",
+			Usage:       "skip records from a content type (repeatable)",
+			Destination: &f.excludeType,
+		},
+		&ucli.StringFlag{
+			Name:        "verdict",
+			Aliases:     []string{"marked", "label"},
+			Usage:       "only records carrying this `verdict`: valid, invalid, none",
+			Destination: &f.label,
+		},
+		&ucli.StringSliceFlag{
+			Name:        "format",
+			Usage:       "alias for --type",
+			Destination: &f.types,
+		},
+		&ucli.BoolFlag{
+			Name:        "follow",
+			Aliases:     []string{"f"},
+			Usage:       "keep printing records as they are extracted",
+			Destination: &f.follow,
+		},
+		&ucli.StringFlag{
+			Name:        "write",
+			Usage:       "write the records out instead of printing them: " + exportFormats(),
+			Destination: &f.out.format,
+		},
+		&ucli.StringFlag{
+			Name:        "to",
+			Usage:       "`destination` for --write: a directory, or a URL for the webhook format",
+			Destination: &f.out.to,
+		},
+		&ucli.StringFlag{
+			Name:        "token-env",
+			Usage:       "environment `variable` holding the webhook bearer token",
+			Destination: &f.out.tokenEnv,
+		},
 	}
 }

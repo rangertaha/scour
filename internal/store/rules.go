@@ -13,6 +13,8 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"github.com/rangertaha/scour/internal/query"
 )
 
 // ReplaceRules swaps an item's induced rules for a new set.
@@ -178,6 +180,11 @@ func existingRecords(tx *gorm.DB, itemID uint) (map[string]Record, error) {
 
 // RecordQuery filters a search over extracted records.
 type RecordQuery struct {
+	// Terms is the search. Every one must match, and their presence changes
+	// the order from newest or best first to best answering the query, which
+	// is the whole difference between record ls and record search.
+	Terms []query.Term
+
 	MinConfidence float64
 	Formats       []string
 	ExcludeFormat []string
@@ -196,6 +203,11 @@ type RecordRow struct {
 	Record
 	Values map[string]string
 	URL    string
+
+	// Rank is how well this row answered the query, and Matched names where.
+	// Both are zero for a listing, which has no query to answer.
+	Rank    float64  `json:",omitempty"`
+	Matched []string `json:",omitempty"`
 }
 
 // SearchRecords returns extracted records, highest confidence first.
@@ -216,21 +228,29 @@ func (s *Store) SearchRecords(ctx context.Context, itemID uint, q RecordQuery) (
 	if q.SinceID > 0 {
 		base = base.Where("id > ?", q.SinceID)
 	}
+	for _, t := range q.Terms {
+		cond, args := termWhere(t)
+		base = base.Where(cond, args...)
+	}
 
 	var total int64
 	if err := base.Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("count records: %w", err)
 	}
 
-	query := base.Session(&gorm.Session{}).Order("confidence DESC, id ASC")
+	sel := base.Session(&gorm.Session{}).Order("confidence DESC, id ASC")
 	if q.SinceID > 0 {
-		query = base.Session(&gorm.Session{}).Order("id ASC")
+		sel = base.Session(&gorm.Session{}).Order("id ASC")
 	}
-	if q.Limit > 0 {
-		query = query.Limit(q.Limit)
+	// A search is ordered by how well each row answers it, which is not
+	// something the database can sort on, so the limit is applied after the
+	// ranking rather than here. The set it runs over is what the terms already
+	// matched, not the whole table.
+	if q.Limit > 0 && len(q.Terms) == 0 {
+		sel = sel.Limit(q.Limit)
 	}
 	var records []Record
-	if err := query.Find(&records).Error; err != nil {
+	if err := sel.Find(&records).Error; err != nil {
 		return nil, 0, fmt.Errorf("list records: %w", err)
 	}
 	if len(records) == 0 {
@@ -253,18 +273,101 @@ func (s *Store) SearchRecords(ctx context.Context, itemID uint, q RecordQuery) (
 		byRecord[v.RecordID][v.Prop] = v.Text
 	}
 
+	urls, err := s.urlsByID(ctx, records)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	out := make([]RecordRow, 0, len(records))
 	for _, r := range records {
-		row := RecordRow{Record: r, Values: byRecord[r.ID]}
-		if r.URLID != 0 {
-			var u URL
-			if err := s.db.WithContext(ctx).Select("url").First(&u, r.URLID).Error; err == nil {
-				row.URL = u.URL
+		row := RecordRow{Record: r, Values: byRecord[r.ID], URL: urls[r.URLID]}
+		if len(q.Terms) > 0 {
+			// The terms already matched in SQL, so this repeats the decision
+			// only to find out how well and where. A row that fails here is a
+			// row the two disagree about, and dropping it keeps the printed
+			// reason honest rather than showing a match it cannot explain.
+			m, ok := (query.Query{Terms: q.Terms}).Match(row.Values, row.URL)
+			if !ok {
+				continue
 			}
+			row.Rank, row.Matched = m.Score, m.Fields
 		}
 		out = append(out, row)
 	}
+
+	// Ranked, unless a follower asked. A follower has already seen everything
+	// below its mark and wants what landed after it in the order it landed;
+	// re-sorting a poll by rank would print the stream out of sequence.
+	if len(q.Terms) > 0 && q.SinceID == 0 {
+		sort.SliceStable(out, func(i, j int) bool {
+			if out[i].Rank != out[j].Rank {
+				return out[i].Rank > out[j].Rank
+			}
+			if out[i].Confidence != out[j].Confidence {
+				return out[i].Confidence > out[j].Confidence
+			}
+			return out[i].ID < out[j].ID
+		})
+		if q.Limit > 0 && len(out) > q.Limit {
+			out = out[:q.Limit]
+		}
+	}
 	return out, total, nil
+}
+
+// urlsByID reads the url of every record in one query rather than one each.
+func (s *Store) urlsByID(ctx context.Context, records []Record) (map[uint]string, error) {
+	ids := make([]uint, 0, len(records))
+	seen := map[uint]bool{}
+	for _, r := range records {
+		if r.URLID != 0 && !seen[r.URLID] {
+			seen[r.URLID] = true
+			ids = append(ids, r.URLID)
+		}
+	}
+	out := make(map[uint]string, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var urls []URL
+	if err := s.db.WithContext(ctx).Select("id", "url").Where("id IN ?", ids).Find(&urls).Error; err != nil {
+		return nil, fmt.Errorf("read record urls: %w", err)
+	}
+	for _, u := range urls {
+		out[u.ID] = u.URL
+	}
+	return out, nil
+}
+
+// termWhere is one term as a condition on the records table.
+//
+// Pushed into SQL rather than filtered in Go because the alternative is loading
+// every record of the item to throw most of them away, and an item's records
+// are the one table that grows without bound as a crawl runs. LIKE is what
+// sqlite can answer here; the ranking that follows is the part it cannot.
+func termWhere(t query.Term) (string, []any) {
+	like := "%" + escapeLike(t.Text) + "%"
+	const (
+		inValues = `EXISTS (SELECT 1 FROM "values" v WHERE v.record_id = records.id AND v.text LIKE ? ESCAPE '\')`
+		inURL    = `EXISTS (SELECT 1 FROM urls u WHERE u.id = records.url_id AND u.url LIKE ? ESCAPE '\')`
+	)
+	switch {
+	case t.Any():
+		return "(" + inValues + " OR " + inURL + ")", []any{like, like}
+	case t.Field == query.URLField:
+		return inURL, []any{like}
+	default:
+		return `EXISTS (SELECT 1 FROM "values" v
+			WHERE v.record_id = records.id AND v.prop = ? AND v.text LIKE ? ESCAPE '\')`,
+			[]any{t.Field, like}
+	}
+}
+
+// escapeLike neutralises the wildcards in a search term, so looking for a
+// literal percent sign finds one rather than everything.
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
+	return r.Replace(s)
 }
 
 // LabelRecords marks records valid or invalid. Unknown ids are reported rather
