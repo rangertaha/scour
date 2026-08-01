@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" role="img"
+     aria-label="The life of one fetch. A URL is leased from the frontier, checked against scope on request, checked against content type when the headers arrive so the body can be abandoned, cached and recorded on response, and mined for links which are scored and returned to the frontier.">
+  <style>
+    .b{fill:#f6f8fa;stroke:#57606a;stroke-width:1.5;rx:6}
+    .s{fill:#ddf4ff;stroke:#0969da;stroke-width:1.5;rx:6}
+    .d{fill:#f6f8fa;stroke:#57606a;stroke-width:1.5;stroke-dasharray:4 3;rx:6}
+    .l{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2328}
+    .i{font:10.5px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#57606a}
+    .n{font:11px -apple-system,system-ui,sans-serif;fill:#57606a}
+    .f{stroke:#57606a;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .k{stroke:#0969da;stroke-width:1.5;fill:none;marker-end:url(#b)}
+    .ah{fill:#57606a} .bh{fill:#0969da}
+    @media (prefers-color-scheme:dark){
+      .b,.d{fill:#21262d;stroke:#8b949e} .s{fill:#0d2d4d;stroke:#58a6ff}
+      .l{fill:#e6edf3} .i,.n{fill:#8b949e} .f{stroke:#8b949e} .k{stroke:#58a6ff}
+      .ah{fill:#8b949e} .bh{fill:#58a6ff}}
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path class="bh" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <text class="n" x="440" y="22" text-anchor="middle">colly owns the loop. The four callbacks are the whole of scour's integration with it.</text>
+
+  <rect class="s" x="40" y="52" width="210" height="52"/>
+  <text class="l" x="145" y="73" text-anchor="middle">frontier</text>
+  <text class="i" x="145" y="90" text-anchor="middle">highest score first, leased</text>
+
+  <rect class="b" x="330" y="52" width="230" height="48"/>
+  <text class="l" x="445" y="73" text-anchor="middle">OnRequest</text>
+  <text class="i" x="445" y="89" text-anchor="middle">in scope? polite yet?</text>
+
+  <rect class="b" x="330" y="140" width="230" height="48"/>
+  <text class="l" x="445" y="161" text-anchor="middle">OnResponseHeaders</text>
+  <text class="i" x="445" y="177" text-anchor="middle">is this a type we read?</text>
+
+  <rect class="b" x="330" y="228" width="230" height="48"/>
+  <text class="l" x="445" y="249" text-anchor="middle">OnResponse</text>
+  <text class="i" x="445" y="265" text-anchor="middle">keep the body</text>
+
+  <rect class="b" x="330" y="316" width="230" height="48"/>
+  <text class="l" x="445" y="337" text-anchor="middle">OnHTML a[href]</text>
+  <text class="i" x="445" y="353" text-anchor="middle">what does it link to?</text>
+
+  <rect class="d" x="640" y="140" width="200" height="48"/>
+  <text class="l" x="740" y="161" text-anchor="middle">abandon</text>
+  <text class="i" x="740" y="177" text-anchor="middle">before the body arrives</text>
+
+  <rect class="s" x="640" y="228" width="200" height="48"/>
+  <text class="l" x="740" y="249" text-anchor="middle">cache</text>
+  <text class="i" x="740" y="265" text-anchor="middle">bytes, keyed by URL</text>
+
+  <rect class="b" x="640" y="316" width="200" height="48"/>
+  <text class="l" x="740" y="337" text-anchor="middle">score</text>
+  <text class="i" x="740" y="353" text-anchor="middle">how promising is it?</text>
+
+  <path class="f" d="M250,76 H326"/>
+  <text class="n" x="288" y="68" text-anchor="middle">url</text>
+
+  <path class="f" d="M445,100 V136"/>
+  <path class="f" d="M445,188 V224"/>
+  <path class="f" d="M445,276 V312"/>
+
+  <path class="f" d="M560,164 H636"/>
+  <path class="f" d="M560,252 H636"/>
+  <path class="f" d="M560,340 H636"/>
+  <text class="n" x="598" y="244" text-anchor="middle">body</text>
+  <text class="n" x="598" y="332" text-anchor="middle">links</text>
+
+  <path class="k" d="M740,364 V412 H145 V108"/>
+  <text class="n" x="440" y="428" text-anchor="middle">scored links go back to the frontier, which is what makes the next fetch a better one</text>
+
+  <text class="n" x="440" y="456" text-anchor="middle">A page that fails the headers check costs a request and no download. A page out of scope costs nothing at all.</text>
+</svg>

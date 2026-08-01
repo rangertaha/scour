@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 420" role="img"
+     aria-label="An item has many jobs, a job has many runs. Records and the model belong to the item rather than to the job, because two jobs hunting one item fill one table and train one model.">
+  <style>
+    .b{fill:#f6f8fa;stroke:#57606a;stroke-width:1.5;rx:6}
+    .s{fill:#ddf4ff;stroke:#0969da;stroke-width:1.5;rx:6}
+    .l{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2328}
+    .i{font:10.5px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#57606a}
+    .n{font:11px -apple-system,system-ui,sans-serif;fill:#57606a}
+    .h{font:600 12px -apple-system,system-ui,sans-serif;fill:#1f2328}
+    .f{stroke:#57606a;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .ah{fill:#57606a}
+    @media (prefers-color-scheme:dark){
+      .b{fill:#21262d;stroke:#8b949e} .s{fill:#0d2d4d;stroke:#58a6ff}
+      .l,.h{fill:#e6edf3} .i,.n{fill:#8b949e} .f{stroke:#8b949e} .ah{fill:#8b949e}}
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <text class="h" x="125" y="34" text-anchor="middle">one item</text>
+  <text class="h" x="375" y="34" text-anchor="middle">many jobs</text>
+  <text class="h" x="615" y="34" text-anchor="middle">many runs</text>
+
+  <rect class="s" x="40" y="120" width="170" height="64"/>
+  <text class="l" x="125" y="144" text-anchor="middle">item</text>
+  <text class="i" x="125" y="162" text-anchor="middle">what you are hunting</text>
+  <text class="i" x="125" y="176" text-anchor="middle">aliases · properties</text>
+
+  <rect class="b" x="290" y="52" width="170" height="56"/>
+  <text class="l" x="375" y="74" text-anchor="middle">job</text>
+  <text class="i" x="375" y="92" text-anchor="middle">targets · policy · frontier</text>
+
+  <rect class="b" x="290" y="196" width="170" height="56"/>
+  <text class="l" x="375" y="218" text-anchor="middle">job</text>
+  <text class="i" x="375" y="236" text-anchor="middle">a different target set</text>
+
+  <rect class="b" x="540" y="30" width="150" height="40"/>
+  <text class="l" x="615" y="55" text-anchor="middle">run</text>
+  <rect class="b" x="540" y="78" width="150" height="40"/>
+  <text class="l" x="615" y="103" text-anchor="middle">run</text>
+  <rect class="b" x="540" y="188" width="150" height="40"/>
+  <text class="l" x="615" y="213" text-anchor="middle">run</text>
+  <rect class="b" x="540" y="236" width="150" height="40"/>
+  <text class="l" x="615" y="261" text-anchor="middle">run</text>
+
+  <path class="f" d="M210,140 C250,132 254,84 286,80"/>
+  <path class="f" d="M210,166 C250,176 254,220 286,224"/>
+
+  <path class="f" d="M460,70 C500,64 506,52 536,50"/>
+  <path class="f" d="M460,90 C500,94 506,96 536,98"/>
+  <path class="f" d="M460,212 C500,204 506,210 536,208"/>
+  <path class="f" d="M460,232 C500,240 506,254 536,256"/>
+
+  <rect class="s" x="40" y="240" width="170" height="52"/>
+  <text class="l" x="125" y="261" text-anchor="middle">record</text>
+  <text class="i" x="125" y="278" text-anchor="middle">what came out</text>
+
+  <rect class="s" x="40" y="312" width="170" height="52"/>
+  <text class="l" x="125" y="333" text-anchor="middle">model</text>
+  <text class="i" x="125" y="350" text-anchor="middle">what was learned</text>
+
+  <path class="f" d="M100,184 V236"/>
+  <path class="f" d="M160,184 C160,270 160,280 160,308"/>
+
+  <text class="n" x="470" y="316" text-anchor="middle">A run is never created or edited by hand. It is listed</text>
+  <text class="n" x="470" y="332" text-anchor="middle">and read through the job that produced it, which is</text>
+  <text class="n" x="470" y="348" text-anchor="middle">why it has no command group of its own.</text>
+
+  <text class="n" x="440" y="392" text-anchor="middle">Records and the model hang off the item, not the job: two jobs hunting one item are filling one table and</text>
+  <text class="n" x="440" y="408" text-anchor="middle">training one model, from every page every job of that item has cached.</text>
+</svg>

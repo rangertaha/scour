@@ -47,11 +47,14 @@ is the whole of that mechanism.
 <a href="{{ '/train/' | relative_url }}"><strong>train</strong><span>Inducing the rules, and applying them</span></a>
 <a href="{{ '/classify/' | relative_url }}"><strong>classify</strong><span>What a page is, and what a URL is</span></a>
 <a href="{{ '/score/' | relative_url }}"><strong>score</strong><span>How likely a URL is to lead to a match</span></a>
+<a href="{{ '/ai/' | relative_url }}"><strong>ai</strong><span>Language models, behind an interface with one method</span></a>
+<a href="{{ '/algorithms/' | relative_url }}"><strong>algorithms</strong><span>Every algorithm in one place, and the corpus behind them</span></a>
 <a href="{{ '/store/' | relative_url }}"><strong>store</strong><span>The database, the frontier, the leases</span></a>
 <a href="{{ '/export/' | relative_url }}"><strong>export</strong><span>Getting the records out</span></a>
 <a href="{{ '/bus/' | relative_url }}"><strong>bus &amp; service</strong><span>One process, or many machines</span></a>
 <a href="{{ '/server/' | relative_url }}"><strong>server &amp; MCP</strong><span>The same scour over a socket</span></a>
 <a href="{{ '/cli/' | relative_url }}"><strong>command line</strong><span>The commands, and the loop they form</span></a>
+<a href="{{ '/config/' | relative_url }}"><strong>config</strong><span>Every setting, and which source wins</span></a>
 <a href="{{ '/results/' | relative_url }}"><strong>measured results</strong><span>What it extracts, on live corpora</span></a>
 <a href="{{ '/plan/' | relative_url }}"><strong>plan</strong><span>Why each part is where it is, and what is still designed</span></a>
 </div>

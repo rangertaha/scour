@@ -1,8 +1,20 @@
-# The command line
+---
+title: The command surface
+description: A design for the command line around five nouns and one rule, and how every command that ships today maps onto it.
+---
 
-This is a design for the command surface, not a description of the one that
-ships today. The last section maps every command that exists now onto the one
-proposed here.
+# The command surface
+
+<p class="lede">This is a design for the command surface, not a description of
+the one that ships today.</p>
+
+The last section maps every command that exists now onto the one proposed here.
+For what ships, see [the command line]({{ '/cli/' | relative_url }}).
+
+<figure>
+<img src="{{ '/img/nouns.svg' | relative_url }}" alt="An item has many jobs, a job has many runs. Records and the model belong to the item rather than to the job, because two jobs hunting one item fill one table and train one model.">
+<figcaption>Five things scour knows about, and everything it stores is one of them.</figcaption>
+</figure>
 
 ## The fault
 
@@ -736,3 +748,8 @@ COMMANDS:
 Three blocks: the nouns, the four shortcuts, and the three that act on the
 install. Someone who reads only the first line of each block can still get from
 an idea to a crawl.
+
+<div class="pager" markdown="1">
+<span markdown="1">&larr; [config]({{ '/config/' | relative_url }})</span>
+<span markdown="1">[The HTTP API]({{ '/server/api.html' | relative_url }}) &rarr;</span>
+</div>

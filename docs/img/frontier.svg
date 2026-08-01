@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 340" role="img"
+     aria-label="A frontier entry is queued, then leased to one crawler, then either fetched or failed. An expired lease returns it to the queue, and a failure retries it up to three attempts. Work is leased rather than removed.">
+  <style>
+    .b{fill:#f6f8fa;stroke:#57606a;stroke-width:1.5;rx:6}
+    .s{fill:#ddf4ff;stroke:#0969da;stroke-width:1.5;rx:6}
+    .l{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2328}
+    .i{font:10.5px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#57606a}
+    .n{font:11px -apple-system,system-ui,sans-serif;fill:#57606a}
+    .f{stroke:#57606a;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .k{stroke:#0969da;stroke-width:1.5;fill:none;stroke-dasharray:4 3;marker-end:url(#b)}
+    .ah{fill:#57606a} .bh{fill:#0969da}
+    @media (prefers-color-scheme:dark){
+      .b{fill:#21262d;stroke:#8b949e} .s{fill:#0d2d4d;stroke:#58a6ff}
+      .l{fill:#e6edf3} .i,.n{fill:#8b949e} .f{stroke:#8b949e} .k{stroke:#58a6ff}
+      .ah{fill:#8b949e} .bh{fill:#58a6ff}}
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path class="bh" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <text class="n" x="440" y="24" text-anchor="middle">work is leased, never removed, which is what makes a dead crawler cost a retry rather than a page</text>
+
+  <rect class="s" x="60" y="126" width="170" height="52"/>
+  <text class="l" x="145" y="147" text-anchor="middle">queued</text>
+  <text class="i" x="145" y="164" text-anchor="middle">ordered by score</text>
+
+  <rect class="b" x="330" y="126" width="170" height="52"/>
+  <text class="l" x="415" y="147" text-anchor="middle">leased</text>
+  <text class="i" x="415" y="164" text-anchor="middle">one crawler, 10 min</text>
+
+  <rect class="s" x="660" y="58" width="170" height="52"/>
+  <text class="l" x="745" y="79" text-anchor="middle">fetched</text>
+  <text class="i" x="745" y="96" text-anchor="middle">body in the cache</text>
+
+  <rect class="b" x="660" y="196" width="170" height="52"/>
+  <text class="l" x="745" y="217" text-anchor="middle">failed</text>
+  <text class="i" x="745" y="234" text-anchor="middle">3 attempts, then done</text>
+
+  <path class="f" d="M230,152 H326"/>
+  <path class="f" d="M500,144 C560,144 590,84 656,84"/>
+  <path class="f" d="M500,160 C560,160 590,222 656,222"/>
+
+  <path class="k" d="M400,126 V72 H145 V122"/>
+  <text class="n" x="272" y="62" text-anchor="middle">lease expires: the crawler died holding it</text>
+
+  <path class="k" d="M745,248 V292 H145 V182"/>
+  <text class="n" x="430" y="284" text-anchor="middle">retried, unless the attempt count is spent</text>
+
+  <text class="n" x="440" y="324" text-anchor="middle">Delivery on the bus is at-least-once, so every write is keyed on a stable hash: the frontier on a URL hash, records on a fingerprint.</text>
+</svg>

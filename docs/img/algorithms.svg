@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 452" role="img"
+     aria-label="Two graphs, two families of algorithm. Over the crawl graph, naive Bayes on the URL tokens and a Markov chain over the parent path combine in odds form to order the frontier. Over the document graph, grouping chooses a container, a matcher scores each candidate, a chain orders the fields, and pattern synthesis emits a locator. Both chains share three constraints.">
+  <style>
+    .b{fill:#f6f8fa;stroke:#57606a;stroke-width:1.5;rx:6}
+    .s{fill:#ddf4ff;stroke:#0969da;stroke-width:1.5;rx:6}
+    .l{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2328}
+    .i{font:10.5px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#57606a}
+    .n{font:11px -apple-system,system-ui,sans-serif;fill:#57606a}
+    .h{font:600 12px -apple-system,system-ui,sans-serif;fill:#1f2328}
+    .f{stroke:#57606a;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .ah{fill:#57606a}
+    .sep{stroke:#d0d7de;stroke-width:1}
+    @media (prefers-color-scheme:dark){
+      .b{fill:#21262d;stroke:#8b949e} .s{fill:#0d2d4d;stroke:#58a6ff}
+      .l,.h{fill:#e6edf3} .i,.n{fill:#8b949e} .f{stroke:#8b949e} .ah{fill:#8b949e}
+      .sep{stroke:#30363d}}
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <text class="n" x="440" y="24" text-anchor="middle">two graphs, two families of algorithm, one set of rules about evidence</text>
+
+  <line class="sep" x1="430" y1="46" x2="430" y2="288"/>
+
+  <text class="h" x="30" y="60">the crawl graph: which URL next</text>
+
+  <rect class="b" x="30" y="70" width="185" height="64"/>
+  <text class="l" x="122" y="92" text-anchor="middle">naive Bayes</text>
+  <text class="i" x="122" y="110" text-anchor="middle">tokens of the URL</text>
+  <text class="i" x="122" y="126" text-anchor="middle">does it look like one?</text>
+
+  <rect class="b" x="225" y="70" width="185" height="64"/>
+  <text class="l" x="317" y="92" text-anchor="middle">Markov chain</text>
+  <text class="i" x="317" y="110" text-anchor="middle">six roles, parent path</text>
+  <text class="i" x="317" y="126" text-anchor="middle">does it lead to one?</text>
+
+  <path class="f" d="M122,134 V160"/>
+  <path class="f" d="M317,134 V160"/>
+
+  <rect class="s" x="30" y="164" width="380" height="56"/>
+  <text class="l" x="220" y="187" text-anchor="middle">combined in odds form</text>
+  <text class="i" x="220" y="206" text-anchor="middle">independent evidence, never one overruling the other</text>
+
+  <text class="n" x="220" y="248" text-anchor="middle">the frontier pops in that order, which is</text>
+  <text class="n" x="220" y="264" text-anchor="middle">the whole of what makes the crawl focused</text>
+
+  <text class="h" x="450" y="60">the document graph: where the fields are</text>
+
+  <rect class="b" x="450" y="70" width="400" height="44"/>
+  <text class="l" x="466" y="90">group and contain</text>
+  <text class="i" x="466" y="106">equivalent nodes, then the record container, in that order</text>
+
+  <rect class="b" x="450" y="124" width="400" height="44"/>
+  <text class="l" x="466" y="144">score each candidate</text>
+  <text class="i" x="466" y="160">labels, tag names, standardised attributes</text>
+
+  <rect class="b" x="450" y="178" width="400" height="44"/>
+  <text class="l" x="466" y="198">order the fields</text>
+  <text class="i" x="466" y="214">a second chain, over field order inside one record</text>
+
+  <rect class="s" x="450" y="232" width="400" height="44"/>
+  <text class="l" x="466" y="252">synthesize the locator</text>
+  <text class="i" x="466" y="268">xpath · css selector · native path · value regex</text>
+
+  <path class="f" d="M650,114 V120"/>
+  <path class="f" d="M650,168 V174"/>
+  <path class="f" d="M650,222 V228"/>
+
+  <text class="h" x="440" y="316" text-anchor="middle">both chains, the same three constraints, because both learn from very little data</text>
+
+  <rect class="b" x="30" y="330" width="260" height="62"/>
+  <text class="l" x="160" y="352" text-anchor="middle">transitions only</text>
+  <text class="i" x="160" y="370" text-anchor="middle">emissions come from what a</text>
+  <text class="i" x="160" y="384" text-anchor="middle">page turned out to hold</text>
+
+  <rect class="b" x="310" y="330" width="260" height="62"/>
+  <text class="l" x="440" y="352" text-anchor="middle">MAP, not likelihood</text>
+  <text class="i" x="440" y="370" text-anchor="middle">the prior enters as pseudo-counts</text>
+  <text class="i" x="440" y="384" text-anchor="middle">and twenty pages leave it intact</text>
+
+  <rect class="b" x="590" y="330" width="260" height="62"/>
+  <text class="l" x="720" y="352" text-anchor="middle">paths, not everything</text>
+  <text class="i" x="720" y="370" text-anchor="middle">fitted to the whole visited set, the</text>
+  <text class="i" x="720" y="384" text-anchor="middle">boilerplate dominates the likelihood</text>
+
+  <text class="n" x="440" y="422" text-anchor="middle">An unsupervised chain's states carry no inherent meaning and would drift off the roles they are named for.</text>
+  <text class="n" x="440" y="440" text-anchor="middle">Every constant behind these is measured against the corpora rather than exposed as a knob.</text>
+</svg>

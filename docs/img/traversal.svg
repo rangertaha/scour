@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 310" role="img"
+     aria-label="One crawl graph walked four ways. Best first follows the highest predicted probability, breadth first takes a level at a time, depth first goes down one spur, and random is an unbiased sample. The numbers in each node are the order it is visited.">
+  <style>
+    .nd{fill:#f6f8fa;stroke:#57606a;stroke-width:1.5}
+    .sd{fill:#ddf4ff;stroke:#0969da;stroke-width:2}
+    .e{stroke:#57606a;stroke-width:1.2;fill:none;opacity:.6}
+    .num{font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2328}
+    .sc{font:9.5px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#57606a}
+    .h{font:600 12px -apple-system,system-ui,sans-serif;fill:#1f2328}
+    .n{font:10.5px -apple-system,system-ui,sans-serif;fill:#57606a}
+    .f{font:11px -apple-system,system-ui,sans-serif;fill:#57606a}
+    @media (prefers-color-scheme:dark){
+      .nd{fill:#21262d;stroke:#8b949e} .sd{fill:#0d2d4d;stroke:#58a6ff}
+      .e{stroke:#8b949e} .num,.h{fill:#e6edf3} .sc,.n,.f{fill:#8b949e}}
+  </style>
+
+  <text class="f" x="440" y="18" text-anchor="middle">one crawl graph, four ways of walking it. The number in each node is the order it comes out of the frontier.</text>
+
+  <!-- panel 1: best first -->
+  <text class="h" x="110" y="46" text-anchor="middle">best</text>
+  <text class="n" x="110" y="60" text-anchor="middle">highest score first</text>
+  <path class="e" d="M110,86 L60,124 M110,86 L160,124 M60,150 L35,182 M60,150 L85,182 M160,150 L135,182 M160,150 L185,182"/>
+  <circle class="sd" cx="110" cy="80" r="14"/><text class="num" x="110" y="85" text-anchor="middle">1</text>
+  <circle class="nd" cx="60"  cy="137" r="14"/><text class="num" x="60"  y="142" text-anchor="middle">5</text>
+  <circle class="nd" cx="160" cy="137" r="14"/><text class="num" x="160" y="142" text-anchor="middle">2</text>
+  <text class="sc" x="60"  y="166" text-anchor="middle">.2</text>
+  <text class="sc" x="160" y="166" text-anchor="middle">.9</text>
+  <circle class="nd" cx="35"  cy="195" r="14"/><text class="num" x="35"  y="200" text-anchor="middle">7</text>
+  <circle class="nd" cx="85"  cy="195" r="14"/><text class="num" x="85"  y="200" text-anchor="middle">6</text>
+  <circle class="nd" cx="135" cy="195" r="14"/><text class="num" x="135" y="200" text-anchor="middle">3</text>
+  <circle class="nd" cx="185" cy="195" r="14"/><text class="num" x="185" y="200" text-anchor="middle">4</text>
+  <text class="sc" x="35"  y="224" text-anchor="middle">.1</text>
+  <text class="sc" x="85"  y="224" text-anchor="middle">.3</text>
+  <text class="sc" x="135" y="224" text-anchor="middle">.8</text>
+  <text class="sc" x="185" y="224" text-anchor="middle">.7</text>
+  <text class="n" x="110" y="252" text-anchor="middle">the focused crawl. Spends the</text>
+  <text class="n" x="110" y="266" text-anchor="middle">budget on the promising subtree</text>
+
+  <!-- panel 2: breadth -->
+  <text class="h" x="330" y="46" text-anchor="middle">breadth</text>
+  <text class="n" x="330" y="60" text-anchor="middle">a level at a time</text>
+  <path class="e" d="M330,86 L280,124 M330,86 L380,124 M280,150 L255,182 M280,150 L305,182 M380,150 L355,182 M380,150 L405,182"/>
+  <circle class="sd" cx="330" cy="80" r="14"/><text class="num" x="330" y="85" text-anchor="middle">1</text>
+  <circle class="nd" cx="280" cy="137" r="14"/><text class="num" x="280" y="142" text-anchor="middle">2</text>
+  <circle class="nd" cx="380" cy="137" r="14"/><text class="num" x="380" y="142" text-anchor="middle">3</text>
+  <circle class="nd" cx="255" cy="195" r="14"/><text class="num" x="255" y="200" text-anchor="middle">4</text>
+  <circle class="nd" cx="305" cy="195" r="14"/><text class="num" x="305" y="200" text-anchor="middle">5</text>
+  <circle class="nd" cx="355" cy="195" r="14"/><text class="num" x="355" y="200" text-anchor="middle">6</text>
+  <circle class="nd" cx="405" cy="195" r="14"/><text class="num" x="405" y="200" text-anchor="middle">7</text>
+  <text class="n" x="330" y="252" text-anchor="middle">the archival crawl. A complete</text>
+  <text class="n" x="330" y="266" text-anchor="middle">level beats a deep spur</text>
+
+  <!-- panel 3: depth -->
+  <text class="h" x="550" y="46" text-anchor="middle">depth</text>
+  <text class="n" x="550" y="60" text-anchor="middle">down one spur</text>
+  <path class="e" d="M550,86 L500,124 M550,86 L600,124 M500,150 L475,182 M500,150 L525,182 M600,150 L575,182 M600,150 L625,182"/>
+  <circle class="sd" cx="550" cy="80" r="14"/><text class="num" x="550" y="85" text-anchor="middle">1</text>
+  <circle class="nd" cx="500" cy="137" r="14"/><text class="num" x="500" y="142" text-anchor="middle">2</text>
+  <circle class="nd" cx="600" cy="137" r="14"/><text class="num" x="600" y="142" text-anchor="middle">5</text>
+  <circle class="nd" cx="475" cy="195" r="14"/><text class="num" x="475" y="200" text-anchor="middle">3</text>
+  <circle class="nd" cx="525" cy="195" r="14"/><text class="num" x="525" y="200" text-anchor="middle">4</text>
+  <circle class="nd" cx="575" cy="195" r="14"/><text class="num" x="575" y="200" text-anchor="middle">6</text>
+  <circle class="nd" cx="625" cy="195" r="14"/><text class="num" x="625" y="200" text-anchor="middle">7</text>
+  <text class="n" x="550" y="252" text-anchor="middle">following one thread as far</text>
+  <text class="n" x="550" y="266" text-anchor="middle">as it goes</text>
+
+  <!-- panel 4: random -->
+  <text class="h" x="770" y="46" text-anchor="middle">random</text>
+  <text class="n" x="770" y="60" text-anchor="middle">an unbiased sample</text>
+  <path class="e" d="M770,86 L720,124 M770,86 L820,124 M720,150 L695,182 M720,150 L745,182 M820,150 L795,182 M820,150 L845,182"/>
+  <circle class="sd" cx="770" cy="80" r="14"/><text class="num" x="770" y="85" text-anchor="middle">1</text>
+  <circle class="nd" cx="720" cy="137" r="14"/><text class="num" x="720" y="142" text-anchor="middle">4</text>
+  <circle class="nd" cx="820" cy="137" r="14"/><text class="num" x="820" y="142" text-anchor="middle">2</text>
+  <circle class="nd" cx="695" cy="195" r="14"/><text class="num" x="695" y="200" text-anchor="middle">6</text>
+  <circle class="nd" cx="745" cy="195" r="14"/><text class="num" x="745" y="200" text-anchor="middle">7</text>
+  <circle class="nd" cx="795" cy="195" r="14"/><text class="num" x="795" y="200" text-anchor="middle">3</text>
+  <circle class="nd" cx="845" cy="195" r="14"/><text class="num" x="845" y="200" text-anchor="middle">5</text>
+  <text class="n" x="770" y="252" text-anchor="middle">for sampling, where anything</text>
+  <text class="n" x="770" y="266" text-anchor="middle">else is a biased sample</text>
+
+  <text class="f" x="440" y="296" text-anchor="middle">The policy is asked once per lease rather than once per crawl, which is what lets warmup walk breadth first until a model exists and best first after that.</text>
+</svg>

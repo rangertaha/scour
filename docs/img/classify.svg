@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 450" role="img"
+     aria-label="A circular dependency: the scorer learns from labels, labels come from extraction, and extraction needs rules induced from pages the crawl already chose. Classification reads the page directly and supplies a label that does not come from extraction, breaking the loop. Separately, node classifiers answer per kind: role, topic and recency.">
+  <style>
+    .b{fill:#f6f8fa;stroke:#57606a;stroke-width:1.5;rx:6}
+    .s{fill:#ddf4ff;stroke:#0969da;stroke-width:1.5;rx:6}
+    .d{fill:#f6f8fa;stroke:#57606a;stroke-width:1.5;stroke-dasharray:4 3;rx:6}
+    .l{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2328}
+    .i{font:10.5px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#57606a}
+    .n{font:11px -apple-system,system-ui,sans-serif;fill:#57606a}
+    .h{font:600 12px -apple-system,system-ui,sans-serif;fill:#1f2328}
+    .f{stroke:#57606a;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .k{stroke:#0969da;stroke-width:1.8;fill:none;marker-end:url(#b)}
+    .ah{fill:#57606a} .bh{fill:#0969da}
+    .sep{stroke:#d0d7de;stroke-width:1}
+    @media (prefers-color-scheme:dark){
+      .b,.d{fill:#21262d;stroke:#8b949e} .s{fill:#0d2d4d;stroke:#58a6ff}
+      .l,.h{fill:#e6edf3} .i,.n{fill:#8b949e} .f{stroke:#8b949e} .k{stroke:#58a6ff}
+      .ah{fill:#8b949e} .bh{fill:#58a6ff} .sep{stroke:#30363d}}
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path class="bh" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <text class="h" x="290" y="26" text-anchor="middle">the loop a first crawl cannot enter</text>
+
+  <rect class="b" x="170" y="46" width="260" height="48"/>
+  <text class="i" x="300" y="66" text-anchor="middle">the scorer learns which pages</text>
+  <text class="i" x="300" y="82" text-anchor="middle">are worth fetching, from labels</text>
+
+  <rect class="b" x="170" y="130" width="260" height="48"/>
+  <text class="i" x="300" y="150" text-anchor="middle">the labels come from</text>
+  <text class="i" x="300" y="166" text-anchor="middle">what extraction found</text>
+
+  <rect class="b" x="170" y="214" width="260" height="48"/>
+  <text class="i" x="300" y="234" text-anchor="middle">extraction needs rules induced</text>
+  <text class="i" x="300" y="250" text-anchor="middle">from pages the crawl chose</text>
+
+  <path class="f" d="M300,94 V126"/>
+  <path class="f" d="M300,178 V210"/>
+  <path class="f" d="M170,238 H130 V70 H166"/>
+  <text class="n" x="86" y="154" text-anchor="middle">and round</text>
+  <text class="n" x="86" y="170" text-anchor="middle">again, with</text>
+  <text class="n" x="86" y="186" text-anchor="middle">nothing to</text>
+  <text class="n" x="86" y="202" text-anchor="middle">start from</text>
+
+  <rect class="s" x="530" y="118" width="300" height="72"/>
+  <text class="l" x="680" y="142" text-anchor="middle">classify</text>
+  <text class="i" x="680" y="161" text-anchor="middle">reads the page and says what it is</text>
+  <text class="i" x="680" y="178" text-anchor="middle">a listing page is one either way</text>
+
+  <path class="k" d="M530,146 C480,146 470,84 434,72"/>
+  <text class="n" x="490" y="106" text-anchor="middle">a label that</text>
+  <text class="n" x="490" y="122" text-anchor="middle">owes nothing</text>
+  <text class="n" x="490" y="138" text-anchor="middle">to extraction</text>
+
+  <line class="sep" x1="40" y1="300" x2="840" y2="300"/>
+
+  <text class="h" x="440" y="328" text-anchor="middle">nodeclass: the same question asked of a URL rather than of markup</text>
+
+  <rect class="b" x="80" y="344" width="220" height="52"/>
+  <text class="l" x="190" y="365" text-anchor="middle">role</text>
+  <text class="i" x="190" y="382" text-anchor="middle">seed · hub · detail · dead</text>
+
+  <rect class="d" x="330" y="344" width="220" height="52"/>
+  <text class="l" x="440" y="365" text-anchor="middle">topic</text>
+  <text class="i" x="440" y="382" text-anchor="middle">what it is about</text>
+
+  <rect class="d" x="580" y="344" width="220" height="52"/>
+  <text class="l" x="690" y="365" text-anchor="middle">recency</text>
+  <text class="i" x="690" y="382" text-anchor="middle">how fresh it is</text>
+
+  <text class="n" x="440" y="424" text-anchor="middle">A classifier declares its Kind, and verdicts are held per kind. Two classifiers of one kind are alternatives;</text>
+  <text class="n" x="440" y="442" text-anchor="middle">two of different kinds both run. Dashed is registered and not written yet.</text>
+</svg>

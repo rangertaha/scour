@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 330" role="img"
+     aria-label="Extracted records are grouped by the domain they came from and written as one file per site, as CSV or JSON, or posted to a webhook.">
+  <style>
+    .b{fill:#f6f8fa;stroke:#57606a;stroke-width:1.5;rx:6}
+    .s{fill:#ddf4ff;stroke:#0969da;stroke-width:1.5;rx:6}
+    .l{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2328}
+    .m{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2328}
+    .i{font:10.5px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#57606a}
+    .n{font:11px -apple-system,system-ui,sans-serif;fill:#57606a}
+    .f{stroke:#57606a;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .ah{fill:#57606a}
+    @media (prefers-color-scheme:dark){
+      .b{fill:#21262d;stroke:#8b949e} .s{fill:#0d2d4d;stroke:#58a6ff}
+      .l,.m{fill:#e6edf3} .i,.n{fill:#8b949e} .f{stroke:#8b949e} .ah{fill:#8b949e}}
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <text class="n" x="440" y="24" text-anchor="middle">the records are the product, so they belong wherever the rest of your pipeline reads</text>
+
+  <rect class="s" x="30" y="112" width="180" height="66"/>
+  <text class="l" x="120" y="138" text-anchor="middle">records</text>
+  <text class="i" x="120" y="157" text-anchor="middle">id · url · confidence</text>
+  <text class="i" x="120" y="172" text-anchor="middle">verdict · fields</text>
+
+  <rect class="b" x="270" y="112" width="200" height="66"/>
+  <text class="l" x="370" y="138" text-anchor="middle">group by domain</text>
+  <text class="i" x="370" y="157" text-anchor="middle">one file per site,</text>
+  <text class="i" x="370" y="172" text-anchor="middle">so a diff is a site</text>
+
+  <path class="f" d="M210,145 H266"/>
+  <path class="f" d="M470,140 C510,140 500,84 536,84"/>
+  <path class="f" d="M470,145 C510,145 500,148 536,148"/>
+  <path class="f" d="M470,150 C510,150 500,212 536,212"/>
+
+  <rect class="b" x="540" y="60" width="310" height="48"/>
+  <text class="l" x="556" y="80">csv</text>
+  <text class="m" x="556" y="98">exports/&lt;item&gt;/&lt;domain&gt;/&lt;date&gt;.csv</text>
+
+  <rect class="b" x="540" y="124" width="310" height="48"/>
+  <text class="l" x="556" y="144">json</text>
+  <text class="m" x="556" y="162">the same rows, nested rather than flat</text>
+
+  <rect class="b" x="540" y="188" width="310" height="48"/>
+  <text class="l" x="556" y="208">webhook</text>
+  <text class="m" x="556" y="226">posted in batches, reporting what landed</text>
+
+  <text class="n" x="440" y="278" text-anchor="middle">The columns are the union of every record's fields, not the first record's, so a field only some pages carry still gets one.</text>
+  <text class="n" x="440" y="296" text-anchor="middle">The verdict travels with the record, because an export is also how records get corrected outside scour.</text>
+  <text class="n" x="440" y="320" text-anchor="middle">Re-running on the same day overwrites rather than accumulating; the webhook reports what it delivered before any failure, so a retry does not double-deliver.</text>
+</svg>

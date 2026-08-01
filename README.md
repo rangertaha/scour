@@ -26,7 +26,7 @@ measured below against live sites rather than fixtures. Running the components
 across several machines works and has been tested end to end against a real
 NATS server and a real S3 endpoint. What is least settled is the extraction
 model itself: it is being changed by measurement, and the open questions are
-kept in `ALGO.md`.
+kept with [the algorithms](https://rangertaha.github.io/scour/algorithms/).
 
 ## Measured
 
@@ -202,12 +202,13 @@ other words a page might label them with, and an example of each:
 ```
 scour item templates
 
-TEMPLATE  PROPS  FIELDS
---------  -----  ------------------------------------------------------------
-article       5  headline, author, published, section, summary
-job           6  title, company, location, salary, employment, posted
-product       7  title, brand, price, currency, sku, availability, rating
-vehicle       9  make, model, year, price, mileage, vin, body, fuel, trans...
+TEMPLATE   PROPS  FIELDS
+---------  -----  ------------------------------------------------------------
+article        7  title, author, published, modified, section, summary, link
+job            6  title, company, location, salary, employment, posted
+microdata      9  headline, author, datePublished, dateModified, descriptio...
+product        7  title, brand, price, currency, sku, availability, rating
+vehicle        9  make, model, year, price, mileage, vin, body, fuel, trans...
 
 scour item add vehicle --template vehicle
 ```
@@ -294,16 +295,22 @@ scour start vehicle --depth 10 --type 'text/*' --exclude-type 'text/css'
 | `pdf` | `application/pdf` |
 | `json` | `application/json`, `application/ld+json` |
 | `xml` | `application/xml`, `text/xml` |
+| `feed` | `application/rss+xml`, `application/atom+xml`, `application/rdf+xml`, and the rest |
 | `text` | `text/plain`, `text/markdown`, `text/csv` |
 | `image` | `image/*` |
+
+`feed` is separate from `xml` because almost nothing serves a feed as plain xml.
+Sampled across a real list of news feeds, eight in twelve arrived as
+`application/rss+xml` and only one as `application/xml`, so a crawl restricted to
+`xml` would have skipped most of the feeds it was pointed at.
 
 Filtering happens twice, so unwanted content costs as little as possible. Before
 a request, scour skips links whose extension clearly disagrees with the allowed
 types. After the response headers arrive, it checks the real `Content-Type` and
 abandons the body if it does not match, without downloading it.
 
-Types that scour can extract text from (HTML, PDF, plain text, JSON, XML) are
-scored and mined for properties like any other page. Types it cannot read, such
+Types that scour can extract text from (HTML, PDF, plain text, JSON, XML, feeds)
+are scored and mined for properties like any other page. Types it cannot read, such
 as images, are recorded in the frontier with their status and size but never
 parsed, so allowing them costs bandwidth without adding matches.
 

@@ -1,10 +1,30 @@
 title: scour
 description: A focused web crawler that ranks links by how likely they are to hold what you want
-theme: jekyll-theme-primer
-show_downloads: false
+url: https://rangertaha.github.io
+baseurl: /scour
 
-# GitHub Pages serves this directory from the default branch. Nothing here is
-# generated from the Go source, so a doc that drifts is a doc somebody has to
-# fix by hand; every command shown is checked against the binary before release.
+# No theme. The layout in _layouts/default.html and the stylesheet it inlines are
+# the whole of the presentation, so the site renders the same from a clone as it
+# does from Pages, and a theme release cannot change how a diagram sits.
+#
+# Nothing here is generated from the Go source, so a doc that drifts is a doc
+# somebody has to fix by hand; every command shown is checked against the binary
+# before release.
+plugins: []
+
+# Declared rather than inherited. GitHub Pages defaults kramdown to GFM input,
+# and every fenced code block on the site depends on it: parsed as plain
+# kramdown, ``` blocks come out as inline <code> inside a paragraph instead of
+# <pre>, which mangles roughly sixty samples without erroring on any of them.
+markdown: kramdown
+kramdown:
+  input: GFM
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
 exclude:
   - README.md

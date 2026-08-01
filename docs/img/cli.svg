@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 340" role="img"
+     aria-label="Say what you are hunting for, then crawl, train, and mark what came back wrong, and crawl again. Records leave through stream.">
+  <style>
+    .b{fill:#f6f8fa;stroke:#57606a;stroke-width:1.5;rx:6}
+    .s{fill:#ddf4ff;stroke:#0969da;stroke-width:1.5;rx:6}
+    .l{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2328}
+    .i{font:10.5px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#57606a}
+    .n{font:11px -apple-system,system-ui,sans-serif;fill:#57606a}
+    .f{stroke:#57606a;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .k{stroke:#0969da;stroke-width:1.8;fill:none;marker-end:url(#b)}
+    .ah{fill:#57606a} .bh{fill:#0969da}
+    @media (prefers-color-scheme:dark){
+      .b{fill:#21262d;stroke:#8b949e} .s{fill:#0d2d4d;stroke:#58a6ff}
+      .l{fill:#e6edf3} .i,.n{fill:#8b949e} .f{stroke:#8b949e} .k{stroke:#58a6ff}
+      .ah{fill:#8b949e} .bh{fill:#58a6ff}}
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path class="bh" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <text class="n" x="440" y="26" text-anchor="middle">the loop is run, train, mark, run. Everything else exists to set it up or to watch it.</text>
+
+  <rect class="b" x="30" y="136" width="170" height="60"/>
+  <text class="l" x="115" y="162" text-anchor="middle">item add</text>
+  <text class="i" x="115" y="180" text-anchor="middle">what you want</text>
+
+  <rect class="b" x="250" y="60" width="170" height="60"/>
+  <text class="l" x="335" y="86" text-anchor="middle">start</text>
+  <text class="i" x="335" y="104" text-anchor="middle">crawl, ranked</text>
+
+  <rect class="b" x="470" y="60" width="170" height="60"/>
+  <text class="l" x="555" y="86" text-anchor="middle">train</text>
+  <text class="i" x="555" y="104" text-anchor="middle">model and rules</text>
+
+  <rect class="b" x="470" y="212" width="170" height="60"/>
+  <text class="l" x="555" y="238" text-anchor="middle">mark</text>
+  <text class="i" x="555" y="256" text-anchor="middle">right, or wrong</text>
+
+  <rect class="s" x="690" y="136" width="160" height="60"/>
+  <text class="l" x="770" y="162" text-anchor="middle">stream</text>
+  <text class="i" x="770" y="180" text-anchor="middle">the records</text>
+
+  <path class="f" d="M200,152 C230,146 236,98 246,90"/>
+  <path class="f" d="M420,90 H466"/>
+  <path class="f" d="M555,120 V208"/>
+  <path class="k" d="M470,242 H335 V124"/>
+  <path class="f" d="M640,96 C680,102 676,150 686,158"/>
+
+  <text class="n" x="392" y="182" text-anchor="middle">a record marked wrong</text>
+  <text class="n" x="392" y="198" text-anchor="middle">is held out of the next run</text>
+
+  <text class="n" x="440" y="308" text-anchor="middle">On the first run there is no trained model, so links are scored from the aliases and property examples alone.</text>
+  <text class="n" x="440" y="326" text-anchor="middle">Every later crawl uses the model trained from the run before, which is why the second crawl is the cheaper one.</text>
+</svg>

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 372" role="img"
+     aria-label="Three problems. Crawling belongs to colly, parsing and locating fields belongs to wom, and deciding which URL is worth fetching next belongs to scour. colly leaves three seams open, and scour puts its own behaviour in each.">
+  <style>
+    .b{fill:#f6f8fa;stroke:#57606a;stroke-width:1.5;rx:6}
+    .s{fill:#ddf4ff;stroke:#0969da;stroke-width:2;rx:6}
+    .l{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2328}
+    .i{font:10.5px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#57606a}
+    .n{font:11px -apple-system,system-ui,sans-serif;fill:#57606a}
+    .h{font:600 12px -apple-system,system-ui,sans-serif;fill:#1f2328}
+    .own{font:600 13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#57606a}
+    .ownb{font:600 13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#0969da}
+    .t{stroke:#57606a;stroke-width:1.2;fill:none;opacity:.55}
+    @media (prefers-color-scheme:dark){
+      .b{fill:#21262d;stroke:#8b949e} .s{fill:#0d2d4d;stroke:#58a6ff}
+      .l,.h{fill:#e6edf3} .i,.n,.own{fill:#8b949e} .ownb{fill:#58a6ff} .t{stroke:#8b949e}}
+  </style>
+
+  <text class="h" x="40" y="30">three problems, and two of them already have good answers</text>
+
+  <rect class="b" x="30" y="44" width="260" height="96"/>
+  <text class="l" x="160" y="68" text-anchor="middle">crawling</text>
+  <text class="i" x="160" y="90" text-anchor="middle">scheduling · robots · cookies</text>
+  <text class="i" x="160" y="107" text-anchor="middle">retries · redirects · depth</text>
+  <text class="i" x="160" y="124" text-anchor="middle">link discovery · politeness</text>
+
+  <rect class="b" x="310" y="44" width="260" height="96"/>
+  <text class="l" x="440" y="68" text-anchor="middle">parsing and locating</text>
+  <text class="i" x="440" y="90" text-anchor="middle">html · xml · rss · json</text>
+  <text class="i" x="440" y="107" text-anchor="middle">js · css · pdf, as one graph</text>
+  <text class="i" x="440" y="124" text-anchor="middle">xpath · css · regex locators</text>
+
+  <rect class="s" x="590" y="44" width="260" height="96"/>
+  <text class="l" x="720" y="68" text-anchor="middle">what to fetch next</text>
+  <text class="i" x="720" y="90" text-anchor="middle">rank every discovered URL</text>
+  <text class="i" x="720" y="107" text-anchor="middle">by how likely it is to hold</text>
+  <text class="i" x="720" y="124" text-anchor="middle">what you asked for</text>
+
+  <text class="own"  x="160" y="164" text-anchor="middle">colly</text>
+  <text class="own"  x="440" y="164" text-anchor="middle">wom</text>
+  <text class="ownb" x="720" y="164" text-anchor="middle">scour</text>
+  <text class="n"    x="720" y="182" text-anchor="middle">this is the actual product</text>
+
+  <text class="h" x="40" y="224">colly leaves three seams open, and the plan puts scour's own behaviour in each</text>
+
+  <path class="t" d="M160,172 V244 H186"/>
+
+  <rect class="b" x="190" y="238" width="212" height="66"/>
+  <text class="l" x="296" y="260" text-anchor="middle">queue.Storage</text>
+  <text class="i" x="296" y="279" text-anchor="middle">a priority queue ordered</text>
+  <text class="i" x="296" y="294" text-anchor="middle">by predicted probability</text>
+
+  <rect class="b" x="420" y="238" width="212" height="66"/>
+  <text class="l" x="526" y="260" text-anchor="middle">storage.Storage</text>
+  <text class="i" x="526" y="279" text-anchor="middle">visited set and cookie jar,</text>
+  <text class="i" x="526" y="294" text-anchor="middle">so a restart resumes</text>
+
+  <rect class="b" x="650" y="238" width="212" height="66"/>
+  <text class="l" x="756" y="260" text-anchor="middle">RoundTripper</text>
+  <text class="i" x="756" y="279" text-anchor="middle">transport per request, which</text>
+  <text class="i" x="756" y="294" text-anchor="middle">is how a browser plugs in</text>
+
+  <text class="n" x="440" y="340" text-anchor="middle">"What next" becomes scour's decision without touching colly's loop, and a rendered page needs no second code path.</text>
+  <text class="n" x="440" y="358" text-anchor="middle">The callback set is wired today; the scored queue and the transport are what the rest of this page is about.</text>
+</svg>

@@ -5,6 +5,21 @@ description: What scour is made of, why each part is where it is, and what is bu
 
 # plan
 
+<p class="lede">What scour is made of, why each part is where it is, and what is
+built against what is still designed.</p>
+
+<figure>
+<img src="{{ '/img/plan.svg' | relative_url }}" alt="Three problems. Crawling belongs to colly, parsing and locating fields belongs to wom, and deciding which URL is worth fetching next belongs to scour. colly leaves three seams open, and scour puts its own behaviour in each.">
+<figcaption>The whole plan follows from not rewriting the first two columns.</figcaption>
+</figure>
+
+<div class="toc" markdown="1">
+**On this page**
+
+* seed
+{:toc}
+</div>
+
 ## 1. What scour is, in terms of its parts
 
 scour is a focused crawler: it decides *what to fetch next*, fetches it, and
@@ -1126,3 +1141,8 @@ Same files as wom, same targets, so muscle memory carries over:
 4. **Per-item versus global frontier.** Two items crawling the same host
    should share politeness state but not queues. The `Host` table is shared, the
    `URL` table is per item, which resolves it, but the accounting needs care.
+
+<div class="pager" markdown="1">
+<span markdown="1">&larr; [Architecture]({{ '/architecture/' | relative_url }})</span>
+<span markdown="1">[Extending it]({{ '/architecture/extending.html' | relative_url }}) &rarr;</span>
+</div>

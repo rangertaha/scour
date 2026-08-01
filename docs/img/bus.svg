@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 430" role="img"
+     aria-label="The same components run inside one process against an embedded broker, or across machines against an external one. Three streams: crawl and records are work queues, metrics are kept for anyone watching.">
+  <style>
+    .b{fill:#f6f8fa;stroke:#57606a;stroke-width:1.5;rx:6}
+    .s{fill:#ddf4ff;stroke:#0969da;stroke-width:1.5;rx:6}
+    .frame{fill:none;stroke:#57606a;stroke-width:1.2;stroke-dasharray:5 4;rx:8}
+    .l{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2328}
+    .i{font:10.5px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#57606a}
+    .n{font:11px -apple-system,system-ui,sans-serif;fill:#57606a}
+    .h{font:600 12px -apple-system,system-ui,sans-serif;fill:#1f2328}
+    .f{stroke:#57606a;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .ah{fill:#57606a}
+    @media (prefers-color-scheme:dark){
+      .b{fill:#21262d;stroke:#8b949e} .s{fill:#0d2d4d;stroke:#58a6ff} .frame{stroke:#8b949e}
+      .l,.h{fill:#e6edf3} .i,.n{fill:#8b949e} .f{stroke:#8b949e} .ah{fill:#8b949e}}
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <text class="n" x="440" y="22" text-anchor="middle">one binary, many roles. The components are identical either way, which is the property the topology tests exist to protect.</text>
+
+  <text class="h" x="220" y="52" text-anchor="middle">scour start, on a laptop</text>
+  <text class="h" x="660" y="52" text-anchor="middle">scour join, on as many machines as you like</text>
+
+  <rect class="frame" x="40" y="64" width="360" height="170"/>
+  <text class="i" x="52" y="82">one process</text>
+
+  <rect class="b" x="66" y="94" width="140" height="52"/>
+  <text class="l" x="136" y="115" text-anchor="middle">crawl</text>
+  <text class="i" x="136" y="132" text-anchor="middle">the network</text>
+
+  <rect class="b" x="232" y="94" width="140" height="52"/>
+  <text class="l" x="302" y="115" text-anchor="middle">store</text>
+  <text class="i" x="302" y="132" text-anchor="middle">the database</text>
+
+  <path class="f" d="M136,146 V178"/>
+  <path class="f" d="M302,146 V178"/>
+
+  <rect class="s" x="60" y="182" width="320" height="42"/>
+  <text class="l" x="220" y="202" text-anchor="middle">embedded NATS</text>
+  <text class="i" x="220" y="217" text-anchor="middle">nothing to install</text>
+
+  <rect class="b" x="462" y="94" width="120" height="52"/>
+  <text class="l" x="522" y="115" text-anchor="middle">crawl</text>
+  <text class="i" x="522" y="132" text-anchor="middle">host A</text>
+
+  <rect class="b" x="596" y="94" width="120" height="52"/>
+  <text class="l" x="656" y="115" text-anchor="middle">crawl</text>
+  <text class="i" x="656" y="132" text-anchor="middle">host B</text>
+
+  <rect class="b" x="730" y="94" width="120" height="52"/>
+  <text class="l" x="790" y="115" text-anchor="middle">store</text>
+  <text class="i" x="790" y="132" text-anchor="middle">host C</text>
+
+  <path class="f" d="M522,146 C522,164 560,164 570,178"/>
+  <path class="f" d="M656,146 V178"/>
+  <path class="f" d="M790,146 C790,164 750,164 742,178"/>
+
+  <rect class="s" x="500" y="182" width="320" height="42"/>
+  <text class="l" x="660" y="202" text-anchor="middle">nats://broker:4222</text>
+  <text class="i" x="660" y="217" text-anchor="middle">the same code, pointed elsewhere</text>
+
+  <text class="n" x="440" y="262" text-anchor="middle">Components never call each other directly. They publish and subscribe on <tspan font-family="ui-monospace, monospace">scour.&lt;item&gt;.&lt;stage&gt;</tspan>.</text>
+
+  <rect class="b" x="40" y="284" width="255" height="72"/>
+  <text class="l" x="167" y="306" text-anchor="middle">SCOUR_CRAWL</text>
+  <text class="i" x="167" y="325" text-anchor="middle">work · discovered · fetched</text>
+  <text class="i" x="167" y="342" text-anchor="middle">a work queue: delivered once</text>
+
+  <rect class="b" x="312" y="284" width="255" height="72"/>
+  <text class="l" x="440" y="306" text-anchor="middle">SCOUR_RECORDS</text>
+  <text class="i" x="440" y="325" text-anchor="middle">one extracted record each</text>
+  <text class="i" x="440" y="342" text-anchor="middle">a work queue: written once</text>
+
+  <rect class="b" x="584" y="284" width="256" height="72"/>
+  <text class="l" x="712" y="306" text-anchor="middle">SCOUR_METRICS</text>
+  <text class="i" x="712" y="325" text-anchor="middle">kept for anyone who asks</text>
+  <text class="i" x="712" y="342" text-anchor="middle">forgotten after fifteen minutes</text>
+
+  <text class="n" x="440" y="384" text-anchor="middle">Metrics are deliberately not a work queue: one dashboard consuming a measurement would take it from every other.</text>
+  <text class="n" x="440" y="408" text-anchor="middle">Delivery is at-least-once, so every consumer is idempotent and every write is keyed on a stable hash.</text>
+</svg>
