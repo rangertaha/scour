@@ -88,6 +88,7 @@ label those properties with.
 | `scour item tag <name> -p <prop> -a/-d/-u <word>` | Add, remove, or replace the whole set |
 | `scour item tag <name> -p <prop> --on <domain>` | Scope the teaching to one site |
 | `scour item ls [<name>]` | A line per item, or everything about one |
+| `scour item show <name>` | Everything known about one item |
 | `scour item rm <name> [-d/-u/-p/--rule]` | Remove an item, or one of its parts |
 | `scour item rm <name> -p <prop> --clear <detail>` | Clear one detail, keeping the property |
 | `scour item templates` | List the built-in schemas `--template` accepts |

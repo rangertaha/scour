@@ -661,6 +661,22 @@ because "no records above 0.9 yet" is an answer, not a failure.
 
 ## Migration
 
+> **Most of this has now happened.** The five nouns are real commands, and so
+> are `run`, `status` and `top`. The column headed "Today" below is the surface
+> that came before them, kept because the mapping is what somebody with the old
+> commands in their fingers needs.
+>
+> Built: every verb under `item`, `job`, `model` and `node` that this document
+> names, plus `record ls` and `record mark`.
+>
+> Not built: `record search`, `record show`, `record write`, `record rm`,
+> `job runs`, `job log`, `job config`, `job validate`, `node ls`, `node show`
+> and `node leave`. The `scour search` shortcut is not there either, and the
+> word is currently unused: `record ls` answers to `stream`, not to `search`,
+> which leaves the name free for the query this document gives it.
+>
+> [What the binary answers to today]({{ '/cli/' | relative_url }}).
+
 | Today | Proposed |
 | --- | --- |
 | `scour item add <n> --alias <w>` | `scour item tag <n> --add <w>` |
