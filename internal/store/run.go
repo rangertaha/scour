@@ -32,6 +32,22 @@ const (
 	RunFailed RunState = "failed"
 )
 
+// RunKind is what a run was doing.
+//
+// Crawling and training are the two pieces of work that take minutes, are
+// started the same way, and are asked the same questions afterwards: when did
+// it run, how did it end, what did it produce. One table answers those for both
+// rather than each growing its own history and its own way of being watched.
+type RunKind string
+
+// The kinds of run.
+const (
+	// RunCrawl works through a job's frontier.
+	RunCrawl RunKind = "crawl"
+	// RunTrain induces an item's model from the pages a crawl left behind.
+	RunTrain RunKind = "train"
+)
+
 // Run is one execution of a job.
 //
 // The job says what to crawl and holds the frontier; a run is one occasion of
@@ -43,8 +59,17 @@ const (
 // recounted from the urls table only until one of them is fetched again, and a
 // history that changes when you re-crawl is not a history.
 type Run struct {
-	ID    uint `gorm:"primaryKey"`
+	ID uint `gorm:"primaryKey"`
+	// Kind is crawl or train. It defaults to crawl so that every run written
+	// before the column existed reads as what it was.
+	Kind RunKind `gorm:"index;not null;default:crawl"`
+	// JobID is the job whose frontier this run drained. Zero for a training
+	// run, which belongs to an item and has no frontier.
 	JobID uint `gorm:"index:idx_run_job_started;not null"`
+	// ItemID is what the run was working on. A crawl could reach it through its
+	// job, but a training run has no job, and "every run of this item" is a
+	// question worth answering without knowing which kind it was.
+	ItemID uint `gorm:"index"`
 	// StartedAt is indexed with the job because every listing of runs is that
 	// job's, newest first.
 	StartedAt time.Time `gorm:"index:idx_run_job_started"`
@@ -58,6 +83,9 @@ type Run struct {
 	// Records is how many the run's pages yielded, filled in by training
 	// rather than by the crawl, since extraction happens afterwards.
 	Records int
+	// Rules is how many locators a training run induced. It is training's
+	// counterpart to Fetched: the number that says what the work produced.
+	Rules int
 
 	// Budget names what ended it: "pages", "time", "pause", or empty when the
 	// frontier simply ran out.
@@ -92,10 +120,26 @@ func (r *Run) StatusCounts() map[int]int {
 }
 
 // StartRun opens a run for a job and returns it.
-func (s *Store) StartRun(ctx context.Context, jobID uint) (*Run, error) {
-	run := &Run{JobID: jobID, StartedAt: time.Now().UTC(), State: RunRunning}
+func (s *Store) StartRun(ctx context.Context, jobID, itemID uint) (*Run, error) {
+	return s.startRun(ctx, &Run{Kind: RunCrawl, JobID: jobID, ItemID: itemID})
+}
+
+// StartTrainingRun opens a run for inducing an item's model.
+//
+// A training run has no job because it has no frontier: it reads whatever every
+// job of the item has already cached. It is a run all the same, for the reason
+// crawls became runs: without one, nothing records that last night's training
+// happened, how long it took, or whether it produced fewer rules than the run
+// before it.
+func (s *Store) StartTrainingRun(ctx context.Context, itemID uint) (*Run, error) {
+	return s.startRun(ctx, &Run{Kind: RunTrain, ItemID: itemID})
+}
+
+func (s *Store) startRun(ctx context.Context, run *Run) (*Run, error) {
+	run.StartedAt = time.Now().UTC()
+	run.State = RunRunning
 	if err := s.db.WithContext(ctx).Create(run).Error; err != nil {
-		return nil, fmt.Errorf("start run: %w", err)
+		return nil, fmt.Errorf("start %s run: %w", run.Kind, err)
 	}
 	return run, nil
 }
@@ -110,6 +154,11 @@ type Finished struct {
 	Budget   string
 	Statuses map[int]int
 	Err      error
+
+	// Records and Rules are what a training run produced. A crawl leaves both
+	// zero, since extraction has not happened yet when it ends.
+	Records int
+	Rules   int
 }
 
 // FinishRun closes a run with what it did.
@@ -127,6 +176,8 @@ func (s *Store) FinishRun(ctx context.Context, runID uint, f Finished) error {
 		"skipped":  f.Skipped,
 		"bytes":    f.Bytes,
 		"budget":   f.Budget,
+		"records":  f.Records,
+		"rules":    f.Rules,
 	}
 	if len(f.Statuses) > 0 {
 		if encoded, err := json.Marshal(f.Statuses); err == nil {
@@ -237,4 +288,50 @@ func (s *Store) RunPageCount(ctx context.Context, runID uint) (int64, error) {
 		return 0, fmt.Errorf("count pages of run %d: %w", runID, err)
 	}
 	return n, nil
+}
+
+// Run reads one run by id, whatever it belongs to.
+//
+// [Store.RunByID] scopes to a job so that `job log` cannot be handed another
+// job's id. Over a wire the id is the whole address, and a training run has no
+// job to scope to, so this is the unscoped read the API needs.
+func (s *Store) Run(ctx context.Context, id uint) (*Run, error) {
+	var run Run
+	err := s.db.WithContext(ctx).Where("id = ?", id).First(&run).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("run %d: %w", id, ErrNotFound)
+		}
+		return nil, fmt.Errorf("run %d: %w", id, err)
+	}
+	return &run, nil
+}
+
+// RecentRuns is the newest runs of every kind, for a caller watching the whole
+// installation rather than one job.
+func (s *Store) RecentRuns(ctx context.Context, limit int) ([]Run, error) {
+	q := s.db.WithContext(ctx).Order("started_at DESC, id DESC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var runs []Run
+	if err := q.Find(&runs).Error; err != nil {
+		return nil, fmt.Errorf("recent runs: %w", err)
+	}
+	return runs, nil
+}
+
+// ItemRuns is every run of one item, crawls and trainings together, newest
+// first. The two are asked about as one history: a model that got worse is
+// read against the crawl that fed it.
+func (s *Store) ItemRuns(ctx context.Context, itemID uint, limit int) ([]Run, error) {
+	q := s.db.WithContext(ctx).Where("item_id = ?", itemID).Order("started_at DESC, id DESC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var runs []Run
+	if err := q.Find(&runs).Error; err != nil {
+		return nil, fmt.Errorf("runs of item %d: %w", itemID, err)
+	}
+	return runs, nil
 }

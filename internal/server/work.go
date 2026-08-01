@@ -106,7 +106,7 @@ func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*
 		// A crawl started over HTTP is a run like any other. Without this the
 		// history would show only what was started from a terminal, which is
 		// the half nobody needs a history of.
-		run, err := s.store.StartRun(jobCtx, job.ID)
+		run, err := s.store.StartRun(jobCtx, job.ID, item.ID)
 		if err != nil {
 			return nil, err
 		}

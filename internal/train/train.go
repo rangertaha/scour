@@ -74,6 +74,8 @@ func New(cfg config.Config, s *store.Store, c cache.Store) *Trainer {
 
 // Result reports what a training run did.
 type Result struct {
+	// RunID is the history row this training wrote, zero when none could be.
+	RunID      uint
 	Pages      int
 	Bytes      int64
 	Skipped    int
@@ -109,6 +111,46 @@ type Options struct {
 // tells you nothing about whether it works. The records it produces are what
 // `scour search` then shows and what labelling corrects.
 func (t *Trainer) Run(ctx context.Context, item *store.Item, opts Options) (*Result, error) {
+	// The history row opens before the work and closes after it, whichever way
+	// it ends, so a training that died leaves a row saying it started rather
+	// than no row at all. Training became a run for the reason crawling did:
+	// without one, nothing recorded that last night's happened, how long it
+	// took, or that it produced fewer rules than the run before it.
+	//
+	// It never fails the training it is recording. A run that induced a model
+	// and could not write its own history row still induced the model, and the
+	// model is the thing worth keeping.
+	var run *store.Run
+	if t.store != nil {
+		opened, err := t.store.StartTrainingRun(ctx, item.ID)
+		if err != nil {
+			slog.Debug("could not open a training run", "item", item.Name, "err", err)
+		} else {
+			run = opened
+		}
+	}
+
+	result, err := t.induce(ctx, item, opts)
+
+	if run != nil {
+		f := store.Finished{State: store.RunDone, Err: err}
+		if err != nil {
+			f.State = store.RunFailed
+		}
+		if result != nil {
+			f.Records, f.Rules, f.Skipped = result.Records, result.Rules, result.Skipped
+			result.RunID = run.ID
+		}
+		if ferr := t.store.FinishRun(ctx, run.ID, f); ferr != nil {
+			slog.Debug("could not close a training run", "run", run.ID, "err", ferr)
+		}
+	}
+	return result, err
+}
+
+// induce is the training run itself. Run wraps it so the history row is written
+// on every path out, including the ones that return an error.
+func (t *Trainer) induce(ctx context.Context, item *store.Item, opts Options) (*Result, error) {
 	start := time.Now()
 
 	props := schemaOf(item)

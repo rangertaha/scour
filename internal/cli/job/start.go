@@ -233,7 +233,7 @@ func runCrawl(c context.Context, a *cli.App, name string, f crawlFlags) error {
 	// The history row opens before the crawl and closes after it, whichever
 	// way the crawl ends, so a run that died is a row saying it started rather
 	// than no row at all.
-	run, err := s.StartRun(c, job.ID)
+	run, err := s.StartRun(c, job.ID, job.ItemID)
 	if err != nil {
 		return err
 	}
