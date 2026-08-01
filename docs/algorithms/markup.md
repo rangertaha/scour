@@ -18,6 +18,17 @@ This is the evidence page for
 [the algorithms]({{ '/algorithms/' | relative_url }}): what the corpus actually
 contains, rather than what the inference does with it.
 
+> **Two things below have since been fixed, and the page is kept as it was
+> written.** It records what inference did at the time, which is what makes the
+> measurements after it meaningful.
+>
+> The record container landing on `/html/head`, called "the largest open
+> failure" in section 6, is closed: the container is now chosen before the
+> fields, and the body markup it put out of reach is reachable. `<link
+> rel="alternate">` and `rel="preconnect"` no longer win `title` and `link`.
+>
+> [What that changed, in numbers]({{ '/results/' | relative_url }}).
+
 Annotations say what inference does with each today, and `<-` marks the ones
 that mislead it.
 
