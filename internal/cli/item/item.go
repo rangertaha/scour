@@ -16,7 +16,7 @@ import (
 // crawling happens. Grouping them says that, and leaves the top level to the
 // five things scour actually does.
 func Item(a *cli.App) *ucli.Command {
-	return &ucli.Command{
+	return cli.Group(&ucli.Command{
 		Category: "MANAGE",
 		Name:     "item",
 		Usage:    "Define items to find",
@@ -37,5 +37,5 @@ func Item(a *cli.App) *ucli.Command {
 			Tag(a),
 			Templates(a),
 		},
-	}
+	})
 }

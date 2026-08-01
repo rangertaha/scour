@@ -453,3 +453,47 @@ func TestClearingAPropertyDetailKeepsTheProperty(t *testing.T) {
 	}
 	_ = out
 }
+
+// A noun given a verb it does not have must answer with its own vocabulary.
+//
+// urfave runs the group's action for a word it does not recognise, and a group
+// with no action prints "No help topic for 'add'" and exits 3, which is the
+// help system's voice rather than the command's.
+func TestAGroupSuggestsItsOwnVerbs(t *testing.T) {
+	dir := t.TempDir()
+
+	for _, tc := range []struct{ group, verb, want string }{
+		{"item", "tsg", "scour item tag"},
+		{"model", "trian", "scour model train"},
+		{"record", "marc", "scour record mark"},
+		{"job", "strt", "scour job start"},
+	} {
+		_, err := run(t, dir, tc.group, tc.verb)
+		if err == nil {
+			t.Errorf("scour %s %s should have failed", tc.group, tc.verb)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("scour %s %s did not suggest %q: %v", tc.group, tc.verb, tc.want, err)
+		}
+	}
+
+	// Nothing close enough is offered nothing, and the message names the group
+	// rather than the program, so the help to read is the group's.
+	_, err := run(t, dir, "job", "zzzzzzzz")
+	if err == nil {
+		t.Fatal("an unknown verb must fail")
+	}
+	if strings.Contains(err.Error(), "did you mean") {
+		t.Errorf("a distant verb should not be suggested: %v", err)
+	}
+	if !strings.Contains(err.Error(), "scour job --help") {
+		t.Errorf("the message should point at the group's help: %v", err)
+	}
+
+	// A noun with no verb is a question about what the verbs are.
+	out := runOK(t, dir, "record")
+	if !strings.Contains(out, "mark") {
+		t.Errorf("a bare group should list its verbs:\n%s", out)
+	}
+}

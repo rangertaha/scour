@@ -19,7 +19,7 @@ import (
 // has to be learned before crawling anything. The word earns its place when one
 // item needs two different target sets.
 func Job(a *cli.App) *ucli.Command {
-	return &ucli.Command{
+	return cli.Group(&ucli.Command{
 		Category: "MANAGE",
 		Name:     "job",
 		Usage:    "Define where to look, and run it",
@@ -33,5 +33,5 @@ func Job(a *cli.App) *ucli.Command {
 		Commands: []*ucli.Command{
 			Start(a), Pause(a), Stop(a), List(a), Import(a), Export(a),
 		},
-	}
+	})
 }

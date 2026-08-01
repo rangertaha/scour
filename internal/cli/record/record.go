@@ -13,7 +13,7 @@ import (
 // Records belong to the item rather than to the job that produced them, because
 // two jobs hunting one item are filling one table.
 func Record(a *cli.App) *ucli.Command {
-	return &ucli.Command{
+	return cli.Group(&ucli.Command{
 		Category: "MANAGE",
 		Name:     "record",
 		Usage:    "Read, mark and export what was found",
@@ -24,5 +24,5 @@ func Record(a *cli.App) *ucli.Command {
 			"  scour record mark vehicle 1042 --verdict invalid\n" +
 			"  scour record write vehicle --format csv --to ./out",
 		Commands: []*ucli.Command{List(a), Mark(a)},
-	}
+	})
 }
