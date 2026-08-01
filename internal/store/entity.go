@@ -58,7 +58,7 @@ func (s *Store) ItemFull(ctx context.Context, name string) (*Item, error) {
 	var e Item
 	err := s.db.WithContext(ctx).
 		Preload("Aliases").Preload("Properties.Aliases").Preload("Properties").
-		Preload("Targets").Preload("ContentTypes").
+		Preload("Jobs").Preload("Jobs.Targets").Preload("Jobs.ContentTypes").
 		Where("name = ?", name).First(&e).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, s.noSuchItem(ctx, name)
@@ -147,8 +147,21 @@ func (s *Store) DeleteItem(ctx context.Context, name string) error {
 				return fmt.Errorf("delete property aliases: %w", err)
 			}
 		}
+		// Targets and content types hang off the item's jobs, so they go by
+		// job rather than by item, and the jobs go with them.
+		var jobIDs []uint
+		if err := tx.Model(&Job{}).Where("item_id = ?", e.ID).Pluck("id", &jobIDs).Error; err != nil {
+			return fmt.Errorf("collect jobs: %w", err)
+		}
+		if len(jobIDs) > 0 {
+			for _, model := range []any{&Target{}, &ContentType{}} {
+				if err := tx.Where("job_id IN ?", jobIDs).Delete(model).Error; err != nil {
+					return fmt.Errorf("delete %T: %w", model, err)
+				}
+			}
+		}
 		for _, model := range []any{
-			&Alias{}, &Property{}, &Target{}, &ContentType{},
+			&Alias{}, &Property{}, &Job{},
 			&URL{}, &Rule{}, &Record{}, &ModelMeta{}, &Chain{}, &PageRole{},
 		} {
 			if err := tx.Where("item_id = ?", e.ID).Delete(model).Error; err != nil {
@@ -320,18 +333,18 @@ func (s *Store) AddPropertyAlias(ctx context.Context, itemID uint, domain, propN
 }
 
 // AddTarget records a crawl target.
-func (s *Store) AddTarget(ctx context.Context, itemID uint, kind TargetKind, value string, subdomains bool, depth int) error {
+func (s *Store) AddTarget(ctx context.Context, jobID uint, kind TargetKind, value string, subdomains bool, depth int) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return errors.New("target must not be empty")
 	}
 	err := s.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "item_id"}, {Name: "kind"}, {Name: "value"}},
+			Columns:   []clause.Column{{Name: "job_id"}, {Name: "kind"}, {Name: "value"}},
 			DoUpdates: clause.AssignmentColumns([]string{"subdomains", "depth"}),
 		}).
 		Create(&Target{
-			ItemID: itemID, Kind: kind, Value: value,
+			JobID: jobID, Kind: kind, Value: value,
 			Subdomains: subdomains, Depth: depth,
 		}).Error
 	if err != nil {
@@ -341,14 +354,14 @@ func (s *Store) AddTarget(ctx context.Context, itemID uint, kind TargetKind, val
 }
 
 // AddContentType restricts the item's crawls to a content type.
-func (s *Store) AddContentType(ctx context.Context, itemID uint, typ string) error {
+func (s *Store) AddContentType(ctx context.Context, jobID uint, typ string) error {
 	typ = strings.TrimSpace(typ)
 	if typ == "" {
 		return errors.New("content type must not be empty")
 	}
 	err := s.db.WithContext(ctx).
 		Clauses(clause.OnConflict{DoNothing: true}).
-		Create(&ContentType{ItemID: itemID, Type: typ}).Error
+		Create(&ContentType{JobID: jobID, Type: typ}).Error
 	if err != nil {
 		return fmt.Errorf("add content type %q: %w", typ, err)
 	}
@@ -356,9 +369,9 @@ func (s *Store) AddContentType(ctx context.Context, itemID uint, typ string) err
 }
 
 // DeleteTarget removes one target by value, whichever kind it is.
-func (s *Store) DeleteTarget(ctx context.Context, itemID uint, value string) error {
+func (s *Store) DeleteTarget(ctx context.Context, jobID uint, value string) error {
 	res := s.db.WithContext(ctx).
-		Where("item_id = ? AND value = ?", itemID, value).
+		Where("job_id = ? AND value = ?", jobID, value).
 		Delete(&Target{})
 	if res.Error != nil {
 		return fmt.Errorf("delete target %q: %w", value, res.Error)
@@ -412,7 +425,7 @@ const TargetBatch = 500
 // committing a transaction per row rather than doing work.
 func (s *Store) AddTargets(
 	ctx context.Context,
-	itemID uint,
+	jobID uint,
 	kind TargetKind,
 	values []string,
 	subdomains bool,
@@ -433,7 +446,7 @@ func (s *Store) AddTargets(
 		}
 		seen[value] = true
 		rows = append(rows, Target{
-			ItemID: itemID, Kind: kind, Value: value,
+			JobID: jobID, Kind: kind, Value: value,
 			Subdomains: subdomains, Depth: depth,
 		})
 	}
@@ -443,7 +456,7 @@ func (s *Store) AddTargets(
 
 	err := s.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "item_id"}, {Name: "kind"}, {Name: "value"}},
+			Columns:   []clause.Column{{Name: "job_id"}, {Name: "kind"}, {Name: "value"}},
 			DoUpdates: clause.AssignmentColumns([]string{"subdomains", "depth"}),
 		}).
 		CreateInBatches(&rows, TargetBatch).Error
@@ -517,14 +530,14 @@ func (s *Store) PropertiesFor(ctx context.Context, itemID uint, domain string) (
 }
 
 // TargetsFor returns an item's crawl targets.
-func (s *Store) TargetsFor(ctx context.Context, itemID uint) ([]Target, error) {
+func (s *Store) TargetsFor(ctx context.Context, jobID uint) ([]Target, error) {
 	var out []Target
 	err := s.db.WithContext(ctx).
-		Where("item_id = ?", itemID).
+		Where("job_id = ?", jobID).
 		Order("id").
 		Find(&out).Error
 	if err != nil {
-		return nil, fmt.Errorf("targets for item %d: %w", itemID, err)
+		return nil, fmt.Errorf("targets for item %d: %w", jobID, err)
 	}
 	return out, nil
 }

@@ -106,7 +106,14 @@ func TestMigrationFromTheEntitySchema(t *testing.T) {
 		t.Errorf("the domain-scoped property kept %d of 1 words", len(scoped))
 	}
 
-	targets, err := s.TargetsFor(ctx, item.ID)
+	// Targets belong to a job now, and the migration made one per item that
+	// had any, named after the item, so the frontier a crawl already built is
+	// still reachable under the same name.
+	job, err := s.Job(ctx, "news")
+	if err != nil {
+		t.Fatalf("the item got no job: %v", err)
+	}
+	targets, err := s.TargetsFor(ctx, job.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -363,12 +363,15 @@ func resolveProps(item *store.Item) []store.Property {
 	return out
 }
 
-// confinedTo reports whether every one of an item's targets sits on one domain.
+// confinedTo reports whether every target of every job of an item sits on one
+// domain, which is what makes that domain's teaching the right answer for the
+// whole corpus.
 func confinedTo(item *store.Item, domain string) bool {
-	if len(item.Targets) == 0 {
+	targets := item.AllTargets()
+	if len(targets) == 0 {
 		return false
 	}
-	for _, t := range item.Targets {
+	for _, t := range targets {
 		host := t.Value
 		if t.Kind == store.TargetURL {
 			u, err := url.Parse(t.Value)

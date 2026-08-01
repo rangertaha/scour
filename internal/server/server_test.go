@@ -131,9 +131,9 @@ func TestCreatingTwiceIsSafe(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &item); err != nil {
 		t.Fatal(err)
 	}
-	if len(item.Aliases) != 1 || len(item.Targets) != 1 {
+	if len(item.Aliases) != 1 || len(item.AllTargets()) != 1 {
 		t.Errorf("repeating the request duplicated things: %d aliases, %d targets",
-			len(item.Aliases), len(item.Targets))
+			len(item.Aliases), len(item.AllTargets()))
 	}
 }
 

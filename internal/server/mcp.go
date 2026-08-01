@@ -150,7 +150,7 @@ func (s *Server) mcpGetItem(ctx context.Context, _ *mcp.CallToolRequest, in item
 		props = append(props, p.Name)
 	}
 	return text("%s: %d targets, %d aliases, properties: %s",
-			item.Name, len(item.Targets), len(item.Aliases),
+			item.Name, len(item.AllTargets()), len(item.Aliases),
 			strings.Join(props, ", ")),
 		getItemOut{Item: item}, nil
 }
@@ -196,14 +196,19 @@ func (s *Server) mcpAddItem(ctx context.Context, _ *mcp.CallToolRequest, in addI
 		}
 		changes = append(changes, "alias "+alias)
 	}
+	job, err := s.store.JobForItem(ctx, item)
+	if err != nil {
+		return nil, addItemOut{}, err
+	}
+
 	for _, d := range in.Domains {
-		if err := s.store.AddTarget(ctx, item.ID, store.TargetDomain, d, false, 0); err != nil {
+		if err := s.store.AddTarget(ctx, job.ID, store.TargetDomain, d, false, 0); err != nil {
 			return nil, addItemOut{}, err
 		}
 		changes = append(changes, "domain "+d)
 	}
 	for _, u := range in.URLs {
-		if err := s.store.AddTarget(ctx, item.ID, store.TargetURL, u, false, 0); err != nil {
+		if err := s.store.AddTarget(ctx, job.ID, store.TargetURL, u, false, 0); err != nil {
 			return nil, addItemOut{}, err
 		}
 		changes = append(changes, "url "+u)

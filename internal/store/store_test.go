@@ -90,10 +90,10 @@ func TestAddIsIdempotentThroughout(t *testing.T) {
 		if err := s.AddAlias(ctx, e.ID, "car"); err != nil {
 			t.Fatalf("AddAlias: %v", err)
 		}
-		if err := s.AddTarget(ctx, e.ID, TargetDomain, "example.com", true, 5); err != nil {
+		if err := s.AddTarget(ctx, jobOf(t, s, e).ID, TargetDomain, "example.com", true, 5); err != nil {
 			t.Fatalf("AddTarget: %v", err)
 		}
-		if err := s.AddContentType(ctx, e.ID, "html"); err != nil {
+		if err := s.AddContentType(ctx, jobOf(t, s, e).ID, "html"); err != nil {
 			t.Fatalf("AddContentType: %v", err)
 		}
 	}
@@ -105,11 +105,14 @@ func TestAddIsIdempotentThroughout(t *testing.T) {
 	if len(full.Aliases) != 1 {
 		t.Errorf("aliases = %d, want 1", len(full.Aliases))
 	}
-	if len(full.Targets) != 1 {
-		t.Errorf("targets = %d, want 1", len(full.Targets))
+	if got := full.AllTargets(); len(got) != 1 {
+		t.Errorf("targets = %d, want 1", len(got))
 	}
-	if len(full.ContentTypes) != 1 {
-		t.Errorf("content types = %d, want 1", len(full.ContentTypes))
+	if len(full.Jobs) != 1 {
+		t.Fatalf("jobs = %d, want the one implicit job", len(full.Jobs))
+	}
+	if len(full.Jobs[0].ContentTypes) != 1 {
+		t.Errorf("content types = %d, want 1", len(full.Jobs[0].ContentTypes))
 	}
 }
 
@@ -151,10 +154,10 @@ func TestAddTargetUpdatesDepthAndSubdomains(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddTarget(ctx, e.ID, TargetDomain, "example.com", false, 3); err != nil {
+	if err := s.AddTarget(ctx, jobOf(t, s, e).ID, TargetDomain, "example.com", false, 3); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddTarget(ctx, e.ID, TargetDomain, "example.com", true, 7); err != nil {
+	if err := s.AddTarget(ctx, jobOf(t, s, e).ID, TargetDomain, "example.com", true, 7); err != nil {
 		t.Fatal(err)
 	}
 
@@ -162,11 +165,11 @@ func TestAddTargetUpdatesDepthAndSubdomains(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(full.Targets) != 1 {
-		t.Fatalf("targets = %d, want 1", len(full.Targets))
+	if len(full.AllTargets()) != 1 {
+		t.Fatalf("targets = %d, want 1", len(full.AllTargets()))
 	}
-	if !full.Targets[0].Subdomains || full.Targets[0].Depth != 7 {
-		t.Errorf("target = %+v, want the updated depth and subdomains", full.Targets[0])
+	if !full.AllTargets()[0].Subdomains || full.AllTargets()[0].Depth != 7 {
+		t.Errorf("target = %+v, want the updated depth and subdomains", full.AllTargets()[0])
 	}
 }
 
@@ -187,7 +190,7 @@ func TestEmptyNamesAreRejected(t *testing.T) {
 	if err := s.AddProperty(ctx, e.ID, "", "", "Ford"); err == nil {
 		t.Error("an empty property name must be rejected")
 	}
-	if err := s.AddTarget(ctx, e.ID, TargetURL, "", false, 0); err == nil {
+	if err := s.AddTarget(ctx, jobOf(t, s, e).ID, TargetURL, "", false, 0); err == nil {
 		t.Error("an empty target must be rejected")
 	}
 }
@@ -206,7 +209,7 @@ func TestDeleteItemRemovesEverythingBelowIt(t *testing.T) {
 	if err := s.AddProperty(ctx, e.ID, "make", "", "Ford"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddTarget(ctx, e.ID, TargetDomain, "example.com", false, 0); err != nil {
+	if err := s.AddTarget(ctx, jobOf(t, s, e).ID, TargetDomain, "example.com", false, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -228,7 +231,7 @@ func TestDeleteItemRemovesEverythingBelowIt(t *testing.T) {
 	}{
 		{"aliases", &Alias{}},
 		{"properties", &Property{}},
-		{"targets", &Target{}},
+		{"jobs", &Job{}},
 		{"records", &Record{}},
 	} {
 		var n int64
@@ -970,4 +973,15 @@ func TestLeaseQueueStillMeansBestFirst(t *testing.T) {
 	if got.URL != "http://example.com/best" {
 		t.Errorf("LeaseQueue handed out %s, want the highest score", got.URL)
 	}
+}
+
+// jobOf returns the implicit job of an item, which is where its targets and
+// content types live.
+func jobOf(t *testing.T, s *Store, item *Item) *Job {
+	t.Helper()
+	job, err := s.JobForItem(context.Background(), item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return job
 }

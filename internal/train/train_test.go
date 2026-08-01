@@ -333,8 +333,8 @@ func TestTaughtPatternOverridesInducedExtraction(t *testing.T) {
 // did not merely fail to take effect, it stopped the item being trainable.
 func TestPropertyTaughtOnADomainDoesNotDuplicate(t *testing.T) {
 	item := &store.Item{
-		Name:    "news",
-		Targets: []store.Target{{Kind: store.TargetDomain, Value: "example.com"}},
+		Name: "news",
+		Jobs: []store.Job{{Targets: []store.Target{{Kind: store.TargetDomain, Value: "example.com"}}}},
 		Properties: []store.Property{
 			{Name: "author", Example: "Anonymous"},
 			{Name: "author", Domain: "example.com", Example: "Hannah McLeod",
@@ -374,10 +374,10 @@ func TestPropertyTaughtOnADomainDoesNotDuplicate(t *testing.T) {
 func TestDomainTeachingYieldsToTheDefaultAcrossSites(t *testing.T) {
 	item := &store.Item{
 		Name: "news",
-		Targets: []store.Target{
+		Jobs: []store.Job{{Targets: []store.Target{
 			{Kind: store.TargetDomain, Value: "example.com"},
 			{Kind: store.TargetDomain, Value: "other.test"},
-		},
+		}}},
 		Properties: []store.Property{
 			{Name: "author", Example: "Anonymous"},
 			{Name: "author", Domain: "example.com", Example: "Hannah McLeod"},
@@ -413,7 +413,7 @@ func TestConfinedToReadsBothKindsOfTarget(t *testing.T) {
 		{"none", nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			item := &store.Item{Targets: tc.targets}
+			item := &store.Item{Jobs: []store.Job{{Targets: tc.targets}}}
 			if got := confinedTo(item, "example.com"); got != tc.want {
 				t.Errorf("confinedTo = %v, want %v", got, tc.want)
 			}

@@ -375,7 +375,13 @@ func (r *runner) start(ctx context.Context, name string) {
 		return
 	}
 
-	types, err := content.New(itemTypes(item), nil)
+	job, err := s.JobForItem(ctx, item)
+	if err != nil {
+		r.note("[red]" + err.Error() + "[-]")
+		return
+	}
+
+	types, err := content.New(jobTypes(job), nil)
 	if err != nil {
 		r.note("[red]" + err.Error() + "[-]")
 		return
@@ -398,7 +404,7 @@ func (r *runner) start(ctx context.Context, name string) {
 
 	_, err = crawl.New(r.app.Cfg, s, pages).Run(ctx, crawl.Options{
 		Item:    item,
-		Targets: item.Targets,
+		Targets: job.Targets,
 		Types:   types,
 		Depth:   r.app.Cfg.Crawl.Depth,
 		Scorer:  scorer,
@@ -440,14 +446,14 @@ func (r *runner) train(ctx context.Context, name string) {
 	r.note(fmt.Sprintf("[green]%s: %d rules, %d records[-]", name, result.Rules, result.Records))
 }
 
-// itemTypes is the item's content types, or the configured default when it
-// has none of its own.
-func itemTypes(e *store.Item) []string {
-	if len(e.ContentTypes) == 0 {
+// jobTypes is a job's content types, or nil when it has none of its own and
+// the configured default applies.
+func jobTypes(j *store.Job) []string {
+	if j == nil || len(j.ContentTypes) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(e.ContentTypes))
-	for _, t := range e.ContentTypes {
+	out := make([]string, 0, len(j.ContentTypes))
+	for _, t := range j.ContentTypes {
 		out = append(out, t.Type)
 	}
 	return out

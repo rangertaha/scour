@@ -157,6 +157,11 @@ func (s *Store) migrate() error {
 	if err := s.renameItemColumns(); err != nil {
 		return err
 	}
+	// Before AutoMigrate, which would otherwise see a targets table with no
+	// job_id and add one full of zeroes.
+	if err := s.splitJobsFromItems(); err != nil {
+		return err
+	}
 	// AutoMigrate adds a column but will not rebuild a unique index whose
 	// definition changed. A database created before `domain` joined
 	// (item_id, name) therefore keeps the old two-column index, and every
@@ -388,3 +393,146 @@ func (s *Store) Close() error {
 // DB exposes the gorm handle for the packages that build on the store. It is
 // deliberately not used outside internal/store's own siblings.
 func (s *Store) DB() *gorm.DB { return s.db }
+
+// splitJobsFromItems moves targets and content types onto a job.
+//
+// An item used to carry a definition, a target list, a budget, a frontier and a
+// run state at once, which left nowhere to put a second crawl of the same item
+// over different sites, and nowhere to say that one of them is paused while the
+// other runs. Targets belong to a job now.
+//
+// Every item that had any becomes an item plus one job named after it, so
+// nothing is re-seeded and a crawl of an item reaches the frontier it already
+// built. The item's paused flag becomes the job's state, because pausing was
+// always a statement about a crawl rather than about what was being hunted.
+//
+// Done in SQL rather than by reading rows: one database here holds 981,461
+// targets, and loading them into Go to write one column back would be minutes
+// and a gigabyte.
+func (s *Store) splitJobsFromItems() error {
+	tables, err := s.tableNames(s.db)
+	if err != nil {
+		return err
+	}
+	if !tables["targets"] {
+		return nil
+	}
+	var hasItemID int64
+	if err := s.db.Raw(
+		"SELECT count(*) FROM pragma_table_info('targets') WHERE name = 'item_id'").Scan(&hasItemID).Error; err != nil {
+		return fmt.Errorf("inspect targets: %w", err)
+	}
+	if hasItemID == 0 {
+		return nil
+	}
+
+	slog.Info("migrating: targets now belong to a job")
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Created from the model rather than by hand, so AutoMigrate does not
+		// then rebuild it to add the constraints a hand-written table missed.
+		// That rebuild copies through a temporary table, and a shape that does
+		// not match fails there rather than here.
+		if !tx.Migrator().HasTable(&Job{}) {
+			if err := tx.Migrator().CreateTable(&Job{}); err != nil {
+				return fmt.Errorf("create jobs: %w", err)
+			}
+		}
+
+		// One job per item that has anything to crawl, named after the item.
+		// An item with no targets gets none: there is nothing for it to run,
+		// and an empty job would be a row that needs explaining.
+		if err := tx.Exec(`INSERT INTO jobs (name, item_id, state, created_at, updated_at)
+			SELECT i.name, i.id,
+			       CASE WHEN i.paused THEN 'paused' ELSE 'ready' END,
+			       CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+			FROM items i
+			WHERE EXISTS (SELECT 1 FROM targets t WHERE t.item_id = i.id)`).Error; err != nil {
+			return fmt.Errorf("create a job per item: %w", err)
+		}
+
+		// Targets carry their own depth; the deepest is what a crawl of that
+		// item would have used, so it becomes the job's.
+		if err := tx.Exec(`UPDATE jobs SET depth = COALESCE(
+			(SELECT MAX(t.depth) FROM targets t WHERE t.item_id = jobs.item_id), 0)`).Error; err != nil {
+			return fmt.Errorf("carry the depth across: %w", err)
+		}
+
+		// Renaming the column is not enough: the table still carries a foreign
+		// key to items, and the renamed column now holds job ids, so the
+		// reference is to a row that is not there. sqlite cannot drop a
+		// constraint, so the table is rebuilt from the model and the rows are
+		// copied through with their item id mapped to their job id.
+		for _, spec := range []struct {
+			name  string
+			model any
+		}{
+			{"targets", &Target{}},
+			{"content_types", &ContentType{}},
+		} {
+			if !tables[spec.name] {
+				continue
+			}
+			old := spec.name + "__pre_job"
+			if err := tx.Exec(fmt.Sprintf("ALTER TABLE %q RENAME TO %q", spec.name, old)).Error; err != nil {
+				return fmt.Errorf("set %s aside: %w", spec.name, err)
+			}
+			if err := tx.Migrator().CreateTable(spec.model); err != nil {
+				return fmt.Errorf("rebuild %s: %w", spec.name, err)
+			}
+
+			var cols []string
+			if err := tx.Raw("SELECT name FROM pragma_table_info(?)", old).Scan(&cols).Error; err != nil {
+				return fmt.Errorf("read %s columns: %w", old, err)
+			}
+			copied := make([]string, 0, len(cols))
+			for _, c := range cols {
+				if c == "id" || c == "item_id" {
+					continue
+				}
+				copied = append(copied, c)
+			}
+			// Qualified on both sides: jobs and targets both have a depth, so
+			// a bare column name is ambiguous in the select.
+			into := make([]string, 0, len(copied))
+			from := make([]string, 0, len(copied))
+			for _, c := range copied {
+				into = append(into, fmt.Sprintf("%q", c))
+				from = append(from, fmt.Sprintf("o.%q", c))
+			}
+			sep := ""
+			if len(copied) > 0 {
+				sep = ", "
+			}
+			// A row whose item never got a job has nothing to belong to, which
+			// is only reachable for a content type on an item with no targets.
+			if err := tx.Exec(fmt.Sprintf(
+				`INSERT INTO %q (job_id%s%s) SELECT j.id%s%s FROM %q o
+				 JOIN jobs j ON j.item_id = o.item_id`,
+				spec.name, sep, strings.Join(into, ", "),
+				sep, strings.Join(from, ", "), old)).Error; err != nil {
+				return fmt.Errorf("copy %s: %w", spec.name, err)
+			}
+			if err := tx.Exec(fmt.Sprintf("DROP TABLE %q", old)).Error; err != nil {
+				return fmt.Errorf("drop %s: %w", old, err)
+			}
+		}
+
+		// The old indexes name item_id; AutoMigrate rebuilds them from the
+		// model, which is the one place their shape is written down.
+		var stale []string
+		if err := tx.Raw(`SELECT name FROM sqlite_master WHERE type = 'index'
+			AND (name LIKE 'idx_target%' OR name LIKE 'idx_ctype%')`).Scan(&stale).Error; err != nil {
+			return fmt.Errorf("list stale indexes: %w", err)
+		}
+		for _, idx := range stale {
+			if err := tx.Exec("DROP INDEX IF EXISTS " + idx).Error; err != nil {
+				return fmt.Errorf("drop stale index %s: %w", idx, err)
+			}
+		}
+
+		var jobs int64
+		tx.Raw("SELECT count(*) FROM jobs").Scan(&jobs)
+		slog.Info("migrated: targets now belong to a job", "jobs", jobs)
+		return nil
+	})
+}

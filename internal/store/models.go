@@ -21,10 +21,26 @@ type Item struct {
 	// somewhere to remember it anyway.
 	Paused bool `gorm:"index"`
 
-	Aliases      []Alias       `gorm:"constraint:OnDelete:CASCADE"`
-	Properties   []Property    `gorm:"constraint:OnDelete:CASCADE"`
-	Targets      []Target      `gorm:"constraint:OnDelete:CASCADE"`
-	ContentTypes []ContentType `gorm:"constraint:OnDelete:CASCADE"`
+	Aliases    []Alias    `gorm:"constraint:OnDelete:CASCADE"`
+	Properties []Property `gorm:"constraint:OnDelete:CASCADE"`
+	Jobs       []Job      `gorm:"constraint:OnDelete:CASCADE"`
+}
+
+// AllTargets is every target of every job of an item.
+//
+// An item has no targets of its own: a job knows where to look and an item does
+// not. Things that ask about the item as a whole, like whether its corpus is
+// confined to one site, want the union, and this is what saves them walking the
+// jobs to build it.
+//
+// Requires the item to have been loaded with its jobs and their targets, which
+// is what ItemFull does.
+func (i *Item) AllTargets() []Target {
+	var out []Target
+	for _, j := range i.Jobs {
+		out = append(out, j.Targets...)
+	}
+	return out
 }
 
 // Alias is another word a page might use for an item, so a page that never
@@ -108,11 +124,15 @@ const (
 )
 
 // Target is where a crawl starts.
+//
+// It belongs to a job rather than to an item. An item says what you are hunting
+// and knows nothing about where it might be found, so two jobs can hunt one
+// item over different sites, and one of them can be paused while the other runs.
 type Target struct {
 	ID         uint       `gorm:"primaryKey"`
-	ItemID     uint       `gorm:"uniqueIndex:idx_target_item_value;not null"`
-	Kind       TargetKind `gorm:"uniqueIndex:idx_target_item_value;not null"`
-	Value      string     `gorm:"uniqueIndex:idx_target_item_value;not null"`
+	JobID      uint       `gorm:"uniqueIndex:idx_target_job_value;not null"`
+	Kind       TargetKind `gorm:"uniqueIndex:idx_target_job_value;not null"`
+	Value      string     `gorm:"uniqueIndex:idx_target_job_value;not null"`
 	Subdomains bool
 	Depth      int
 }
@@ -120,9 +140,9 @@ type Target struct {
 // ContentType restricts an item's crawls to particular formats. An item
 // with none configured uses the crawl defaults.
 type ContentType struct {
-	ID     uint   `gorm:"primaryKey"`
-	ItemID uint   `gorm:"uniqueIndex:idx_ctype_item_type;not null"`
-	Type   string `gorm:"uniqueIndex:idx_ctype_item_type;not null"`
+	ID    uint   `gorm:"primaryKey"`
+	JobID uint   `gorm:"uniqueIndex:idx_ctype_job_type;not null"`
+	Type  string `gorm:"uniqueIndex:idx_ctype_job_type;not null"`
 }
 
 // Host carries per-host crawl policy, either configured or learned. It is
@@ -374,7 +394,7 @@ type Judgement struct {
 // tables lists every model, in dependency order, for migration.
 func tables() []any {
 	return []any{
-		&Item{}, &Alias{}, &Property{}, &PropertyAlias{}, &Target{}, &ContentType{},
+		&Item{}, &Alias{}, &Property{}, &PropertyAlias{}, &Job{}, &Target{}, &ContentType{},
 		&Host{}, &URL{}, &Response{},
 		&Rule{}, &Record{}, &Value{},
 		&ModelMeta{}, &Chain{}, &Judgement{},

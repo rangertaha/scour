@@ -139,7 +139,11 @@ func TestTheStoreOnlyRecordsDiscoveriesInsideTheItem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AddTarget(ctx, e.ID, store.TargetDomain, "example.com", false, 0); err != nil {
+	job, err := db.JobForItem(ctx, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AddTarget(ctx, job.ID, store.TargetDomain, "example.com", false, 0); err != nil {
 		t.Fatal(err)
 	}
 

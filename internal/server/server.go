@@ -168,20 +168,26 @@ func (s *Server) createItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	job, err := s.store.JobForItem(ctx, item)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+
 	for _, d := range req.Domains {
-		if err := s.store.AddTarget(ctx, item.ID, store.TargetDomain, d, req.Subdomains, req.Depth); err != nil {
+		if err := s.store.AddTarget(ctx, job.ID, store.TargetDomain, d, req.Subdomains, req.Depth); err != nil {
 			s.fail(w, r, err)
 			return
 		}
 	}
 	for _, u := range req.URLs {
-		if err := s.store.AddTarget(ctx, item.ID, store.TargetURL, u, req.Subdomains, req.Depth); err != nil {
+		if err := s.store.AddTarget(ctx, job.ID, store.TargetURL, u, req.Subdomains, req.Depth); err != nil {
 			s.fail(w, r, err)
 			return
 		}
 	}
 	for _, t := range req.Types {
-		if err := s.store.AddContentType(ctx, item.ID, strings.ToLower(t)); err != nil {
+		if err := s.store.AddContentType(ctx, job.ID, strings.ToLower(t)); err != nil {
 			s.fail(w, r, err)
 			return
 		}

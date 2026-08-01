@@ -49,13 +49,19 @@ func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	if len(item.Targets) == 0 {
+	// An unnamed crawl of an item means the job named after it, created on the
+	// first crawl so a caller never has to name one.
+	job, err := s.store.JobForItem(ctx, item)
+	if err != nil {
+		return nil, err
+	}
+	if len(job.Targets) == 0 {
 		return nil, invalid("item %s has no targets: add a domain or url first", name)
 	}
 
 	allow := req.Types
 	if len(allow) == 0 {
-		for _, t := range item.ContentTypes {
+		for _, t := range job.ContentTypes {
 			allow = append(allow, t.Type)
 		}
 	}
@@ -99,7 +105,7 @@ func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*
 		crawler := crawl.New(s.cfg, s.store, s.pages)
 		return crawler.Run(jobCtx, crawl.Options{
 			Item:    item,
-			Targets: item.Targets,
+			Targets: job.Targets,
 			Types:   types,
 			Depth:   depth,
 			Limit:   req.MaxPages,

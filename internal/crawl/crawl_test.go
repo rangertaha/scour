@@ -103,14 +103,20 @@ func item(t *testing.T, s *store.Store, base string) (*store.Item, []store.Targe
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddTarget(ctx, e.ID, store.TargetURL, base+"/", false, 0); err != nil {
+	// Targets belong to a job; an item's own name is its implicit job, which is
+	// what an unnamed crawl of that item means.
+	job, err := s.JobForItem(ctx, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddTarget(ctx, job.ID, store.TargetURL, base+"/", false, 0); err != nil {
 		t.Fatal(err)
 	}
 	full, err := s.ItemFull(ctx, "vehicle")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return full, full.Targets
+	return full, full.AllTargets()
 }
 
 func types(t *testing.T, allow ...string) *content.Set {

@@ -94,7 +94,11 @@ func runURLExport(c context.Context, a *cli.App, name string, f urlExportFlags) 
 		f.urls, f.domains = "-", "-"
 	}
 
-	targets, err := s.TargetsFor(c, item.ID)
+	job, err := s.JobForItem(c, item)
+	if err != nil {
+		return err
+	}
+	targets, err := s.TargetsFor(c, job.ID)
 	if err != nil {
 		return err
 	}

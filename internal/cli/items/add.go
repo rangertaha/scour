@@ -14,7 +14,7 @@ import (
 	"github.com/rangertaha/scour/internal/store"
 )
 
-// addExamples is shown both in --help and by runAdd when a bare "scour add
+// addExamples is shown both in --help and by runAdd when a bare "scour item add
 // <name>" leaves the item with nothing to crawl, so the two never drift.
 const addExamples = "  scour item add vehicle --alias car --alias 'pickup truck'\n" +
 	"  scour item add vehicle -d example.com --subdomains\n" +
@@ -80,7 +80,7 @@ func Add(a *cli.App) *ucli.Command {
 			},
 			&ucli.StringFlag{
 				Name:        "template",
-				Usage:       "start from a built-in schema: see scour list templates",
+				Usage:       "start from a built-in schema: see scour item templates",
 				Destination: &f.template,
 			},
 			&ucli.StringFlag{
@@ -159,6 +159,14 @@ func runAdd(c context.Context, a *cli.App, name string, f addFlags) error {
 		return err
 	}
 
+	// Targets and content types belong to a job. An item's own name is its
+	// implicit job, made on demand, so `scour item add -d` still works without
+	// anybody naming one.
+	job, err := s.JobForItem(c, item)
+	if err != nil {
+		return err
+	}
+
 	var changes []string
 
 	// With --prop the domain scopes the teaching; without it, it is a target.
@@ -190,7 +198,7 @@ func runAdd(c context.Context, a *cli.App, name string, f addFlags) error {
 			if err != nil {
 				return err
 			}
-			if err := s.AddTarget(c, item.ID, store.TargetDomain, host, f.subdomains, f.depth); err != nil {
+			if err := s.AddTarget(c, job.ID, store.TargetDomain, host, f.subdomains, f.depth); err != nil {
 				return err
 			}
 			changes = append(changes, "domain "+host)
@@ -202,7 +210,7 @@ func runAdd(c context.Context, a *cli.App, name string, f addFlags) error {
 		if err != nil {
 			return err
 		}
-		if err := s.AddTarget(c, item.ID, store.TargetURL, normalised, f.subdomains, f.depth); err != nil {
+		if err := s.AddTarget(c, job.ID, store.TargetURL, normalised, f.subdomains, f.depth); err != nil {
 			return err
 		}
 		changes = append(changes, "url "+normalised)
@@ -241,7 +249,7 @@ func runAdd(c context.Context, a *cli.App, name string, f addFlags) error {
 	}
 
 	for _, t := range f.types {
-		if err := s.AddContentType(c, item.ID, strings.ToLower(t)); err != nil {
+		if err := s.AddContentType(c, job.ID, strings.ToLower(t)); err != nil {
 			return err
 		}
 		changes = append(changes, "type "+t)

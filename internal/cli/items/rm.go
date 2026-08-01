@@ -182,12 +182,17 @@ func runRemove(c context.Context, a *cli.App, name string, f removeFlags) error 
 		return nil
 	}
 
+	job, err := s.JobForItem(c, item)
+	if err != nil {
+		return err
+	}
+
 	for _, d := range f.domains {
 		host, err := cli.NormaliseDomain(d)
 		if err != nil {
 			return err
 		}
-		if err := s.DeleteTarget(c, item.ID, host); err != nil {
+		if err := s.DeleteTarget(c, job.ID, host); err != nil {
 			return err
 		}
 		a.Printf("%s: removed domain %s\n", name, host)
@@ -198,7 +203,7 @@ func runRemove(c context.Context, a *cli.App, name string, f removeFlags) error 
 		if err != nil {
 			return err
 		}
-		if err := s.DeleteTarget(c, item.ID, normalised); err != nil {
+		if err := s.DeleteTarget(c, job.ID, normalised); err != nil {
 			return err
 		}
 		a.Printf("%s: removed url %s\n", name, normalised)

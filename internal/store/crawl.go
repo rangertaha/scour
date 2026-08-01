@@ -227,7 +227,10 @@ func (s *Store) Status(ctx context.Context, itemID uint) (*Status, error) {
 		model any
 		where []any
 	}{
-		{&st.Targets, &Target{}, []any{"item_id = ?", itemID}},
+		// Targets belong to the item's jobs, so counting them is a join rather
+		// than a column: an item's target count is what all its jobs point at.
+		{&st.Targets, &Target{}, []any{
+			"job_id IN (SELECT id FROM jobs WHERE item_id = ?)", itemID}},
 		{&st.Properties, &Property{}, []any{"item_id = ?", itemID}},
 		{&st.Aliases, &Alias{}, []any{"item_id = ?", itemID}},
 		{&st.Queued, &URL{}, []any{"item_id = ? AND status = ?", itemID, URLQueued}},

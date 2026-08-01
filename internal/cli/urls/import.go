@@ -36,8 +36,9 @@ func Import(a *cli.App) *ucli.Command {
 		Name:      "import",
 		ArgsUsage: "<name>",
 		Usage:     "Import domains and urls from file",
-		Description: "The same additions `scour add` makes one at a time, from a file. Every form\n" +
-			"is idempotent, so re-importing a file that has grown only adds what is new.\n\n" +
+		Description: "The same additions `scour item add` makes one at a time, from a file. Every\n" +
+			"form is idempotent, so re-importing a file that has grown only adds what is\n" +
+			"new.\n\n" +
 			"Blank lines and lines starting with # are ignored, so a list can carry notes.",
 		UsageText: "  scour import vehicle --urls urls.txt\n" +
 			"  scour import vehicle --domains domains.txt --subdomains\n" +
@@ -107,10 +108,16 @@ func runImport(c context.Context, a *cli.App, name string, f importFlags) error 
 		return err
 	}
 
+	// Targets belong to a job; an item's own name is its implicit job.
+	job, err := s.JobForItem(c, item)
+	if err != nil {
+		return err
+	}
+
 	total := importResult{}
 
 	for _, path := range f.urls {
-		res, err := importTargets(c, s, item.ID, path, store.TargetURL, cli.NormaliseURL, f)
+		res, err := importTargets(c, s, job.ID, path, store.TargetURL, cli.NormaliseURL, f)
 		if err != nil {
 			return err
 		}
@@ -119,7 +126,7 @@ func runImport(c context.Context, a *cli.App, name string, f importFlags) error 
 	}
 
 	for _, path := range f.domains {
-		res, err := importTargets(c, s, item.ID, path, store.TargetDomain, cli.NormaliseDomain, f)
+		res, err := importTargets(c, s, job.ID, path, store.TargetDomain, cli.NormaliseDomain, f)
 		if err != nil {
 			return err
 		}
@@ -177,7 +184,7 @@ func report(a *cli.App, path, kind string, res importResult) {
 func importTargets(
 	ctx context.Context,
 	s *store.Store,
-	itemID uint,
+	jobID uint,
 	path string,
 	kind store.TargetKind,
 	normalise func(string) (string, error),
@@ -194,7 +201,7 @@ func importTargets(
 		if len(*rows) == 0 {
 			return nil
 		}
-		n, err := s.AddTargets(ctx, itemID, kind, *rows, subdomains, f.depth)
+		n, err := s.AddTargets(ctx, jobID, kind, *rows, subdomains, f.depth)
 		if err != nil {
 			return err
 		}

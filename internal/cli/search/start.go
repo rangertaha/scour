@@ -135,9 +135,17 @@ func runCrawl(c context.Context, a *cli.App, name string, f crawlFlags) error {
 		}
 		a.Printf("%s: resuming a paused search\n", item.Name)
 	}
+
+	// An unnamed crawl of an item means the job named after it, created by the
+	// first crawl so nobody has to learn the word before crawling anything.
+	job, err := s.JobForItem(c, item)
+	if err != nil {
+		return err
+	}
+
 	// Announcing a crawl that cannot run puts the reason it failed after the
 	// claim that it started.
-	if len(item.Targets) == 0 {
+	if len(job.Targets) == 0 {
 		return fmt.Errorf("item %q has no targets: scour item add %s -d <domain>", item.Name, item.Name)
 	}
 
@@ -145,7 +153,7 @@ func runCrawl(c context.Context, a *cli.App, name string, f crawlFlags) error {
 	// setting, which beats content_types in the configuration.
 	allow := f.types
 	if len(allow) == 0 {
-		for _, t := range item.ContentTypes {
+		for _, t := range job.ContentTypes {
 			allow = append(allow, t.Type)
 		}
 	}
@@ -215,12 +223,12 @@ func runCrawl(c context.Context, a *cli.App, name string, f crawlFlags) error {
 			scoring += " with crawl chain"
 		}
 		a.Printf("crawling %s: %d targets, depth %d, types %s, scoring %s\n",
-			item.Name, len(item.Targets), depth, strings.Join(types.Names(), " "), scoring)
+			item.Name, len(job.Targets), depth, strings.Join(types.Names(), " "), scoring)
 	}
 
 	result, err := crawler.Run(c, crawl.Options{
 		Item:    item,
-		Targets: item.Targets,
+		Targets: job.Targets,
 		Types:   types,
 		Depth:   depth,
 		Limit:   f.limit,

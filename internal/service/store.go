@@ -84,9 +84,15 @@ func (s *StoreService) scopeFor(ctx context.Context, itemID uint) (*crawl.Scope,
 		return sc, nil
 	}
 
-	targets, err := s.store.TargetsFor(ctx, itemID)
+	// An item's scope is the union of its jobs' targets: two jobs hunting one
+	// item are both inside it, and a URL either job would fetch is in scope.
+	jobs, err := s.store.Jobs(ctx, itemID)
 	if err != nil {
 		return nil, err
+	}
+	var targets []store.Target
+	for _, j := range jobs {
+		targets = append(targets, j.Targets...)
 	}
 	sc, err := crawl.NewScope(targets)
 	if err != nil {
