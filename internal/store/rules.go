@@ -342,3 +342,27 @@ func (s *Store) SetURLMatches(ctx context.Context, itemID uint, counts map[strin
 		return nil
 	})
 }
+
+// DeleteModel forgets what was learned for an item, keeping the pages and the
+// marks.
+//
+// The rules and the fitted chain go with it: they are what training produced,
+// and leaving them would mean the next crawl scored against a model the meta
+// says is not there. The records stay, because a record is what was found
+// rather than what was learned, and so do the marks, which are the expensive
+// part and were made by a person.
+func (s *Store) DeleteModel(ctx context.Context, itemID uint) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, model := range []any{&Rule{}, &ModelMeta{}} {
+			if err := tx.Where("item_id = ?", itemID).Delete(model).Error; err != nil {
+				return fmt.Errorf("delete %T: %w", model, err)
+			}
+		}
+		// The crawl chain is this item's; the extraction prior is shared and
+		// has no item, so a null item_id is left alone.
+		if err := tx.Where("item_id = ?", itemID).Delete(&Chain{}).Error; err != nil {
+			return fmt.Errorf("delete chain: %w", err)
+		}
+		return nil
+	})
+}

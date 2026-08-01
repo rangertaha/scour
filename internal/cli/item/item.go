@@ -34,6 +34,7 @@ func Item(a *cli.App) *ucli.Command {
 			Add(a),
 			Remove(a),
 			List(a),
+			Show(a),
 			Tag(a),
 			Templates(a),
 		},

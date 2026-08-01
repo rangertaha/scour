@@ -273,3 +273,39 @@ func TestResetReallyStartsOver(t *testing.T) {
 		t.Errorf("--reset fetched nothing, so the visited set survived it:\n%s", out)
 	}
 }
+
+// model rm then model train is a clean retrain, and the pages and marks are
+// what must survive it: the crawl is the expensive half and a person made the
+// marks.
+func TestModelRemoveKeepsThePagesAndTheMarks(t *testing.T) {
+	dir, _ := trained(t)
+	runOK(t, dir, "model", "train", "vehicle")
+	runOK(t, dir, "record", "mark", "vehicle", "1", "--verdict", "invalid")
+
+	before := runOK(t, dir, "item", "show", "vehicle")
+	if !strings.Contains(before, "rules") {
+		t.Fatalf("training produced no rules:\n%s", before)
+	}
+
+	out := runOK(t, dir, "model", "rm", "vehicle")
+	if !strings.Contains(out, "discarded") {
+		t.Errorf("removing the model did not say so:\n%s", out)
+	}
+	if shown := runOK(t, dir, "model", "show", "vehicle"); !strings.Contains(shown, "no model yet") {
+		t.Errorf("the model outlived its removal:\n%s", shown)
+	}
+
+	// The corpus is untouched, so training again costs the induction and not
+	// the crawl.
+	after := runOK(t, dir, "item", "show", "vehicle")
+	if !strings.Contains(after, "visited") {
+		t.Errorf("the pages went with the model:\n%s", after)
+	}
+
+	// And the mark is still there to train on.
+	runOK(t, dir, "model", "train", "vehicle")
+	marked := runOK(t, dir, "record", "ls", "vehicle", "--verdict", "invalid")
+	if !strings.Contains(marked, "showing 1 of 1") {
+		t.Errorf("the mark did not survive the retrain:\n%s", marked)
+	}
+}

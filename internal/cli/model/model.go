@@ -19,6 +19,6 @@ func Model(a *cli.App) *ucli.Command {
 		Usage:    "Train and inspect what was learned",
 		UsageText: "  scour model train vehicle\n" +
 			"  scour model rules vehicle",
-		Commands: []*ucli.Command{Train(a), Rules(a)},
+		Commands: []*ucli.Command{Train(a), Show(a), Rules(a), Remove(a)},
 	})
 }
