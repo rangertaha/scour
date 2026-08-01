@@ -326,3 +326,97 @@ func TestTaughtPatternOverridesInducedExtraction(t *testing.T) {
 		t.Errorf("an untaught field kept %q, want the induced pattern", got)
 	}
 }
+
+// A property may be taught twice: once as the item's default and again scoped
+// to a domain. Both rows carry the same name, and handing both to wom is
+// handing it a duplicate field, which it rejects. Teaching a domain therefore
+// did not merely fail to take effect, it stopped the item being trainable.
+func TestPropertyTaughtOnADomainDoesNotDuplicate(t *testing.T) {
+	item := &store.Item{
+		Name:    "news",
+		Targets: []store.Target{{Kind: store.TargetDomain, Value: "example.com"}},
+		Properties: []store.Property{
+			{Name: "author", Example: "Anonymous"},
+			{Name: "author", Domain: "example.com", Example: "Hannah McLeod",
+				Aliases: []store.PropertyAlias{{Word: "byline"}}},
+			{Name: "title", Example: "A headline"},
+		},
+	}
+
+	got := resolveProps(item)
+	if len(got) != 2 {
+		t.Fatalf("resolved %d properties, want 2: %+v", len(got), got)
+	}
+	seen := map[string]bool{}
+	for _, p := range got {
+		if seen[p.Name] {
+			t.Fatalf("property %q resolved twice", p.Name)
+		}
+		seen[p.Name] = true
+	}
+
+	// Every target is that domain, so the corpus is that site and the scoped
+	// answer is the right one everywhere in it.
+	for _, p := range got {
+		if p.Name != "author" {
+			continue
+		}
+		if p.Example != "Hannah McLeod" {
+			t.Errorf("the scoped teaching was not applied: example = %q", p.Example)
+		}
+		if len(p.Aliases) != 1 || p.Aliases[0].Word != "byline" {
+			t.Errorf("the scoped aliases were not applied: %+v", p.Aliases)
+		}
+	}
+}
+
+// Across several sites there is no single answer, so the default is kept.
+func TestDomainTeachingYieldsToTheDefaultAcrossSites(t *testing.T) {
+	item := &store.Item{
+		Name: "news",
+		Targets: []store.Target{
+			{Kind: store.TargetDomain, Value: "example.com"},
+			{Kind: store.TargetDomain, Value: "other.test"},
+		},
+		Properties: []store.Property{
+			{Name: "author", Example: "Anonymous"},
+			{Name: "author", Domain: "example.com", Example: "Hannah McLeod"},
+		},
+	}
+
+	got := resolveProps(item)
+	if len(got) != 1 {
+		t.Fatalf("resolved %d properties, want 1", len(got))
+	}
+	if got[0].Example != "Anonymous" {
+		t.Errorf("one site's answer was applied to all of them: %q", got[0].Example)
+	}
+}
+
+// A URL target counts towards the same question as a domain target, and a
+// subdomain is still that domain.
+func TestConfinedToReadsBothKindsOfTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		targets []store.Target
+		want    bool
+	}{
+		{"one url", []store.Target{{Kind: store.TargetURL, Value: "http://example.com/a/"}}, true},
+		{"subdomain", []store.Target{{Kind: store.TargetDomain, Value: "news.example.com"}}, true},
+		{"www stripped", []store.Target{{Kind: store.TargetURL, Value: "http://www.example.com/a/"}}, true},
+		{"another site", []store.Target{{Kind: store.TargetDomain, Value: "other.test"}}, false},
+		{"mixed", []store.Target{
+			{Kind: store.TargetURL, Value: "http://example.com/a/"},
+			{Kind: store.TargetDomain, Value: "other.test"},
+		}, false},
+		// No targets is not "confined to everything".
+		{"none", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := &store.Item{Targets: tc.targets}
+			if got := confinedTo(item, "example.com"); got != tc.want {
+				t.Errorf("confinedTo = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

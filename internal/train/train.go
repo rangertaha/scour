@@ -12,6 +12,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -309,6 +311,80 @@ func (t *Trainer) extract(ctx context.Context, item *store.Item, model *wom.Mode
 	return saved, nil
 }
 
+// resolveProps picks one row per property name.
+//
+// A property may be taught twice: once as the item's default and again scoped
+// to a domain, which is how one site's word for a byline is kept from becoming
+// every site's. The two rows carry the same name, and handing both to wom is
+// handing it a schema with a duplicate field, which it rejects. Teaching a
+// domain therefore did not merely fail to take effect, it stopped the item
+// being trainable at all.
+//
+// The scoped row wins only when every target is that domain, because then the
+// corpus is that site and its answer is the right one everywhere in it. Across
+// several sites there is no single answer, so the default is kept and the
+// scoped teaching is reported as unused rather than silently dropped: applying
+// it per host means inducing per host, which the trainer does not do yet.
+func resolveProps(item *store.Item) []store.Property {
+	byName := make(map[string][]store.Property, len(item.Properties))
+	order := make([]string, 0, len(item.Properties))
+	for _, p := range item.Properties {
+		if _, seen := byName[p.Name]; !seen {
+			order = append(order, p.Name)
+		}
+		byName[p.Name] = append(byName[p.Name], p)
+	}
+
+	out := make([]store.Property, 0, len(order))
+	for _, name := range order {
+		rows := byName[name]
+		best := rows[0]
+		for _, r := range rows {
+			// A row with no domain is the default and is the fallback.
+			if r.Domain == "" {
+				best = r
+			}
+		}
+		for _, r := range rows {
+			if r.Domain != "" && confinedTo(item, r.Domain) {
+				best = r
+				break
+			}
+		}
+		for _, r := range rows {
+			if r.Domain != "" && r.Domain != best.Domain {
+				slog.Warn("property taught on a domain is not being applied",
+					"item", item.Name, "property", name, "domain", r.Domain,
+					"why", "the corpus covers more than that domain")
+			}
+		}
+		out = append(out, best)
+	}
+	return out
+}
+
+// confinedTo reports whether every one of an item's targets sits on one domain.
+func confinedTo(item *store.Item, domain string) bool {
+	if len(item.Targets) == 0 {
+		return false
+	}
+	for _, t := range item.Targets {
+		host := t.Value
+		if t.Kind == store.TargetURL {
+			u, err := url.Parse(t.Value)
+			if err != nil {
+				return false
+			}
+			host = u.Hostname()
+		}
+		host = strings.TrimPrefix(strings.ToLower(host), "www.")
+		if host != domain && !strings.HasSuffix(host, "."+domain) {
+			return false
+		}
+	}
+	return true
+}
+
 // schemaOf turns an item into the wom schema that describes it: one record
 // prop named after the item, carrying its aliases, with a child per property.
 func schemaOf(item *store.Item) []wom.Prop {
@@ -322,7 +398,7 @@ func schemaOf(item *store.Item) []wom.Prop {
 	}
 
 	props := make([]wom.Prop, 0, len(item.Properties))
-	for _, p := range item.Properties {
+	for _, p := range resolveProps(item) {
 		prop := wom.Prop{Name: p.Name, Description: p.Description, Pattern: p.Regex, Label: p.Label}
 		if p.Type != "" {
 			prop.Type = wom.Type(p.Type)

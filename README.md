@@ -213,6 +213,21 @@ overwrite what the next one calls it:
 scour item tag news -p author --on example.com --append 'staff writer'
 ```
 
+A scoped property applies when every one of the item's targets is that site,
+because then the corpus is that site. Across several, there is no single answer,
+so the default is kept and `scour --verbose train` says which teaching went
+unused. Applying it per site means inducing per site, which training does not
+do yet.
+
+Teaching writes only what you give it, so adding a label does not cost a
+property the example it was taught with. That means an empty value means "not
+given" rather than "make it empty", and clearing has its own form:
+
+```
+scour item rm news -p author --regex          # drop a pattern taught in error
+scour item rm news -p author --label --example
+```
+
 Then crawl, following links up to a given depth. Discovered URLs come back
 ranked by probability. On the first run there is no trained model yet, so scour
 scores links from the aliases and property examples alone; every later crawl
@@ -474,6 +489,7 @@ output, and `--limit <n>` to cap the rows returned.
 | `scour item ls <name>` | Everything known about one item |
 | `scour export <name>` | Write an item's domains and urls back out to files |
 | `scour item rm <name> [-d/-u/-p/--rule]` | Remove an item, or one of its targets, properties or rules |
+| `scour item rm <name> -p <prop> --regex\|--label\|--example` | Clear one detail, keeping the property |
 | `scour item templates` | List the built-in schemas `--template` accepts |
 | `scour mcp` | Run as an MCP server over stdio |
 | `scour server --listen <addr>` | Run as a service, serving the HTTP API and MCP |

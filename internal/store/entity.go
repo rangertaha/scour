@@ -712,3 +712,34 @@ func PropertyTypes() []string {
 		string(wom.TypeDate), string(wom.TypeURL), string(wom.TypeEmail),
 	}
 }
+
+// ClearPropertyFields blanks named details on a property, leaving the property
+// itself and everything not named alone.
+//
+// Setting cannot do this. AddPropertyDetail writes only what it is given, so
+// that describing a property more fully does not cost it what it already knew,
+// and the consequence is that an empty value means "not given" rather than
+// "make it empty". Emptying is a different act and says so with its own call.
+func (s *Store) ClearPropertyFields(ctx context.Context, itemID uint, domain, name string, fields []string) error {
+	prop, err := s.findProperty(ctx, itemID, domain, name)
+	if err != nil {
+		return err
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	blank := make(map[string]any, len(fields))
+	for _, f := range fields {
+		switch f {
+		case "regex", "label", "example", "description", "type":
+			blank[f] = ""
+		default:
+			return fmt.Errorf("property %q has no field %q", name, f)
+		}
+	}
+	if err := s.db.WithContext(ctx).Model(&Property{}).
+		Where("id = ?", prop.ID).Updates(blank).Error; err != nil {
+		return fmt.Errorf("clear %s on %q: %w", strings.Join(fields, ", "), name, err)
+	}
+	return nil
+}

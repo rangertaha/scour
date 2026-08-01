@@ -411,3 +411,41 @@ func TestBareCommandShowsItsHelp(t *testing.T) {
 		t.Errorf("a miscount should not reprint the whole help:\n%s", out)
 	}
 }
+
+// A pattern taught in error could only be overwritten, never removed, because
+// setting writes only what it is given so that describing a property more fully
+// does not cost it what it already knew. Emptying is a different act.
+func TestClearingAPropertyDetailKeepsTheProperty(t *testing.T) {
+	dir := t.TempDir()
+	runOK(t, dir, "item", "add", "news", "-p", "title", "--prop-type", "string",
+		"-e", "A headline", "--regex", `^.{5,}$`, "--label", `^og:title$`)
+
+	out := runOK(t, dir, "item", "rm", "news", "-p", "title", "--regex")
+	if !strings.Contains(out, "cleared regex on title") {
+		t.Fatalf("clearing did not say what it did:\n%s", out)
+	}
+
+	shown := runOK(t, dir, "--json", "item", "ls", "news")
+	if !strings.Contains(shown, `"Properties": 1`) {
+		t.Errorf("clearing a detail removed the property:\n%s", shown)
+	}
+
+	// Clearing one detail leaves the others, which is the whole point.
+	rules := runOK(t, dir, "item", "rm", "news", "-p", "title", "--label", "--example")
+	if !strings.Contains(rules, "cleared label, example on title") {
+		t.Errorf("unexpected output:\n%s", rules)
+	}
+
+	// Naming a detail without a property is a question, not a whole-item delete.
+	out, err := run(t, dir, "item", "rm", "news", "--regex")
+	if err == nil {
+		t.Fatal("clearing with no --prop must fail rather than delete the item")
+	}
+	if !strings.Contains(err.Error(), "--prop") {
+		t.Errorf("the refusal should say what is missing: %v", err)
+	}
+	if shown := runOK(t, dir, "item", "ls"); !strings.Contains(shown, "news") {
+		t.Errorf("the item was deleted by a clear that named no property:\n%s", shown)
+	}
+	_ = out
+}

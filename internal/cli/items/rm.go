@@ -4,6 +4,8 @@ package items
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	ucli "github.com/urfave/cli/v3"
 
@@ -16,6 +18,14 @@ type removeFlags struct {
 	props   []string
 	rules   []uint
 	force   bool
+
+	// clear names the details to blank on the properties given with --prop,
+	// rather than removing the properties themselves.
+	regex       bool
+	label       bool
+	example     bool
+	description bool
+	on          string
 }
 
 func Remove(a *cli.App) *ucli.Command {
@@ -57,6 +67,31 @@ func Remove(a *cli.App) *ucli.Command {
 				Usage:       "remove an induced rule by id (repeatable)",
 				Destination: &f.rules,
 			},
+			&ucli.StringFlag{
+				Name:        "on",
+				Usage:       "the `domain` a property was taught on, for clearing a scoped one",
+				Destination: &f.on,
+			},
+			&ucli.BoolFlag{
+				Name:        "regex",
+				Usage:       "with --prop, clear the value pattern rather than removing the property",
+				Destination: &f.regex,
+			},
+			&ucli.BoolFlag{
+				Name:        "label",
+				Usage:       "with --prop, clear the name pattern rather than removing the property",
+				Destination: &f.label,
+			},
+			&ucli.BoolFlag{
+				Name:        "example",
+				Usage:       "with --prop, clear the example value",
+				Destination: &f.example,
+			},
+			&ucli.BoolFlag{
+				Name:        "description",
+				Usage:       "with --prop, clear the description",
+				Destination: &f.description,
+			},
 			&ucli.BoolFlag{
 				Name:        "force",
 				Usage:       "confirm deleting the whole item",
@@ -75,13 +110,33 @@ func Remove(a *cli.App) *ucli.Command {
 	return cmd
 }
 
+// clearing lists the details named for blanking, in the order the help shows.
+func (f removeFlags) clearing() []string {
+	var out []string
+	for _, c := range []struct {
+		set  bool
+		name string
+	}{
+		{f.regex, "regex"}, {f.label, "label"},
+		{f.example, "example"}, {f.description, "description"},
+	} {
+		if c.set {
+			out = append(out, c.name)
+		}
+	}
+	return out
+}
+
 func runRemove(c context.Context, a *cli.App, name string, f removeFlags) error {
 	s, err := a.Store()
 	if err != nil {
 		return err
 	}
 
-	partial := len(f.domains) > 0 || len(f.urls) > 0 || len(f.props) > 0 || len(f.rules) > 0
+	// Naming a detail to clear is a partial removal even with no --prop yet:
+	// without this, `rm news --regex` fell through to deleting the whole item.
+	partial := len(f.domains) > 0 || len(f.urls) > 0 || len(f.props) > 0 ||
+		len(f.rules) > 0 || len(f.clearing()) > 0
 	if !partial {
 		if !f.force {
 			a.Printf("this deletes item %q and every target, rule and record it owns\n", name)
@@ -98,6 +153,33 @@ func runRemove(c context.Context, a *cli.App, name string, f removeFlags) error 
 	item, err := s.Item(c, name)
 	if err != nil {
 		return err
+	}
+
+	// --prop names a property to remove, unless a detail is named too, in
+	// which case it names the property to take that detail off. Removing the
+	// whole property to drop a regex taught in error is a poor trade: the
+	// example, the type and every word taught for it go with it.
+	if fields := f.clearing(); len(fields) > 0 {
+		if len(f.props) == 0 {
+			return fmt.Errorf("--%s needs --prop to say which property to clear", fields[0])
+		}
+		scope := ""
+		if f.on != "" {
+			if scope, err = cli.NormaliseDomain(f.on); err != nil {
+				return err
+			}
+		}
+		for _, prop := range f.props {
+			if err := s.ClearPropertyFields(c, item.ID, scope, prop, fields); err != nil {
+				return err
+			}
+			where := ""
+			if scope != "" {
+				where = " on " + scope
+			}
+			a.Printf("%s: cleared %s on %s%s\n", item.Name, strings.Join(fields, ", "), prop, where)
+		}
+		return nil
 	}
 
 	for _, d := range f.domains {
