@@ -46,7 +46,7 @@ func TestRendersAPageThatPlainHTTPCannotRead(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		io.WriteString(w, spa)
+		_, _ = io.WriteString(w, spa)
 	}))
 	defer srv.Close()
 
@@ -56,7 +56,7 @@ func TestRendersAPageThatPlainHTTPCannotRead(t *testing.T) {
 	}
 	defer rt.Close()
 
-	req, err := http.NewRequest(http.MethodGet, srv.URL+"/cars/1/", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/cars/1/", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestEscalationRendersForReal(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		io.WriteString(w, spa)
+		_, _ = io.WriteString(w, spa)
 	}))
 	defer srv.Close()
 
@@ -105,7 +105,11 @@ func TestEscalationRendersForReal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer browser.(*Transport).Close()
+	tr, ok := browser.(*Transport)
+	if !ok {
+		t.Fatalf("New(webdriver) returned %T", browser)
+	}
+	defer tr.Close()
 
 	var escalated []string
 	e := &transport.Escalating{
@@ -113,7 +117,7 @@ func TestEscalationRendersForReal(t *testing.T) {
 		OnEscalate: func(host string) { escalated = append(escalated, host) },
 	}
 
-	req, err := http.NewRequest(http.MethodGet, srv.URL+"/cars/1/", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/cars/1/", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +162,7 @@ func TestPoolBoundsConcurrentRenders(t *testing.T) {
 		mu.Unlock()
 
 		w.Header().Set("Content-Type", "text/html")
-		io.WriteString(w, spa)
+		_, _ = io.WriteString(w, spa)
 	}))
 	defer srv.Close()
 
@@ -173,7 +177,7 @@ func TestPoolBoundsConcurrentRenders(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			req, err := http.NewRequest(http.MethodGet, srv.URL+"/cars/1/", nil)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/cars/1/", nil)
 			if err != nil {
 				return
 			}
@@ -182,7 +186,7 @@ func TestPoolBoundsConcurrentRenders(t *testing.T) {
 				t.Errorf("render %d: %v", i, err)
 				return
 			}
-			io.Copy(io.Discard, resp.Body)
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 		}()
 	}
@@ -207,11 +211,13 @@ func TestOnlyGETIsRendered(t *testing.T) {
 
 	// No browser starts here: the method is rejected before the allocator is
 	// ever touched, which is what makes this test cheap enough to always run.
-	req, err := http.NewRequest(http.MethodPost, "http://example.com/", strings.NewReader("a=1"))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://example.com/", strings.NewReader("a=1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rt.RoundTrip(req); err == nil {
+	resp, err := rt.RoundTrip(req)
+	if err == nil {
+		resp.Body.Close()
 		t.Error("a POST was quietly turned into a page load")
 	}
 }
@@ -233,7 +239,9 @@ func TestACancelledRequestDoesNotStartABrowser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rt.RoundTrip(req); err == nil {
+	resp, err := rt.RoundTrip(req)
+	if err == nil {
+		resp.Body.Close()
 		t.Error("a cancelled request still queued for a tab")
 	}
 }
@@ -246,15 +254,20 @@ func TestRegisteredUnderWebdriver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New(webdriver): %v", err)
 	}
-	rt.(*Transport).Close()
+	tr, ok := rt.(*Transport)
+	if !ok {
+		t.Fatalf("New(webdriver) returned %T", rt)
+	}
+	tr.Close()
 }
 
 func TestSynthesiseWrapsBareFragments(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, "http://example.com/", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com/", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp := synthesise(req, "just text")
+	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)

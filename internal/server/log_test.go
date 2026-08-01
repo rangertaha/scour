@@ -69,7 +69,7 @@ func TestLoggingLevelFollowsStatus(t *testing.T) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(tc.status)
 		})
-		serve(h, httptest.NewRequest("GET", "/v1/items", nil))
+		serve(h, httptest.NewRequestWithContext(t.Context(), "GET", "/v1/items", nil))
 
 		got := buf.String()
 		if !strings.Contains(got, tc.want) {
@@ -86,7 +86,7 @@ func TestLoggingKeepsPollersOutOfTheLog(t *testing.T) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
-		serve(h, httptest.NewRequest("GET", path, nil))
+		serve(h, httptest.NewRequestWithContext(t.Context(), "GET", path, nil))
 
 		if strings.Contains(buf.String(), "msg=request") {
 			t.Errorf("%s should not be logged at info:\n%s", path, buf.String())
@@ -98,7 +98,7 @@ func TestLoggingKeepsPollersOutOfTheLog(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	serve(h, httptest.NewRequest("GET", "/healthz", nil))
+	serve(h, httptest.NewRequestWithContext(t.Context(), "GET", "/healthz", nil))
 	if !strings.Contains(buf.String(), "/healthz") {
 		t.Errorf("--verbose should reach the polling endpoints:\n%s", buf.String())
 	}
@@ -114,7 +114,7 @@ func TestLoggingRequestIDReachesHandlerAndCaller(t *testing.T) {
 		seen = RequestID(r.Context())
 		w.WriteHeader(http.StatusOK)
 	})
-	w := serve(h, httptest.NewRequest("GET", "/v1/items", nil))
+	w := serve(h, httptest.NewRequestWithContext(t.Context(), "GET", "/v1/items", nil))
 
 	if seen == "" {
 		t.Fatal("the handler could not read the request id")
@@ -132,7 +132,7 @@ func TestLoggingRecordsSizeAndImplicitStatus(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("hello world"))
 	})
-	serve(h, httptest.NewRequest("GET", "/v1/items", nil))
+	serve(h, httptest.NewRequestWithContext(t.Context(), "GET", "/v1/items", nil))
 
 	got := buf.String()
 	if !strings.Contains(got, "status=200") {
@@ -154,7 +154,7 @@ func TestClientIPPrefersForwardedFor(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest("GET", "/v1/items", nil)
+			r := httptest.NewRequestWithContext(t.Context(), "GET", "/v1/items", nil)
 			r.RemoteAddr = tc.remote
 			if tc.forwarded != "" {
 				r.Header.Set("X-Forwarded-For", tc.forwarded)
@@ -180,7 +180,7 @@ func TestUnauthorizedIsLogged(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			buf := capture(t, slog.LevelDebug)
-			r := httptest.NewRequest("GET", "/v1/items", nil)
+			r := httptest.NewRequestWithContext(t.Context(), "GET", "/v1/items", nil)
 			if tc.header != "" {
 				r.Header.Set("Authorization", tc.header)
 			}

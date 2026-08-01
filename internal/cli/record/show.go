@@ -124,9 +124,9 @@ func runShow(c context.Context, a *cli.App, name string, id uint) error {
 func verdictOf(l store.Label) string {
 	switch l {
 	case store.Valid:
-		return "valid"
+		return string(store.Valid)
 	case store.Invalid:
-		return "invalid"
+		return string(store.Invalid)
 	default:
 		return ""
 	}

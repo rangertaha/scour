@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/rangertaha/scour/internal/fuzzy"
 	"github.com/rangertaha/scour/internal/wom"
-	"gorm.io/gorm/clause"
 )
 
 // CreateItem creates an item, or returns the existing one. Adding to an

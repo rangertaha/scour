@@ -60,7 +60,7 @@ func oldSchema(t *testing.T, path string) {
 		"INSERT INTO targets (entity_id, kind, value, subdomains, depth) VALUES (7, 'domain', 'example.com', 0, 0)",
 	}
 	for _, q := range stmts {
-		if _, err := db.Exec(q); err != nil {
+		if _, err := db.ExecContext(t.Context(), q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
@@ -270,7 +270,7 @@ func preJobSchema(t *testing.T, path string) {
 		"INSERT INTO queue_items (item_id, score, hash, host, data, attempts) VALUES (2, 0.1, 'h3', 'other.com', 'three', 1)",
 	}
 	for _, q := range stmts {
-		if _, err := db.Exec(q); err != nil {
+		if _, err := db.ExecContext(t.Context(), q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
@@ -381,7 +381,7 @@ func TestAnEmptyEntitiesTableFromAnOldBinaryIsCleared(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Exactly what the old binary's AutoMigrate writes.
-	if _, err := db.Exec("CREATE TABLE `entities` (`id` integer PRIMARY KEY AUTOINCREMENT," +
+	if _, err := db.ExecContext(t.Context(), "CREATE TABLE `entities` (`id` integer PRIMARY KEY AUTOINCREMENT,"+
 		"`name` text NOT NULL,`created_at` datetime,`updated_at` datetime)"); err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func TestAPopulatedEntitiesTableStillRefuses(t *testing.T) {
 		"CREATE TABLE `entities` (`id` integer PRIMARY KEY AUTOINCREMENT, `name` text NOT NULL)",
 		"INSERT INTO entities (name) VALUES ('from an older scour')",
 	} {
-		if _, err := db.Exec(q); err != nil {
+		if _, err := db.ExecContext(t.Context(), q); err != nil {
 			t.Fatal(err)
 		}
 	}

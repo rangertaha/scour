@@ -152,6 +152,11 @@ the page is not about any of the listed subjects, answer other_subject.`
 // because the measured difference between this working and not is whether the
 // model is recognising a topic it knows or resolving a pronoun. "vehicle" is
 // something a model has seen; "the subject" is a referent it has to track.
+// subjectKey names the one field the model answers with. The schema property,
+// the required list and the struct tag it decodes into all have to agree, and
+// they were three independent literals.
+const subjectKey = "subject"
+
 func verdictSchema(subjects []string) map[string]any {
 	enum := append([]string{}, subjects...)
 	enum = append(enum,
@@ -162,9 +167,9 @@ func verdictSchema(subjects []string) map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"subject": map[string]any{"type": "string", "enum": enum},
+			subjectKey: map[string]any{"type": "string", "enum": enum},
 		},
-		"required":             []string{"subject"},
+		"required":             []string{subjectKey},
 		"additionalProperties": false,
 	}
 }
@@ -185,7 +190,7 @@ func (l *LLM) ask(ctx context.Context, topic Topic, page Page) (Category, error)
 
 	raw, err := l.provider.JSON(ctx, ai.Request{
 		System:    system,
-		Prompt:    prompt(topic, page),
+		Prompt:    prompt(page),
 		Schema:    verdictSchema(names),
 		MaxTokens: 32,
 	})
@@ -261,7 +266,7 @@ func subjectNames(topic Topic) []string {
 // removing them changed nothing measurable while adding them gave the model
 // more to resolve before it could answer a question that is fundamentally
 // recognition.
-func prompt(topic Topic, page Page) string {
+func prompt(page Page) string {
 	var b strings.Builder
 
 	if page.Title != "" {

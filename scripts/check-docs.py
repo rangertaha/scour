@@ -190,10 +190,21 @@ def check_shorthands() -> None:
     if not block:
         fail("shorthands", "cannot find the Shorthands map in internal/content")
         return
-    real = {
-        m.group(1): set(re.findall(r'"([^"]+)"', m.group(2)))
-        for m in re.finditer(r'"([a-z]+)":\s*\{(.*?)\}', block.group(1), re.S)
-    }
+    # The keys are the shorthand constants (HTML, Feed, ...) rather than string
+    # literals, so the name is resolved through the const block that declares
+    # them. Reading the literals alone silently matched nothing the day those
+    # constants landed, and a check that finds nothing passes.
+    names = dict(re.findall(r'^\t([A-Za-z]+)\s+=\s+"([a-z]+)"$', source, re.M))
+    real = {}
+    for m in re.finditer(r'([A-Za-z]+):\s*\{(.*?)\}', block.group(1), re.S):
+        key = names.get(m.group(1))
+        if key is None:
+            fail("shorthands", f"Shorthands is keyed on {m.group(1)}, which is not a shorthand constant")
+            continue
+        real[key] = set(re.findall(r'"([^"]+)"', m.group(2)))
+    if not real:
+        fail("shorthands", "no shorthands were read from internal/content: the map's shape changed")
+        return
     doc = open(f"{DOCS}/crawl/index.md", encoding="utf-8").read()
     table = doc[doc.index("| Shorthand |") :]
     table = table[: table.index("\n\n")]

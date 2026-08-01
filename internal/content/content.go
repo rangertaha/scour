@@ -16,25 +16,46 @@ import (
 	"strings"
 )
 
+// The shorthand names, as constants because four tables have to agree on them
+// and nothing was checking that they did. Shorthands says what each expands to,
+// extensions maps filenames onto them, Extractable says which can be parsed,
+// and callers name them in config. A misspelling in any one of those is a
+// silent hole rather than an error, which is how .xml came to name only half of
+// what it can be.
+const (
+	HTML    = "html"
+	PDF     = "pdf"
+	JSON    = "json"
+	XML     = "xml"
+	Feed    = "feed"
+	Text    = "text"
+	Image   = "image"
+	CSS     = "css"
+	JS      = "js"
+	Archive = "archive"
+	Video   = "video"
+	Audio   = "audio"
+)
+
 // Shorthands are the friendly names accepted wherever a content type is given,
 // and the MIME types each expands to.
 var Shorthands = map[string][]string{
-	"html": {"text/html", "application/xhtml+xml"},
-	"pdf":  {"application/pdf"},
-	"json": {"application/json", "application/ld+json"},
-	"xml":  {"application/xml", "text/xml"},
+	HTML: {"text/html", "application/xhtml+xml"},
+	PDF:  {"application/pdf"},
+	JSON: {"application/json", "application/ld+json"},
+	XML:  {"application/xml", "text/xml"},
 	// Feeds get their own shorthand because almost nothing serves them as
 	// plain xml. Sampled across a real list of news feeds, eight in twelve
 	// arrived as application/rss+xml and only one as application/xml, so a
 	// crawl restricted to "xml" would have skipped most of the feeds it was
 	// pointed at.
-	"feed": {
+	Feed: {
 		"application/rss+xml", "application/atom+xml",
 		"application/rdf+xml", "application/feed+json",
 		"text/rss+xml", "text/atom+xml",
 	},
-	"text": {"text/plain", "text/markdown", "text/csv"},
-	"image": {
+	Text: {"text/plain", "text/markdown", "text/csv"},
+	Image: {
 		"image/*",
 	},
 }
@@ -50,23 +71,23 @@ var Shorthands = map[string][]string{
 // before it ever saw a Content-Type saying application/rss+xml. That is the
 // same mistake the feed shorthand exists to correct, made one layer earlier.
 var extensions = map[string][]string{
-	".html": {"html"}, ".htm": {"html"}, ".xhtml": {"html"},
-	".pdf":  {"pdf"},
-	".json": {"json"}, ".jsonl": {"json"}, ".ndjson": {"json"},
-	".xml": {"xml", "feed"}, ".rss": {"feed"}, ".atom": {"feed"}, ".rdf": {"feed"},
-	".txt": {"text"}, ".md": {"text"}, ".csv": {"text"},
-	".jpg": {"image"}, ".jpeg": {"image"}, ".png": {"image"}, ".gif": {"image"},
-	".webp": {"image"}, ".bmp": {"image"}, ".ico": {"image"}, ".svg": {"image"},
-	".css": {"css"}, ".js": {"js"}, ".mjs": {"js"},
-	".zip": {"archive"}, ".gz": {"archive"}, ".tar": {"archive"},
-	".mp4": {"video"}, ".webm": {"video"}, ".mp3": {"audio"},
+	".html": {HTML}, ".htm": {HTML}, ".xhtml": {HTML},
+	".pdf":  {PDF},
+	".json": {JSON}, ".jsonl": {JSON}, ".ndjson": {JSON},
+	".xml": {XML, Feed}, ".rss": {Feed}, ".atom": {Feed}, ".rdf": {Feed},
+	".txt": {Text}, ".md": {Text}, ".csv": {Text},
+	".jpg": {Image}, ".jpeg": {Image}, ".png": {Image}, ".gif": {Image},
+	".webp": {Image}, ".bmp": {Image}, ".ico": {Image}, ".svg": {Image},
+	".css": {CSS}, ".js": {JS}, ".mjs": {JS},
+	".zip": {Archive}, ".gz": {Archive}, ".tar": {Archive},
+	".mp4": {Video}, ".webm": {Video}, ".mp3": {Audio},
 }
 
 // Extractable lists the shorthands scour can pull text out of. Types outside
 // it are recorded with their status and size but never parsed, so allowing
 // them costs bandwidth without adding matches.
 var Extractable = map[string]bool{
-	"html": true, "pdf": true, "json": true, "xml": true, "feed": true, "text": true,
+	HTML: true, PDF: true, JSON: true, XML: true, Feed: true, Text: true,
 }
 
 // Set is a resolved allow and deny list of content types.

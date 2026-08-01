@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -161,7 +162,7 @@ func (s *Store) RunByID(ctx context.Context, jobID, id uint) (*Run, error) {
 	var run Run
 	err := s.db.WithContext(ctx).Where("id = ? AND job_id = ?", id, jobID).First(&run).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("run %d: %w", id, ErrNotFound)
 		}
 		return nil, fmt.Errorf("run %d: %w", id, err)

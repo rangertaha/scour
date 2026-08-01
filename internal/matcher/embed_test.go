@@ -51,7 +51,11 @@ func newEmbed(t *testing.T, cfg Config) *Embed {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return m.(*Embed)
+	e, ok := m.(*Embed)
+	if !ok {
+		t.Fatalf("NewEmbed returned %T", m)
+	}
+	return e
 }
 
 // labelled builds a page whose value carries one class, which is the whole

@@ -7,11 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/rangertaha/scour/internal/schedule"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rangertaha/scour/internal/schedule"
 )
 
 // open returns a store backed by a file in a temp directory. A file rather

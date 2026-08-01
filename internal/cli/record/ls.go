@@ -288,9 +288,9 @@ func parseLabel(s string) (store.Label, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "":
 		return "", nil
-	case "valid":
+	case string(store.Valid):
 		return store.Valid, nil
-	case "invalid":
+	case string(store.Invalid):
 		return store.Invalid, nil
 	case "unlabelled", "unlabeled":
 		return store.Unlabelled, nil

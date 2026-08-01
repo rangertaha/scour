@@ -50,7 +50,7 @@ func (c *Crawler) measure(ctx context.Context, name string, value float64, unit 
 // a rising latency means a site is straining, a falling size means pages are
 // being served differently than expected, and the status distribution is where
 // a block shows up first.
-func (c *Crawler) measureFetch(ctx context.Context, item, rawURL string, status int, latency time.Duration, size int64) {
+func (c *Crawler) measureFetch(ctx context.Context, rawURL string, status int, latency time.Duration, size int64) {
 	if c.meter == nil {
 		return
 	}

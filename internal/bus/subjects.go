@@ -60,8 +60,9 @@ const (
 // once acknowledged, which is what makes a restarted component pick up where
 // the last one stopped rather than replaying everything.
 func (b *Bus) createStreams(ctx context.Context) error {
-	streams := []jetstream.StreamConfig{
-		{
+	streams := make([]jetstream.StreamConfig, 0, 3)
+	streams = append(streams,
+		jetstream.StreamConfig{
 			Name: StreamCrawl,
 			Subjects: []string{
 				AllItems(SubjectFetched),
@@ -77,7 +78,7 @@ func (b *Bus) createStreams(ctx context.Context) error {
 			// collapse to one write.
 			Duplicates: 5 * time.Minute,
 		},
-		{
+		jetstream.StreamConfig{
 			Name:       StreamRecords,
 			Subjects:   []string{AllItems(SubjectRecord)},
 			Retention:  jetstream.WorkQueuePolicy,
@@ -86,7 +87,7 @@ func (b *Bus) createStreams(ctx context.Context) error {
 			MaxAge:     time.Hour,
 			Duplicates: 5 * time.Minute,
 		},
-	}
+	)
 
 	// Measurements are not work. The other two streams are work queues, where a
 	// message is delivered once and removed, which is right for a page that

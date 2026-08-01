@@ -85,7 +85,7 @@ func (a *Anthropic) JSON(ctx context.Context, req Request) ([]byte, error) {
 	}
 
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(a.model),
+		Model:     a.model,
 		MaxTokens: maxTokens,
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(req.Prompt)),

@@ -97,7 +97,11 @@ func newLLM(t *testing.T, cfg Config) *LLM {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return m.(*LLM)
+	l, ok := m.(*LLM)
+	if !ok {
+		t.Fatalf("NewLLM returned %T", m)
+	}
+	return l
 }
 
 func TestConfidentHeuristicNeverReachesTheModel(t *testing.T) {

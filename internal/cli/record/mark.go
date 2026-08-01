@@ -76,9 +76,9 @@ func parseVerdict(v string) (store.Label, error) {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "":
 		return "", errors.New("mark needs --verdict: valid, invalid, or none")
-	case "valid":
+	case string(store.Valid):
 		return store.Valid, nil
-	case "invalid":
+	case string(store.Invalid):
 		return store.Invalid, nil
 	case "none", "unlabelled", "unlabeled":
 		return store.Unlabelled, nil

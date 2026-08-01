@@ -43,9 +43,21 @@ func (f *fake) RoundTrip(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-func get(t *testing.T, rt http.RoundTripper, url string) (*http.Response, string) {
+// get fetches a URL and returns its body. Only one test needs the response
+// itself, and handing one back to eleven callers that drop it reads as eleven
+// unclosed bodies.
+func get(t *testing.T, rt http.RoundTripper, url string) string {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	_, body := getStatus(t, rt, url)
+	return body
+}
+
+// getStatus fetches a URL and returns the status and body. The response itself
+// is not handed back: its body is already closed, and returning it reads to a
+// linter, correctly, as an open body escaping the function that opened it.
+func getStatus(t *testing.T, rt http.RoundTripper, url string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,12 +65,12 @@ func get(t *testing.T, rt http.RoundTripper, url string) (*http.Response, string
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
+	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
-	return resp, string(body)
+	return resp.StatusCode, string(body)
 }
 
 // The shell a single-page application serves: scripts, a mount point, and
@@ -84,7 +96,7 @@ func TestAutoEscalatesOnlyWhenThePageIsEmpty(t *testing.T) {
 	browser := &fake{body: rendered}
 	e := &Escalating{Base: base, Browser: browser, Policy: Auto}
 
-	_, body := get(t, e, "http://example.com/cars/1/")
+	body := get(t, e, "http://example.com/cars/1/")
 	if !strings.Contains(body, "Ford F-Series") {
 		t.Errorf("got the shell back, not the rendered page:\n%s", body)
 	}
@@ -98,7 +110,7 @@ func TestAutoLeavesAServerRenderedPageAlone(t *testing.T) {
 	browser := &fake{body: rendered}
 	e := &Escalating{Base: base, Browser: browser, Policy: Auto}
 
-	_, body := get(t, e, "http://example.com/cars/1/")
+	body := get(t, e, "http://example.com/cars/1/")
 	if !strings.Contains(body, "2026") {
 		t.Errorf("the served page was replaced:\n%s", body)
 	}
@@ -148,7 +160,7 @@ func TestPrimedHostsSkipTheWastedRequest(t *testing.T) {
 	}
 	e.Prime("example.com", "")
 
-	_, body := get(t, e, "http://example.com/cars/1/")
+	body := get(t, e, "http://example.com/cars/1/")
 	if !strings.Contains(body, "Ford F-Series") {
 		t.Errorf("a primed host was not rendered:\n%s", body)
 	}
@@ -198,9 +210,9 @@ func TestBrowserFailureKeepsThePlainResponse(t *testing.T) {
 	browser := &fake{err: errors.New("no chrome here")}
 	e := &Escalating{Base: base, Browser: browser, Policy: Auto}
 
-	resp, body := get(t, e, "http://example.com/")
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d", resp.StatusCode)
+	status, body := getStatus(t, e, "http://example.com/")
+	if status != http.StatusOK {
+		t.Errorf("status = %d", status)
 	}
 	if !strings.Contains(body, "root") {
 		t.Errorf("the plain response was lost when the browser failed:\n%s", body)
@@ -211,7 +223,7 @@ func TestNoBrowserConfiguredIsPlainHTTP(t *testing.T) {
 	base := &fake{body: shell}
 	e := &Escalating{Base: base, Policy: Auto}
 
-	if _, body := get(t, e, "http://example.com/"); !strings.Contains(body, "root") {
+	if body := get(t, e, "http://example.com/"); !strings.Contains(body, "root") {
 		t.Errorf("body = %s", body)
 	}
 	if base.calls.Load() != 1 {
@@ -247,7 +259,7 @@ func TestErrorResponsesAreNeverEscalated(t *testing.T) {
 func TestBodyIsStillReadableAfterInspection(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		io.WriteString(w, served)
+		_, _ = io.WriteString(w, served)
 	}))
 	defer srv.Close()
 
@@ -257,13 +269,16 @@ func TestBodyIsStillReadableAfterInspection(t *testing.T) {
 	}
 	e := &Escalating{Base: base, Browser: &fake{body: rendered}, Policy: Auto}
 
-	_, body := get(t, e, srv.URL)
+	body := get(t, e, srv.URL)
 	if !strings.Contains(body, "F-Series") {
 		t.Errorf("body was consumed by the inspection:\n%q", body)
 	}
 }
 
 func TestParsePolicy(t *testing.T) {
+	// The padding and the case in " AUTO " are what this asserts gets trimmed
+	// and lowered, so gocritic's suspicious-whitespace warning is the point.
+	//nolint:gocritic // mapKey: the whitespace is deliberate
 	tests := map[string]Policy{
 		"":         Auto,
 		"auto":     Auto,

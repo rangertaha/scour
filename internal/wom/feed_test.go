@@ -76,7 +76,7 @@ func TestFeedFieldsAreLocatedByElementName(t *testing.T) {
 	found := map[string]string{}
 	for _, item := range items {
 		for _, child := range item.Items {
-			found[child.Name] = child.Locator.XPath
+			found[child.Name] = child.XPath
 		}
 	}
 

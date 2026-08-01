@@ -136,9 +136,9 @@ var logLevel = new(slog.LevelVar)
 //
 // Warnings and errors still come through: those are not progress, they are the
 // reason the answer might be wrong.
-func SetupLogging(Verbose bool) {
+func SetupLogging(verbose bool) {
 	logLevel.Set(slog.LevelWarn)
-	if Verbose {
+	if verbose {
 		logLevel.Set(slog.LevelDebug)
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))

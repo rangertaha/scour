@@ -319,7 +319,7 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	// So does the queue, which is also where scour's crawl order will live.
-	var pending Frontier = opts.Frontier
+	pending := opts.Frontier
 	if pending == nil {
 		pending = crawlqueue.New(ctx, c.store, opts.Item.ID, opts.Job.ID)
 	}
@@ -716,7 +716,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 			Latency:     latency,
 			CacheKey:    key,
 		}
-		c.measureFetch(ctx, opts.Item.Name, rawURL, r.StatusCode, latency, int64(len(r.Body)))
+		c.measureFetch(ctx, rawURL, r.StatusCode, latency, int64(len(r.Body)))
 
 		if err := c.sink.Fetched(ctx, f); err != nil {
 			slog.Error("record fetch failed", "url", rawURL, "err", err)
@@ -823,7 +823,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 			StatusCode: r.StatusCode,
 			Latency:    elapsed(r.Ctx.Get(ctxStart)),
 		}
-		c.measureFetch(ctx, opts.Item.Name, rawURL, r.StatusCode, f.Latency, 0)
+		c.measureFetch(ctx, rawURL, r.StatusCode, f.Latency, 0)
 
 		if err := c.sink.Fetched(ctx, f); err != nil {
 			slog.Error("record failure failed", "url", rawURL, "err", err)

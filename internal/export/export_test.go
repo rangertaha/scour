@@ -293,7 +293,7 @@ func TestWebhookPostsRecords(t *testing.T) {
 func TestWebhookReportsRejection(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		w.Write([]byte("missing tenant header"))
+		_, _ = w.Write([]byte("missing tenant header"))
 	}))
 	defer srv.Close()
 

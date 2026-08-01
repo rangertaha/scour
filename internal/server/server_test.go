@@ -46,9 +46,9 @@ func do(t *testing.T, srv *Server, method, path, body string, headers ...string)
 
 	var r *http.Request
 	if body == "" {
-		r = httptest.NewRequest(method, path, nil)
+		r = httptest.NewRequestWithContext(t.Context(), method, path, nil)
 	} else {
-		r = httptest.NewRequest(method, path, strings.NewReader(body))
+		r = httptest.NewRequestWithContext(t.Context(), method, path, strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 	}
 	for i := 0; i+1 < len(headers); i += 2 {

@@ -16,7 +16,11 @@ func init() {
 // NewHTTP returns the ordinary network transport, which is what everything
 // uses unless a host is configured otherwise.
 func NewHTTP(cfg Config) (http.RoundTripper, error) {
-	base := http.DefaultTransport.(*http.Transport).Clone()
+	def, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("http.DefaultTransport is %T, not *http.Transport", http.DefaultTransport)
+	}
+	base := def.Clone()
 
 	if cfg.Proxy != "" {
 		u, err := url.Parse(cfg.Proxy)

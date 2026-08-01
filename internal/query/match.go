@@ -52,7 +52,8 @@ func (q Query) Match(values map[string]string, url string) (Match, bool) {
 	for _, t := range q.Terms {
 		best, field := 0.0, ""
 
-		if t.Any() {
+		switch {
+		case t.Any():
 			// Deterministic order, so two fields scoring the same report the
 			// same one every run rather than whichever the map yielded first.
 			for _, name := range sortedKeys(values) {
@@ -63,9 +64,9 @@ func (q Query) Match(values map[string]string, url string) (Match, bool) {
 			if s := score(url, t.Text); s > best {
 				best, field = s, URLField
 			}
-		} else if t.Field == URLField {
+		case t.Field == URLField:
 			best, field = score(url, t.Text), URLField
-		} else {
+		default:
 			best, field = score(values[t.Field], t.Text), t.Field
 		}
 

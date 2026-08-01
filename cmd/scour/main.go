@@ -15,7 +15,13 @@ import (
 	"github.com/rangertaha/scour/internal/cli"
 )
 
-func main() {
+func main() { os.Exit(runCLI()) }
+
+// runCLI is separated from main so the signal handler is released on every
+// path.
+// os.Exit does not run deferred calls, so a defer in main is a defer that never
+// happens.
+func runCLI() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -28,6 +34,7 @@ func main() {
 		if !errors.Is(err, cli.ErrSilent) && !errors.Is(err, cli.ErrEmpty) {
 			fmt.Fprintln(os.Stderr, "scour:", err)
 		}
-		os.Exit(cli.ExitCode(err))
+		return cli.ExitCode(err)
 	}
+	return 0
 }

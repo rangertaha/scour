@@ -148,6 +148,8 @@ func (h *webhook) post(ctx context.Context, body payload) error {
 		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("%s returned %s: %s", h.url, resp.Status, strings.TrimSpace(string(detail)))
 	}
-	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	// Drained so the connection can be reused. Nothing here needs the body, and
+	// a failed drain costs a connection rather than a delivery.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	return nil
 }

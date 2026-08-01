@@ -168,6 +168,10 @@ func (h Heuristic) Score(_ context.Context, p schema.Prop, n *graph.Node) float6
 	return clamp(score)
 }
 
+// wordHeading is what every heading tag means, named once so the six of them
+// cannot drift apart.
+const wordHeading = "heading"
+
 // namingAttrs are attributes that exist to name something else rather than to
 // carry data. <meta property="article:author" content="..."> is the clearest
 // case: `property` scores well against a prop called "authors" precisely
@@ -783,12 +787,12 @@ type tagLabel struct {
 // by the HTML specification, because that is what makes it hold on a Greek or
 // Russian page where nothing else in the markup is a word we know.
 var semanticTags = map[string]tagLabel{
-	"h1":         {"heading", 0.95},
-	"h2":         {"heading", 0.60},
-	"h3":         {"heading", 0.55},
-	"h4":         {"heading", 0.50},
-	"h5":         {"heading", 0.50},
-	"h6":         {"heading", 0.50},
+	"h1":         {wordHeading, 0.95},
+	"h2":         {wordHeading, 0.60},
+	"h3":         {wordHeading, 0.55},
+	"h4":         {wordHeading, 0.50},
+	"h5":         {wordHeading, 0.50},
+	"h6":         {wordHeading, 0.50},
 	"time":       {"date", 0.95},
 	"address":    {"author", 0.90},
 	"figcaption": {"caption", 0.90},

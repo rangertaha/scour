@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -25,12 +26,12 @@ func (s *Store) Judgement(ctx context.Context, key string) (float64, bool, error
 		return 0, false, fmt.Errorf("read judgement: %w", err)
 	}
 
+	// The answer is already in hand; failing to count its reuse is not a
+	// reason to go and ask a model again.
 	if err := s.db.WithContext(ctx).Model(&Judgement{}).
 		Where("id = ?", row.ID).
 		UpdateColumn("uses", gorm.Expr("uses + 1")).Error; err != nil {
-		// The answer is already in hand; failing to count its reuse is not a
-		// reason to go and ask a model again.
-		return row.Score, true, nil
+		slog.Debug("could not count a judgement reuse", "err", err)
 	}
 	return row.Score, true, nil
 }
@@ -94,10 +95,11 @@ func (s *Store) Verdict(ctx context.Context, key string) (string, bool, error) {
 		return "", false, nil
 	}
 
+	// As above: a verdict already read is worth more than its use count.
 	if err := s.db.WithContext(ctx).Model(&Judgement{}).
 		Where("id = ?", row.ID).
 		UpdateColumn("uses", gorm.Expr("uses + 1")).Error; err != nil {
-		return row.Verdict, true, nil
+		slog.Debug("could not count a verdict reuse", "err", err)
 	}
 	return row.Verdict, true, nil
 }
