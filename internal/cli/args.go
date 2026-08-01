@@ -3,10 +3,14 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/urfave/cli/v3"
 )
+
+// ErrNothingToSet is returned when a set command is given no value to write.
+var ErrNothingToSet = errors.New("nothing to set: name a bound, such as --depth")
 
 func Need(cmd *cli.Command, n int, what string) ([]string, error) {
 	got := cmd.Args().Slice()

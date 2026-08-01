@@ -366,20 +366,28 @@ func TestUnknownItemSuggestsAcrossCommands(t *testing.T) {
 	}
 }
 
-// status and `item ls` are the same listing under two names: one reached while
-// defining things, one asked between commands. They must not drift.
-func TestStatusMatchesItemLs(t *testing.T) {
+// status is `job ls`, not `item ls`. They were one listing when an item
+// carried its own targets; now a job holds them, and the two answer different
+// questions: what am I hunting, against where am I hunting it.
+func TestStatusIsTheJobListing(t *testing.T) {
 	dir := t.TempDir()
 	runOK(t, dir, "item", "add", "vehicle", "-d", "example.com", "-p", "make", "-e", "Ford")
 
-	if fleet, ls := runOK(t, dir, "status"), runOK(t, dir, "item", "ls"); fleet != ls {
-		t.Errorf("status and item ls differ:\n%s\n%s", fleet, ls)
+	if status, jobs := runOK(t, dir, "status"), runOK(t, dir, "job", "ls"); status != jobs {
+		t.Errorf("status and job ls differ:\n%s\n%s", status, jobs)
 	}
-	if one, ls := runOK(t, dir, "status", "vehicle"), runOK(t, dir, "item", "ls", "vehicle"); one != ls {
-		t.Errorf("status <name> and item ls <name> differ:\n%s\n%s", one, ls)
+
+	// The job listing names the item each job hunts for, which the item
+	// listing has no column for.
+	status := runOK(t, dir, "status")
+	if !strings.Contains(status, "ITEM") {
+		t.Errorf("the job listing should name the item:\n%s", status)
 	}
-	if _, err := run(t, dir, "status", "nosuch"); err == nil {
-		t.Error("status on an unknown item must fail")
+	if items := runOK(t, dir, "item", "ls"); status == items {
+		t.Errorf("status should not be the item listing:\n%s", status)
+	}
+	if _, err := run(t, dir, "job", "ls", "nosuch"); err == nil {
+		t.Error("naming an unknown job must fail")
 	}
 }
 

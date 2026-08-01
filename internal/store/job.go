@@ -209,3 +209,61 @@ func (s *Store) ContentTypesFor(ctx context.Context, jobID uint) ([]string, erro
 	}
 	return out, nil
 }
+
+// JobPolicy is what bounds a job's runs. A nil field is left as it was, which
+// is what lets `scour job set --depth 12` change the depth and nothing else.
+type JobPolicy struct {
+	Depth    *int
+	MaxPages *int
+	MaxTime  *time.Duration
+}
+
+// SetJobPolicy overwrites the bounds given and leaves the rest.
+//
+// Overwriting is the point, and is why this is `set` rather than `add`: a depth
+// replaces the depth that was there, where a target joins the targets that were
+// there. That is the whole distinction between the two verbs.
+func (s *Store) SetJobPolicy(ctx context.Context, jobID uint, p JobPolicy) error {
+	fields := map[string]any{}
+	if p.Depth != nil {
+		if *p.Depth < 0 {
+			return fmt.Errorf("depth must not be negative, got %d", *p.Depth)
+		}
+		fields["depth"] = *p.Depth
+	}
+	if p.MaxPages != nil {
+		if *p.MaxPages < 0 {
+			return fmt.Errorf("max pages must not be negative, got %d", *p.MaxPages)
+		}
+		fields["max_pages"] = *p.MaxPages
+	}
+	if p.MaxTime != nil {
+		if *p.MaxTime < 0 {
+			return fmt.Errorf("max time must not be negative, got %s", *p.MaxTime)
+		}
+		fields["max_time"] = int64(*p.MaxTime)
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	fields["updated_at"] = time.Now().UTC()
+	if err := s.db.WithContext(ctx).Model(&Job{}).
+		Where("id = ?", jobID).Updates(fields).Error; err != nil {
+		return fmt.Errorf("set job policy: %w", err)
+	}
+	return nil
+}
+
+// DeleteContentType stops a job allowing a content type.
+func (s *Store) DeleteContentType(ctx context.Context, jobID uint, typ string) error {
+	res := s.db.WithContext(ctx).
+		Where("job_id = ? AND type = ?", jobID, strings.ToLower(strings.TrimSpace(typ))).
+		Delete(&ContentType{})
+	if res.Error != nil {
+		return fmt.Errorf("remove content type %q: %w", typ, res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("content type %q: %w", typ, ErrNotFound)
+	}
+	return nil
+}

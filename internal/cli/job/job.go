@@ -31,7 +31,8 @@ func Job(a *cli.App) *ucli.Command {
 			"  scour job pause news\n" +
 			"  scour job import news --urls urls.txt",
 		Commands: []*ucli.Command{
-			Start(a), Pause(a), Stop(a), List(a), Import(a), Export(a),
+			Add(a), Remove(a), Set(a), List(a), Show(a),
+			Start(a), Pause(a), Stop(a), Import(a), Export(a),
 		},
 	})
 }
