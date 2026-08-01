@@ -236,24 +236,41 @@ func (s *Store) AddPropertyDetail(ctx context.Context, itemID uint, d PropertyDe
 		}
 	}
 
-	update := []string{"type", "example"}
-	if d.Regex != "" {
-		update = append(update, "regex")
+	// Only what was given is written. Adding one detail to a property must not
+	// cost it the others: `add -p title --label ...` used to blank the example
+	// it was taught with, which is the value the first round of matching is
+	// bootstrapped from, so a property could be quietly demoted to a bare name
+	// by being told something new about it.
+	//
+	// The consequence is that a field cannot be cleared by passing an empty
+	// one. Nothing can, today. Emptying is a different act from setting and
+	// wants a way of its own to say so.
+	update := make([]string, 0, 5)
+	for col, given := range map[string]string{
+		"type": d.Type, "example": d.Example, "regex": d.Regex,
+		"label": d.Label, "description": d.Description,
+	} {
+		if given != "" {
+			update = append(update, col)
+		}
 	}
-	if d.Label != "" {
-		update = append(update, "label")
+
+	// Nothing given but the name means the caller is making sure the property
+	// exists, not changing it. Said outright rather than left to what an empty
+	// column list happens to generate.
+	conflict := clause.OnConflict{
+		Columns:   []clause.Column{{Name: "item_id"}, {Name: "domain"}, {Name: "name"}},
+		DoUpdates: clause.AssignmentColumns(update),
 	}
-	if d.Description != "" {
-		// An empty description must not blank one already recorded: adding an
-		// example to a templated property should not cost it its meaning.
-		update = append(update, "description")
+	if len(update) == 0 {
+		conflict = clause.OnConflict{
+			Columns:   []clause.Column{{Name: "item_id"}, {Name: "domain"}, {Name: "name"}},
+			DoNothing: true,
+		}
 	}
 
 	err := s.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "item_id"}, {Name: "domain"}, {Name: "name"}},
-			DoUpdates: clause.AssignmentColumns(update),
-		}).
+		Clauses(conflict).
 		Create(&Property{
 			ItemID: itemID, Domain: domain, Name: name, Type: d.Type,
 			Example: d.Example, Description: d.Description,

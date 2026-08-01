@@ -823,3 +823,58 @@ func TestUnknownPropertyTypeIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// Teaching a property one thing must not cost it the others.
+//
+// Adding a label used to blank the example, because type and example were
+// written on every upsert whether or not they were given. The example is what
+// the first round of matching is bootstrapped from, so a property could be
+// quietly demoted to a bare name by being told something new about it.
+func TestTeachingOneDetailKeepsTheRest(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	full := PropertyDetail{
+		Name: "title", Type: "string", Example: "A headline",
+		Regex: `^.{5,}$`, Description: "the headline",
+	}
+	if err := s.AddPropertyDetail(ctx, item.ID, full); err != nil {
+		t.Fatal(err)
+	}
+
+	// Each of these adds one detail and names nothing else.
+	for _, add := range []PropertyDetail{
+		{Name: "title", Label: `^(og:|twitter:)?title$`},
+		{Name: "title", Example: "Another headline"},
+		{Name: "title", Type: "string"},
+		{Name: "title"},
+	} {
+		if err := s.AddPropertyDetail(ctx, item.ID, add); err != nil {
+			t.Fatalf("%+v: %v", add, err)
+		}
+	}
+
+	props, err := s.PropertiesFor(ctx, item.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(props) != 1 {
+		t.Fatalf("got %d properties, want 1", len(props))
+	}
+	got := props[0]
+	for _, tc := range []struct{ what, got, want string }{
+		{"type", got.Type, "string"},
+		{"example", got.Example, "Another headline"},
+		{"regex", got.Regex, `^.{5,}$`},
+		{"label", got.Label, `^(og:|twitter:)?title$`},
+		{"description", got.Description, "the headline"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s = %q, want %q", tc.what, tc.got, tc.want)
+		}
+	}
+}
