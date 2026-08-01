@@ -173,11 +173,9 @@ func runStream(c context.Context, a *cli.App, name string, f streamFlags) error 
 			if err != nil {
 				return err
 			}
-			a.Printf("no records matched, out of %d\n", all)
-			return nil
+			return a.Empty("no records matched, out of %d\n", all)
 		}
-		a.Printf("no records yet: scour model train %s\n", item.Name)
-		return nil
+		return a.Empty("no records yet: scour model train %s\n", item.Name)
 	}
 
 	props := propOrder(item, rows)

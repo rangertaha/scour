@@ -71,11 +71,9 @@ func List(a *cli.App) *ucli.Command {
 			}
 			if len(jobs) == 0 {
 				if item != "" {
-					a.Printf("%s has no jobs yet: scour run %s -d <domain>\n", item, item)
-					return nil
+					return a.Empty("%s has no jobs yet: scour run %s -d <domain>\n", item, item)
 				}
-				a.Println("no jobs yet: scour run <item> -d <domain>")
-				return nil
+				return a.Empty("no jobs yet: scour run <item> -d <domain>\n")
 			}
 
 			type row struct {

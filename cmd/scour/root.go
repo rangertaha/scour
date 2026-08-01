@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	ucli "github.com/urfave/cli/v3"
 
@@ -52,6 +51,11 @@ func newRootCmd() *ucli.Command {
 				Usage:       "print machine-readable output",
 				Destination: &a.JSON,
 			},
+			&ucli.BoolFlag{
+				Name:        "strict",
+				Usage:       "exit 4 when the result is empty",
+				Destination: &a.Strict,
+			},
 			&ucli.IntFlag{
 				Name:        "limit",
 				Usage:       "cap the number of rows printed (0 for no cap)",
@@ -91,9 +95,9 @@ func newRootCmd() *ucli.Command {
 					names = append(names, c.Names()...)
 				}
 				if near := fuzzy.Nearest(name, names); near != "" {
-					return fmt.Errorf("unknown command %q, did you mean `scour %s`?", name, near)
+					return cli.Usagef("unknown command %q, did you mean `scour %s`?", name, near)
 				}
-				return fmt.Errorf("unknown command %q, run `scour --help`", name)
+				return cli.Usagef("unknown command %q, run `scour --help`", name)
 			}
 			return ucli.ShowAppHelp(cmd)
 		},

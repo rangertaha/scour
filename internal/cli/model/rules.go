@@ -51,8 +51,7 @@ func Rules(a *cli.App) *ucli.Command {
 				return cli.WriteJSON(a.Out(), rules)
 			}
 			if len(rules) == 0 {
-				a.Printf("no rules yet: scour model train %s\n", item.Name)
-				return nil
+				return a.Empty("no rules yet: scour model train %s\n", item.Name)
 			}
 			if a.Limit > 0 && len(rules) > a.Limit {
 				rules = rules[:a.Limit]

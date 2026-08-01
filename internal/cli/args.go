@@ -39,7 +39,7 @@ func AtLeast(cmd *cli.Command, n int, what string) ([]string, error) {
 // already owed.
 func wanted(cmd *cli.Command, got []string, what string) error {
 	if len(got) > 0 {
-		return fmt.Errorf("%s takes %s, got %d", cmd.Name, what, len(got))
+		return Usagef("%s takes %s, got %d", cmd.Name, what, len(got))
 	}
 	if err := cli.ShowSubcommandHelp(cmd); err != nil {
 		return err
@@ -54,7 +54,7 @@ func wanted(cmd *cli.Command, got []string, what string) error {
 func AtMost(cmd *cli.Command, n int, what string) ([]string, error) {
 	got := cmd.Args().Slice()
 	if len(got) > n {
-		return nil, fmt.Errorf("%s takes %s, got %d", cmd.Name, what, len(got))
+		return nil, Usagef("%s takes %s, got %d", cmd.Name, what, len(got))
 	}
 	return got, nil
 }

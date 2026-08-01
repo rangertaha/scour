@@ -4,7 +4,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 
 	ucli "github.com/urfave/cli/v3"
 
@@ -37,10 +36,10 @@ func Group(c *ucli.Command) *ucli.Command {
 			verbs = append(verbs, sub.Names()...)
 		}
 		if near := fuzzy.Nearest(name, verbs); near != "" {
-			return fmt.Errorf("%s has no %q, did you mean `scour %s %s`?",
+			return Usagef("%s has no %q, did you mean `scour %s %s`?",
 				cmd.Name, name, cmd.Name, near)
 		}
-		return fmt.Errorf("%s has no %q, run `scour %s --help`", cmd.Name, name, cmd.Name)
+		return Usagef("%s has no %q, run `scour %s --help`", cmd.Name, name, cmd.Name)
 	}
 	return c
 }

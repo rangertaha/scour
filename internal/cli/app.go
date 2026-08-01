@@ -42,6 +42,10 @@ type App struct {
 	Verbose    bool
 	JSON       bool
 	Limit      int
+	// Strict turns an empty result into a failure, so a script can wait for
+	// one without reading the text. Off by default, because "no records above
+	// 0.9 yet" is an answer rather than a fault.
+	Strict bool
 }
 
 // Printf writes to the command's output.
