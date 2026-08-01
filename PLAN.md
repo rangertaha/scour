@@ -153,7 +153,7 @@ cmd/scour/              main and the root command's wiring
 internal/cli/           what every command needs: App, args, tables, help
 internal/cli/urls/      import, export
 internal/cli/items/     item add|rm|ls|tag|templates, stream
-internal/cli/learn/     rules, train
+internal/cli/learn/     rules, train, mark
 internal/cli/search/    status, top, start, stop, pause
 internal/cli/serve/     mcp, server, join
 internal/wom/           the document engine: graph, parse, match, seq, infer, model
@@ -185,6 +185,12 @@ internal/mcp/           MCP server, stdio and HTTP
 
 Everything is `internal/` until v1, following wom's reasoning: promoting a
 package later is non-breaking, demoting one is not.
+
+The five groups under `internal/cli` are grouped by what a command does, which
+is what the help prints. M11 regroups them by the noun they act on, so they
+become `item`, `job`, `record`, `model` and `node`. That is a rename of the
+directories and the constructors, not of the machinery: the shared `App`, the
+argument checks and the registry-shaped help stay where they are.
 
 ## 4. Extension model
 
@@ -374,7 +380,11 @@ machines and leave the rest of the pipeline light.
 Item      id, name, created_at
 Alias       item_id, word
 Property    item_id, name, type, example
-Target      item_id, kind(domain|url), value, subdomains, depth
+Job         item_id, name unique, state, depth, max_pages, max_time,     -- M11
+            last_run_at
+Target        job_id, kind(domain|url), value, subdomains, depth        -- item_id today
+ContentType   job_id, type                                              -- item_id today
+Run           job_id, started_at, ended_at, reason, pages, records      -- M11
 Host        host, rate, concurrency, robots, transport   -- learned or configured
 URL         item_id, hash unique, url, parent_id, depth, score, role,
             status, content_type, size, latency, fetched_at, next_at
@@ -387,6 +397,24 @@ ModelMeta   item_id, path, algorithm, accuracy, trained_at, observations
 Chain       item_id null, kind(extract|crawl), states, transitions json,
             observations, fitted_at
 ```
+
+`Job` and `Run` are M11 and are not built. Targets and content types hang off
+the item today, and the two lines marked above are what changes. Everything else
+in this block is what ships.
+
+`Job` is what the item carries alongside its definition today: the targets, the
+policy, the frontier and the run state. Splitting it is what lets one item be
+hunted over two different site sets, with one of them paused and the other not,
+and it is why `Target` and `ContentType` hang off a job rather than an item. An
+item knows what you are looking for; a job knows where to look.
+
+Records still belong to the item, not the job, because two jobs hunting one item
+fill one table, and a model belongs to the item for the same reason: it is
+trained from every page every job of that item cached.
+
+`Run` is written and never edited. A job accumulates runs, and `state` on the
+job is the last one's outcome, distinguishing `budget` from `done` because both
+end with the frontier intact and only one means there is more to fetch.
 
 `URL.parent_id` and `URL.role` are what the crawl chain needs: the parent edge
 reconstructs the path for Viterbi, and the role is the decoded state, which is
@@ -741,6 +769,44 @@ Hence the default is off, and the benchmark is the tool for deciding whether to
 turn it on for a given model and a given item. Named after what it actually
 collects, the classifier removes false negatives at no cost; named `proj7`, it
 should stay off.
+
+**M11. The command surface.** *(designed, in `CLI.md`)* The item carries a
+definition, a target list, a budget, a frontier and a run state at once, which
+leaves nowhere to put a second crawl of one item over a different site set, and
+nowhere to say that one of them is paused and the other is not. `CLI.md` is the
+design; this is what it costs to build.
+
+Five nouns, one rule, `scour <noun> <verb> [target] [flags]`, with four
+shortcuts for what is typed all day: `run`, `search`, `status`, `top`. The verbs
+mean one thing everywhere, which is what the current surface breaks when `add`
+creates an item and `--append` adds a word to one.
+
+Three stages, in dependency order.
+
+*Data model.* `Job` arrives, `Target` and `ContentType` move onto it, and the
+item's paused flag becomes the job's state. Every item that has targets migrates
+to an item plus one job named after it, so `scour start vehicle` and `scour run
+vehicle` reach the same frontier and nothing is re-seeded. `Run` is a new table,
+written and never edited. Measured on the database here: the migration touches
+981,461 target rows, so it is SQL rather than rows read into Go, in the shape
+the entity-to-item rename already used.
+
+The blast radius is 69 call sites across 23 files, because `item.Targets` is
+reached from the crawler, the dispatcher, the API, the TUI and training. That is
+the whole cost of the change and it is worth knowing before starting: the model
+change is a day, the call sites are the rest.
+
+*Command tree.* Five groups under `internal/cli/{item,job,record,model,node}`,
+the four shortcuts, and the flag renames: `--append`/`--delete`/`--update`
+become `--add`/`--rm`/`--set`, and clearing becomes `--clear <detail>` rather
+than a boolean per field. The 60-odd CLI tests drive `newRootCmd` and read what
+comes out, so they are the safety net for this stage, as they were for the move
+off cobra.
+
+*New capability.* The query language for `scour search`, confidence bands,
+`--strict` and the exit codes, run history and `job log --follow`. None of it is
+reachable today under any spelling, which is why it goes last: everything above
+is a renaming of things that work.
 
 ## 8.5 What crawling real sites exposed
 
