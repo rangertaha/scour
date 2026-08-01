@@ -1008,9 +1008,23 @@ Same files as wom, same targets, so muscle memory carries over:
    and `/helpcenter/article_...` genuinely are detail pages and are not
    articles, which is a topic question, not a role one.
 
-   So the chain needs evidence extraction did not produce: outlink count, URL
-   shape, whether a page's children were worth fetching. All are known before
-   anything is extracted and none is among the four observations it reads.
+   So the chain needs evidence extraction did not produce. Outlink count does
+   not work: section-like pages average 18.6 queued children against 8.7 for
+   the rest, and the ranges overlap almost entirely.
+
+   URL shape does, measured over news2's 867 records. Of the real articles, 735
+   of 749 carry an id in the last path segment; of the section pages, 77 of 118
+   are bare directories with a trailing slash. That is known when a URL is
+   discovered, before it is fetched.
+
+   It must not become a rule that articles carry ids. True of this publisher,
+   false of others, and exactly the belief about content a generic crawler may
+   not hold. It belongs as an observation the chain reads, so the association is
+   fitted per item and a site with the opposite convention learns the opposite.
+
+   The cost is a new observation vocabulary, which changes the emission matrix a
+   fitted chain serialises. Stored chains are six roles by four symbols, so they
+   need a version and a refit rather than being read under the new meaning.
 
    Inference does some of this work instead, in the wrong place. `variety`
    halves a location whose value never changes, which is what caught `section`

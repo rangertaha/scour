@@ -152,10 +152,35 @@ circularity above. And `/eedition/special_section/page_...`, `/ads/sale/...` and
 `/helpcenter/article_...` really are detail pages, just not articles: a
 different subject, which is a topic question and not a role one.
 
-So the chain needs evidence that does not come from extraction. Outlink count,
-URL shape, whether a page's children were themselves worth fetching: all are
-known before anything is extracted, and none is in the four observations it
-reads today. That is the work, and it is larger than reading a stored answer.
+So the chain needs evidence extraction did not produce. Outlink count is the
+obvious candidate and does not work: pages with a section-like title average 18.6
+queued children against 8.7 for the rest, with ranges that overlap almost
+entirely, so no threshold separates them.
+
+URL shape does separate them, measured over news2's 867 records:
+
+| Last path segment | Section-like title | Normal title |
+| --- | --- | --- |
+| a directory, trailing slash | 77 | 9 |
+| carries an id | 29 | 735 |
+| carries digits | 12 | 4 |
+
+98% of the real articles carry an id in the last segment, and 65% of the section
+pages are bare directories. That is known the moment a URL is discovered, before
+anything is fetched, let alone extracted.
+
+It must not become a rule that articles have ids in their URLs. That is true of
+this publisher and false of plenty of others, and hardcoding it is exactly the
+kind of belief about content a generic crawler does not get to hold. It belongs
+as an observation the chain reads, so the association between shape and role is
+fitted per item from that item's own crawl, and a site that numbers its sections
+and slugs its articles learns the opposite association without anyone editing
+code.
+
+Implementing it means a new observation vocabulary, which changes the shape of
+the emission matrix a fitted chain serialises. Stored chains are six roles by
+four symbols today, so they need a version and a refit rather than being read
+under the new meaning, which would be silently wrong rather than loudly stale.
 
 ## Scoring, which is per graph
 
