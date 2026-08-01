@@ -747,8 +747,8 @@ url    = ""                          # empty means the default pages directory
 
 [model]
 scorer    = "bayes"                  # URL scoring: bayes or embed
-vectors   = ""                       # word vectors, for the embed scorer
-matcher   = "heuristic"              # how candidate values are matched: heuristic or llm
+vectors   = ""                       # word vectors, for whatever embed is selected
+matcher   = "heuristic"              # how candidate values are matched: heuristic, embed or llm
 classifier = ""                      # read pages to label them: "" (off) or llm
 ai        = ""                       # which [[ai]] block the llm matcher uses
 budget    = 0                        # model calls per training run, 0 for the default

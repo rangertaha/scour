@@ -42,3 +42,7 @@ bin/
 
 # Coverage report
 coverage.html
+
+# Python bytecode, from the docs checker
+__pycache__/
+*.pyc
