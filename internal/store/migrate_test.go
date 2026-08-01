@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "github.com/glebarez/go-sqlite"
@@ -225,5 +226,212 @@ func TestForeignKeysAreOnAfterMigrating(t *testing.T) {
 	}
 	if left != 0 {
 		t.Errorf("%d alias rows outlived the item they belonged to", left)
+	}
+}
+
+// preJobSchema builds a database from before targets and the frontier moved
+// onto a job: items carrying their own targets, and a queue keyed on the item.
+//
+// The second item is the point. It has work waiting and no targets, which is
+// what an item looks like after its targets are removed once a crawl has run.
+// It gets no job from the targets migration, so if the frontier migration only
+// maps rows onto jobs that already exist, its queue is silently discarded.
+func preJobSchema(t *testing.T, path string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	stmts := []string{
+		"PRAGMA foreign_keys = ON",
+		"CREATE TABLE `items` (`id` integer PRIMARY KEY AUTOINCREMENT, `name` text NOT NULL, `paused` numeric)",
+		"CREATE UNIQUE INDEX `idx_items_name` ON `items`(`name`)",
+
+		"CREATE TABLE `targets` (`id` integer PRIMARY KEY AUTOINCREMENT, `item_id` integer NOT NULL," +
+			" `kind` text NOT NULL, `value` text NOT NULL, `subdomains` numeric, `depth` integer," +
+			" CONSTRAINT `fk_items_targets` FOREIGN KEY (`item_id`) REFERENCES `items`(`id`) ON DELETE CASCADE)",
+
+		"CREATE TABLE `queue_items` (`id` integer PRIMARY KEY AUTOINCREMENT, `item_id` integer NOT NULL," +
+			" `score` real, `hash` text NOT NULL, `host` text, `data` blob," +
+			" `leased_until` datetime, `attempts` integer DEFAULT 0, `created_at` datetime," +
+			" CONSTRAINT `fk_items_queue` FOREIGN KEY (`item_id`) REFERENCES `items`(`id`) ON DELETE CASCADE)",
+		"CREATE INDEX `idx_queue_item_score` ON `queue_items`(`item_id`,`score`)",
+		// Auto-created by gorm from the model, and named the same in the model
+		// this migrates to. A rebuild that does not clear it first collides.
+		"CREATE INDEX `idx_queue_items_leased_until` ON `queue_items`(`leased_until`)",
+
+		"INSERT INTO items (id, name, paused) VALUES (1, 'news', 0)",
+		"INSERT INTO items (id, name, paused) VALUES (2, 'stray', 0)",
+		"INSERT INTO targets (item_id, kind, value, subdomains, depth) VALUES (1, 'domain', 'example.com', 0, 2)",
+		"INSERT INTO queue_items (item_id, score, hash, host, data, attempts) VALUES (1, 0.9, 'h1', 'example.com', 'one', 3)",
+		"INSERT INTO queue_items (item_id, score, hash, host, data, attempts) VALUES (1, 0.5, 'h2', 'example.com', 'two', 0)",
+		"INSERT INTO queue_items (item_id, score, hash, host, data, attempts) VALUES (2, 0.1, 'h3', 'other.com', 'three', 1)",
+	}
+	for _, q := range stmts {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+}
+
+// The frontier is expensive: every queued URL was discovered by a fetch that
+// was paid for. None of it may be lost moving the queue onto the job.
+func TestTheFrontierSurvivesMovingOntoJobs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scour.db")
+	preJobSchema(t, path)
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	var total int64
+	if err := s.db.Raw("SELECT count(*) FROM queue_items").Scan(&total).Error; err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 {
+		t.Errorf("the frontier came across with %d of 3 rows", total)
+	}
+
+	var orphans int64
+	if err := s.db.Raw(
+		"SELECT count(*) FROM queue_items q LEFT JOIN jobs j ON j.id = q.job_id WHERE j.id IS NULL",
+	).Scan(&orphans).Error; err != nil {
+		t.Fatal(err)
+	}
+	if orphans != 0 {
+		t.Errorf("%d queued rows point at no job, so nothing will ever hand them out", orphans)
+	}
+
+	// The item with targets keeps its two, under the job named after it.
+	news, err := s.Job(ctx, "news")
+	if err != nil {
+		t.Fatalf("news got no job: %v", err)
+	}
+	n, err := s.QueueSize(ctx, news.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("news kept %d of 2 queued URLs", n)
+	}
+
+	// And the item with a frontier but no targets got a job to hold it, rather
+	// than having its work dropped by a join that matched nothing.
+	stray, err := s.Job(ctx, "stray")
+	if err != nil {
+		t.Fatalf("an item with queued work and no targets got no job: %v", err)
+	}
+	if n, err = s.QueueSize(ctx, stray.ID); err != nil || n != 1 {
+		t.Errorf("stray kept %d of 1 queued URLs (%v)", n, err)
+	}
+
+	// The payload has to arrive intact: the data is the serialised request, and
+	// attempts is what stops a URL being retried forever.
+	var row struct {
+		Data     []byte
+		Attempts int
+		Score    float64
+		Host     string
+	}
+	if err := s.db.Raw(
+		"SELECT data, attempts, score, host FROM queue_items WHERE hash = 'h1'").Scan(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if string(row.Data) != "one" || row.Attempts != 3 || row.Score != 0.9 || row.Host != "example.com" {
+		t.Errorf("the queued request came across as %q/%d/%v/%q, want \"one\"/3/0.9/\"example.com\"",
+			row.Data, row.Attempts, row.Score, row.Host)
+	}
+}
+
+// Migrating twice must not double the frontier or lose it.
+func TestTheFrontierMigrationIsIdempotent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scour.db")
+	preJobSchema(t, path)
+
+	for i := range 3 {
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("open %d: %v", i+1, err)
+		}
+		var n int64
+		if err := s.db.Raw("SELECT count(*) FROM queue_items").Scan(&n).Error; err != nil {
+			t.Fatal(err)
+		}
+		if n != 3 {
+			t.Fatalf("open %d: the frontier holds %d of 3", i+1, n)
+		}
+		s.Close()
+	}
+}
+
+// A scour built before the rename recreates an empty entities table on whatever
+// database it opens. Finding one is not a half-migrated database and must not
+// wedge every later open, which is what refusing outright did.
+func TestAnEmptyEntitiesTableFromAnOldBinaryIsCleared(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scour.db")
+	preJobSchema(t, path)
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Exactly what the old binary's AutoMigrate writes.
+	if _, err := db.Exec("CREATE TABLE `entities` (`id` integer PRIMARY KEY AUTOINCREMENT," +
+		"`name` text NOT NULL,`created_at` datetime,`updated_at` datetime)"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("an empty leftover entities table blocked the open: %v", err)
+	}
+	defer s.Close()
+
+	var left int64
+	if err := s.db.Raw(
+		"SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'entities'").Scan(&left).Error; err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 {
+		t.Error("the leftover entities table is still there, so the next open trips over it again")
+	}
+	if _, err := s.Item(context.Background(), "news"); err != nil {
+		t.Errorf("the item did not survive: %v", err)
+	}
+}
+
+// With rows in it the two tables really are ambiguous, and picking one could
+// overwrite a migrated database with a stale one. That still has to stop.
+func TestAPopulatedEntitiesTableStillRefuses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scour.db")
+	preJobSchema(t, path)
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		"CREATE TABLE `entities` (`id` integer PRIMARY KEY AUTOINCREMENT, `name` text NOT NULL)",
+		"INSERT INTO entities (name) VALUES ('from an older scour')",
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err == nil {
+		s.Close()
+		t.Fatal("opened a database holding both entities and items with rows in each")
+	}
+	if !strings.Contains(err.Error(), "refusing to guess") {
+		t.Errorf("got %v, want a refusal naming the ambiguity", err)
 	}
 }

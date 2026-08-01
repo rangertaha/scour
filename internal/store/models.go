@@ -327,9 +327,16 @@ type Cookie struct {
 // every score is equal, so the tie-break on ID keeps the order the crawl would
 // have had anyway.
 type QueueItem struct {
-	ID     uint    `gorm:"primaryKey"`
-	ItemID uint    `gorm:"index:idx_queue_item_score;not null"`
-	Score  float64 `gorm:"index:idx_queue_item_score"`
+	ID uint `gorm:"primaryKey"`
+	// JobID is whose frontier this is. The queue belongs to a job because a job
+	// is a crawl: two jobs hunting one item over different sites have different
+	// work waiting, and one can be paused while the other runs.
+	//
+	// The pages they fetch land in the item's corpus, which is why urls, visits
+	// and cookies stay on the item and only this moves. Two jobs over one site
+	// should not refetch each other's pages, and a session is owed to the site.
+	JobID uint    `gorm:"index:idx_queue_job_score;not null"`
+	Score float64 `gorm:"index:idx_queue_job_score"`
 	// Hash identifies the URL, so the item can be released when the fetch is
 	// recorded without the releaser having to know the queue's row ids.
 	Hash string `gorm:"index"`

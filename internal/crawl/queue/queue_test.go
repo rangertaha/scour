@@ -24,7 +24,11 @@ func harness(t *testing.T) (*Storage, *store.Store, uint) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := New(context.Background(), s, e.ID)
+	job, err := s.JobForItem(context.Background(), e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := New(context.Background(), s, e.ID, job.ID)
 	if err := q.Init(); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +133,11 @@ func TestQueueSurvivesReopening(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := New(ctx, s, e.ID)
+	job, err := s.JobForItem(ctx, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := New(ctx, s, e.ID, job.ID)
 	if err := q.AddRequest([]byte("pending")); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +153,11 @@ func TestQueueSurvivesReopening(t *testing.T) {
 	}
 	defer s2.Close()
 
-	q2 := New(ctx, s2, e.ID)
+	job2, err := s2.JobForItem(ctx, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q2 := New(ctx, s2, e.ID, job2.ID)
 	n, err := q2.QueueSize()
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +182,11 @@ func TestItemsHaveSeparateQueues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherQ := New(ctx, s, other.ID)
+	otherJob, err := s.JobForItem(ctx, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherQ := New(ctx, s, other.ID, otherJob.ID)
 
 	if err := q.AddRequest([]byte("for vehicle")); err != nil {
 		t.Fatal(err)

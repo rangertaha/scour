@@ -101,7 +101,7 @@ func (s *StoreService) asked(host string, at time.Time) {
 
 // dispatchOnce hands out at most one batch, for every item with work.
 func (s *StoreService) dispatchOnce(ctx context.Context) error {
-	items, err := s.store.QueuedItems(ctx)
+	jobs, err := s.store.QueuedJobs(ctx)
 	if err != nil {
 		return err
 	}
@@ -110,8 +110,16 @@ func (s *StoreService) dispatchOnce(ctx context.Context) error {
 		return err
 	}
 
-	for _, id := range items {
-		inFlight, err := s.store.InFlight(ctx, id)
+	for _, jobID := range jobs {
+		// The frontier is the job's; the item is what the work is for, and is
+		// what the bus events and the scope are keyed by.
+		job, err := s.store.JobByID(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		id := job.ItemID
+
+		inFlight, err := s.store.InFlight(ctx, jobID)
 		if err != nil {
 			return err
 		}
@@ -134,7 +142,7 @@ func (s *StoreService) dispatchOnce(ctx context.Context) error {
 		// that says whether crawlers are keeping up: a queue growing while the
 		// in-flight count sits at its ceiling means the crawl is discovering
 		// faster than it can fetch.
-		if depth, err := s.store.QueueSize(ctx, id); err == nil {
+		if depth, err := s.store.QueueSize(ctx, jobID); err == nil {
 			s.bus.Emit(ctx, name, bus.Metric{
 				ItemID: id, Name: bus.MetricQueueDepth,
 				Value: float64(depth), Unit: "count",
@@ -147,7 +155,7 @@ func (s *StoreService) dispatchOnce(ctx context.Context) error {
 
 		for range room {
 			now := time.Now()
-			data, err := s.store.LeaseQueueSkipping(ctx, id, 0, s.cooling(now, rates))
+			data, err := s.store.LeaseQueueSkipping(ctx, jobID, 0, s.cooling(now, rates))
 			if err != nil {
 				// Empty, or every host still cooling. Either way there is
 				// nothing to hand out for this item right now.

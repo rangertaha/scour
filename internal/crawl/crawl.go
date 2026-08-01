@@ -39,7 +39,11 @@ import (
 
 // Options configures one crawl.
 type Options struct {
-	Item    *store.Item
+	Item *store.Item
+	// Job is the crawl this run belongs to, and owns the frontier it drains.
+	// Nil resolves the item's implicit job, which is what a bare "scour crawl
+	// <item>" wants: one job, named after the item, made on first use.
+	Job     *store.Job
 	Targets []store.Target
 	Types   *content.Set
 	Depth   int
@@ -243,6 +247,17 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 		opts.Scorer = score.Fixed(1)
 	}
 
+	// The frontier belongs to a job, so a run without one named gets the
+	// item's implicit job rather than an ambiguous queue. A crawler handed its
+	// work by another process is drained by whoever handed it, and needs none.
+	if opts.Job == nil && opts.Frontier == nil {
+		job, err := c.store.JobForItem(ctx, opts.Item)
+		if err != nil {
+			return nil, fmt.Errorf("resolve job for %s: %w", opts.Item.Name, err)
+		}
+		opts.Job = job
+	}
+
 	st := &state{statuses: map[int]int{}}
 	if opts.MaxTime > 0 {
 		st.deadline = time.Now().Add(opts.MaxTime)
@@ -271,7 +286,7 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 	// So does the queue, which is also where scour's crawl order will live.
 	var pending Frontier = opts.Frontier
 	if pending == nil {
-		pending = crawlqueue.New(ctx, c.store, opts.Item.ID)
+		pending = crawlqueue.New(ctx, c.store, opts.Item.ID, opts.Job.ID)
 	}
 	threads := c.cfg.Crawl.Concurrency
 	if threads < 1 {
@@ -357,7 +372,7 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 	// make the next run wait ten minutes for work it already has. Only for the
 	// database frontier: a crawler handed its work does not own the queue.
 	if opts.Frontier == nil {
-		if err := c.store.ReturnLeases(ctx, opts.Item.ID); err != nil {
+		if err := c.store.ReturnLeases(ctx, opts.Job.ID); err != nil {
 			slog.Warn("could not return leases", "item", opts.Item.Name, "err", err)
 		}
 	}
@@ -543,6 +558,13 @@ const (
 // register wires the callbacks. This is the whole integration with colly.
 func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pending Frontier, sc *Scope, opts Options, st *state) {
 	itemID := opts.Item.ID
+	// A crawler handed its work has no job of its own: whoever handed it the
+	// work owns the frontier, and releases the entry when the result comes
+	// back. Zero is that "not mine to release".
+	var jobID uint
+	if opts.Job != nil {
+		jobID = opts.Job.ID
+	}
 
 	// Attach the timing and lineage this request will be recorded with, and
 	// drop links whose extension already disagrees with the allowed types.
@@ -554,7 +576,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		}
 		if !opts.Types.AllowsPath(r.URL.Path) {
 			slog.Debug("skipped by extension", "url", r.URL.String())
-			c.skip(ctx, st, itemID, r.URL.String(), r.Depth)
+			c.skip(ctx, st, itemID, jobID, r.URL.String(), r.Depth)
 			r.Abort()
 			return
 		}
@@ -573,14 +595,14 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		ct := r.Headers.Get("Content-Type")
 		if !opts.Types.AllowsMIME(ct) {
 			slog.Debug("skipped by content type", "url", r.Request.URL.String(), "type", ct)
-			c.skip(ctx, st, itemID, r.Request.URL.String(), r.Request.Depth)
+			c.skip(ctx, st, itemID, jobID, r.Request.URL.String(), r.Request.Depth)
 			r.Request.Abort()
 			return
 		}
 		if max := int64(c.cfg.Crawl.MaxSize); max > 0 && r.Headers.Get("Content-Length") != "" {
 			if size := parseSize(r.Headers.Get("Content-Length")); size > max {
 				slog.Debug("skipped by size", "url", r.Request.URL.String(), "size", size)
-				c.skip(ctx, st, itemID, r.Request.URL.String(), r.Request.Depth)
+				c.skip(ctx, st, itemID, jobID, r.Request.URL.String(), r.Request.Depth)
 				r.Request.Abort()
 			}
 		}
@@ -609,6 +631,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 
 			failed := store.Fetched{
 				ItemID:     itemID,
+				JobID:      jobID,
 				URL:        rawURL,
 				ParentURL:  r.Ctx.Get(ctxParent),
 				Depth:      r.Request.Depth,
@@ -643,6 +666,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 
 		f := store.Fetched{
 			ItemID:      itemID,
+			JobID:       jobID,
 			URL:         rawURL,
 			ParentURL:   r.Ctx.Get(ctxParent),
 			Depth:       r.Request.Depth,
@@ -728,6 +752,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 		slog.Debug("fetch failed", "url", rawURL, "status", r.StatusCode, "err", err)
 		f := store.Fetched{
 			ItemID:     itemID,
+			JobID:      jobID,
 			URL:        rawURL,
 			ParentURL:  r.Ctx.Get(ctxParent),
 			Depth:      r.Request.Depth,
@@ -745,13 +770,14 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 }
 
 // skip records a URL that was deliberately not downloaded.
-func (c *Crawler) skip(ctx context.Context, st *state, itemID uint, rawURL string, depth int) {
+func (c *Crawler) skip(ctx context.Context, st *state, itemID, jobID uint, rawURL string, depth int) {
 	st.mu.Lock()
 	st.skipped++
 	st.mu.Unlock()
 
 	f := store.Fetched{
 		ItemID: itemID,
+		JobID:  jobID,
 		URL:    rawURL,
 		Depth:  depth,
 		Status: store.URLSkipped,

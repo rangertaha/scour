@@ -53,7 +53,12 @@ func (s *Store) Discovered(ctx context.Context, itemID uint, rawURL, parentURL s
 
 // Fetched is the outcome of one fetch, as the crawl callbacks see it.
 type Fetched struct {
-	ItemID      uint
+	// ItemID owns the url row: a fetched page joins the item's corpus, and is
+	// there for the next job over the same site rather than fetched again.
+	ItemID uint
+	// JobID owns the frontier entry this fetch settles. A page can be reached
+	// by two jobs of one item, and each has its own entry to release.
+	JobID       uint
 	URL         string
 	ParentURL   string
 	Depth       int
@@ -123,7 +128,7 @@ func (s *Store) RecordFetch(ctx context.Context, f Fetched) error {
 	// fetch succeeded or failed. Both paths arrive here, so this is the single
 	// place a lease is released; anything that never arrives is returned by its
 	// lease expiring instead.
-	if err := s.ReleaseQueue(ctx, f.ItemID, u.Hash); err != nil {
+	if err := s.ReleaseQueue(ctx, f.JobID, u.Hash); err != nil {
 		return err
 	}
 

@@ -26,9 +26,15 @@ import (
 // equal and the tie-break on insertion order gives the same breadth-first walk
 // colly would have done on its own.
 type Storage struct {
-	ctx    context.Context
-	store  *store.Store
+	ctx   context.Context
+	store *store.Store
+
+	// itemID identifies a URL. Hashes are item-scoped because a fetched page
+	// belongs to the item's corpus, which outlives any one job over it.
 	itemID uint
+	// jobID owns the frontier. Two jobs of one item have separate work
+	// waiting, and one can be paused while the other runs.
+	jobID uint
 
 	// scoreOf is consulted when a request is added, to decide its priority.
 	// It is set by the crawler, which is the only part that knows how to
@@ -66,9 +72,14 @@ type Storage struct {
 	frozen atomic.Bool
 }
 
-// New returns a queue storage for one item.
-func New(ctx context.Context, s *store.Store, itemID uint) *Storage {
-	return &Storage{ctx: ctx, store: s, itemID: itemID}
+// New returns the queue storage for one job over one item.
+//
+// Both ids are needed and neither implies the other: the frontier read and
+// written here is the job's, while the URL hashes that identify its entries are
+// the item's, so that a page already fetched for the corpus is recognised as
+// such by every job over it.
+func New(ctx context.Context, s *store.Store, itemID, jobID uint) *Storage {
+	return &Storage{ctx: ctx, store: s, itemID: itemID, jobID: jobID}
 }
 
 // SetScorer installs the function that assigns a priority to a serialised
@@ -146,7 +157,7 @@ func (s *Storage) AddRequest(data []byte) error {
 	if f != nil {
 		score = f(data)
 	}
-	return s.store.PushQueue(s.ctx, s.itemID, score, s.hashOf(data), data)
+	return s.store.PushQueue(s.ctx, s.jobID, score, s.hashOf(data), data)
 }
 
 // hashOf recovers the URL from a serialised request and keys it the way the
@@ -192,10 +203,10 @@ func (s *Storage) GetRequest() ([]byte, error) {
 		order = next()
 	}
 
-	data, err := s.store.LeaseQueueOrdered(s.ctx, s.itemID, 0, nil, order)
+	data, err := s.store.LeaseQueueOrdered(s.ctx, s.jobID, 0, nil, order)
 	if errors.Is(err, store.ErrQueueEmpty) && s.topUp() > 0 {
 		// Empty only meant the next batch of seeds had not been queued yet.
-		data, err = s.store.LeaseQueueOrdered(s.ctx, s.itemID, 0, nil, order)
+		data, err = s.store.LeaseQueueOrdered(s.ctx, s.jobID, 0, nil, order)
 	}
 	if err != nil {
 		return nil, err
@@ -209,14 +220,14 @@ func (s *Storage) QueueSize() (int, error) {
 	if s.frozen.Load() {
 		return 0, nil
 	}
-	n, err := s.store.QueueSize(s.ctx, s.itemID)
+	n, err := s.store.QueueSize(s.ctx, s.jobID)
 	if err != nil || n > 0 {
 		return n, err
 	}
 	// colly stops its loop when the queue reports empty, so an empty queue with
 	// seeds still unqueued has to top up here too, not only on the read.
 	if s.topUp() > 0 {
-		return s.store.QueueSize(s.ctx, s.itemID)
+		return s.store.QueueSize(s.ctx, s.jobID)
 	}
 	return 0, nil
 }

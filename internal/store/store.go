@@ -162,6 +162,10 @@ func (s *Store) migrate() error {
 	if err := s.splitJobsFromItems(); err != nil {
 		return err
 	}
+	// After the jobs exist, because it maps the frontier onto them.
+	if err := s.moveFrontierToJobs(); err != nil {
+		return err
+	}
 	// AutoMigrate adds a column but will not rebuild a unique index whose
 	// definition changed. A database created before `domain` joined
 	// (item_id, name) therefore keeps the old two-column index, and every
@@ -217,7 +221,29 @@ func (s *Store) renameItemColumns() error {
 		return nil
 	}
 	if tables["items"] {
-		return fmt.Errorf("migrate: both entities and items exist, refusing to guess which is current")
+		// A scour built before the rename recreates an empty entities table on
+		// any database it opens, because AutoMigrate makes what its models
+		// describe. Finding that next to a populated items table does not mean
+		// the database is half migrated; it means an old binary is still
+		// installed somewhere and was run once. An empty table is nothing to
+		// lose, so it is cleared away rather than blocking every later open.
+		//
+		// With rows in it the two really are ambiguous, and guessing could
+		// overwrite a migrated database with a stale one. That still stops.
+		var n int64
+		if err := s.db.Raw("SELECT count(*) FROM entities").Scan(&n).Error; err != nil {
+			return fmt.Errorf("inspect entities: %w", err)
+		}
+		if n > 0 {
+			return fmt.Errorf(
+				"migrate: both entities (%d rows) and items exist, refusing to guess which is current", n)
+		}
+		slog.Warn("removing an empty entities table left by a scour built before the rename; " +
+			"an old binary is still installed, and running it again will recreate it")
+		if err := s.db.Exec("DROP TABLE entities").Error; err != nil {
+			return fmt.Errorf("drop the leftover entities table: %w", err)
+		}
+		return nil
 	}
 
 	slog.Info("migrating: entity is now item")
@@ -535,4 +561,140 @@ func (s *Store) splitJobsFromItems() error {
 		slog.Info("migrated: targets now belong to a job", "jobs", jobs)
 		return nil
 	})
+}
+
+// moveFrontierToJobs makes the queue belong to a job rather than to an item.
+//
+// The frontier is what a crawl has left to do, so it is the job's: two jobs
+// over one item have different work waiting, and pausing one must not stop the
+// other. What they fetch stays the item's, which is why the urls, visits and
+// cookies tables are untouched here. A page already in the corpus is a page the
+// next job over that site does not pay for again.
+//
+// Run after [splitJobsFromItems], which made the jobs this maps onto. An item
+// holding queued work but no targets got no job there and gets one here, rather
+// than having its frontier dropped by a join that does not match: work already
+// discovered is expensive, and losing it silently is the worst way to lose it.
+func (s *Store) moveFrontierToJobs() error {
+	tables, err := s.tableNames(s.db)
+	if err != nil {
+		return err
+	}
+	if !tables["queue_items"] {
+		return nil
+	}
+	var hasItemID int64
+	if err := s.db.Raw(
+		"SELECT count(*) FROM pragma_table_info('queue_items') WHERE name = 'item_id'").Scan(&hasItemID).Error; err != nil {
+		return fmt.Errorf("inspect queue_items: %w", err)
+	}
+	if hasItemID == 0 {
+		return nil
+	}
+
+	var before int64
+	if err := s.db.Raw("SELECT count(*) FROM queue_items").Scan(&before).Error; err != nil {
+		return fmt.Errorf("count the frontier: %w", err)
+	}
+	slog.Info("migrating: the frontier now belongs to a job", "queued", before)
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if !tx.Migrator().HasTable(&Job{}) {
+			if err := tx.Migrator().CreateTable(&Job{}); err != nil {
+				return fmt.Errorf("create jobs: %w", err)
+			}
+		}
+
+		// An item with work waiting and no job to hold it. Reachable when its
+		// targets were removed after a crawl had already run.
+		if err := tx.Exec(`INSERT INTO jobs (name, item_id, state, created_at, updated_at)
+			SELECT i.name, i.id,
+			       CASE WHEN i.paused THEN 'paused' ELSE 'ready' END,
+			       CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+			FROM items i
+			WHERE EXISTS (SELECT 1 FROM queue_items q WHERE q.item_id = i.id)
+			  AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.item_id = i.id)`).Error; err != nil {
+			return fmt.Errorf("create a job per queued item: %w", err)
+		}
+
+		// Rebuilt rather than renamed, for the reason targets were: the column
+		// would still carry a foreign key to items while holding job ids.
+		const old = "queue_items__pre_job"
+		if err := tx.Exec(fmt.Sprintf("ALTER TABLE queue_items RENAME TO %q", old)).Error; err != nil {
+			return fmt.Errorf("set the frontier aside: %w", err)
+		}
+		// sqlite keeps a table's indexes when it is renamed, under their
+		// original names, and two of those names are ones the model asks for
+		// again. Dropped by owning table rather than by name pattern, so this
+		// takes the old table's indexes and cannot touch the new one's.
+		if err := dropIndexesOn(tx, old); err != nil {
+			return err
+		}
+		if err := tx.Migrator().CreateTable(&QueueItem{}); err != nil {
+			return fmt.Errorf("rebuild queue_items: %w", err)
+		}
+
+		var cols []string
+		if err := tx.Raw("SELECT name FROM pragma_table_info(?)", old).Scan(&cols).Error; err != nil {
+			return fmt.Errorf("read the old frontier columns: %w", err)
+		}
+		into, from := []string{}, []string{}
+		for _, c := range cols {
+			if c == "id" || c == "item_id" {
+				continue
+			}
+			into = append(into, fmt.Sprintf("%q", c))
+			from = append(from, fmt.Sprintf("o.%q", c))
+		}
+		sep := ""
+		if len(into) > 0 {
+			sep = ", "
+		}
+		if err := tx.Exec(fmt.Sprintf(
+			`INSERT INTO queue_items (job_id%s%s) SELECT j.id%s%s FROM %q o
+			 JOIN jobs j ON j.item_id = o.item_id`,
+			sep, strings.Join(into, ", "), sep, strings.Join(from, ", "), old)).Error; err != nil {
+			return fmt.Errorf("copy the frontier: %w", err)
+		}
+
+		// Every queued URL must arrive. A job was made above for every item
+		// that had any, so a short count means the join lost rows, and a crawl
+		// would silently resume with less to do than it had.
+		var after int64
+		if err := tx.Raw("SELECT count(*) FROM queue_items").Scan(&after).Error; err != nil {
+			return fmt.Errorf("count the moved frontier: %w", err)
+		}
+		if after != before {
+			return fmt.Errorf("frontier lost rows: %d queued before, %d after", before, after)
+		}
+
+		if err := tx.Exec(fmt.Sprintf("DROP TABLE %q", old)).Error; err != nil {
+			return fmt.Errorf("drop %s: %w", old, err)
+		}
+
+		slog.Info("migrated: the frontier now belongs to a job", "queued", after)
+		return nil
+	})
+}
+
+// dropIndexesOn removes every index belonging to one table.
+//
+// By owning table rather than by name, because a name pattern wide enough to
+// catch the old indexes is wide enough to catch the new ones: idx_queue% is
+// both the frontier's old item index and its new job index. Auto-created
+// indexes on a renamed table keep their names, so an unqualified rebuild
+// collides with them.
+func dropIndexesOn(tx *gorm.DB, table string) error {
+	var names []string
+	if err := tx.Raw(
+		"SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_%'",
+		table).Scan(&names).Error; err != nil {
+		return fmt.Errorf("list indexes on %s: %w", table, err)
+	}
+	for _, n := range names {
+		if err := tx.Exec("DROP INDEX IF EXISTS " + n).Error; err != nil {
+			return fmt.Errorf("drop index %s: %w", n, err)
+		}
+	}
+	return nil
 }

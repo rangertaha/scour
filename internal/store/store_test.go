@@ -31,6 +31,18 @@ func open(t *testing.T) *Store {
 	return s
 }
 
+// jobFor is the job a frontier test needs. The queue belongs to a job, and
+// these tests are about the queue rather than about which job holds it, so they
+// use the item's implicit one: the same job a bare "scour crawl <item>" gets.
+func jobFor(t *testing.T, s *Store, item *Item) *Job {
+	t.Helper()
+	job, err := s.JobForItem(context.Background(), item)
+	if err != nil {
+		t.Fatalf("job for %s: %v", item.Name, err)
+	}
+	return job
+}
+
 func TestOpenCreatesMissingDirectories(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "nested", "deeper", "scour.db")
 	s, err := Open(dsn)
@@ -528,19 +540,19 @@ func TestALeasedItemComesBackIfNothingReportsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := URLHash(e.ID, "http://example.com/a")
-	if err := s.PushQueue(ctx, e.ID, 1, hash, []byte("req")); err != nil {
+	if err := s.PushQueue(ctx, jobFor(t, s, e).ID, 1, hash, []byte("req")); err != nil {
 		t.Fatal(err)
 	}
 
 	// Taken, and now in flight: not handed out twice and not counted as
 	// waiting.
-	if _, err := s.LeaseQueue(ctx, e.ID, time.Minute); err != nil {
+	if _, err := s.LeaseQueue(ctx, jobFor(t, s, e).ID, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.LeaseQueue(ctx, e.ID, time.Minute); !errors.Is(err, ErrQueueEmpty) {
+	if _, err := s.LeaseQueue(ctx, jobFor(t, s, e).ID, time.Minute); !errors.Is(err, ErrQueueEmpty) {
 		t.Errorf("a leased item was handed out twice: %v", err)
 	}
-	if n, err := s.QueueSize(ctx, e.ID); err != nil || n != 0 {
+	if n, err := s.QueueSize(ctx, jobFor(t, s, e).ID); err != nil || n != 0 {
 		t.Errorf("QueueSize = %d (err %v), want 0 while in flight", n, err)
 	}
 
@@ -550,10 +562,10 @@ func TestALeasedItemComesBackIfNothingReportsIt(t *testing.T) {
 		Update("leased_until", past).Error; err != nil {
 		t.Fatal(err)
 	}
-	if n, err := s.QueueSize(ctx, e.ID); err != nil || n != 1 {
+	if n, err := s.QueueSize(ctx, jobFor(t, s, e).ID); err != nil || n != 1 {
 		t.Errorf("QueueSize = %d (err %v), want 1 once the lease expired", n, err)
 	}
-	got, err := s.LeaseQueue(ctx, e.ID, time.Minute)
+	got, err := s.LeaseQueue(ctx, jobFor(t, s, e).ID, time.Minute)
 	if err != nil {
 		t.Fatalf("an expired lease should be handed out again: %v", err)
 	}
@@ -575,14 +587,14 @@ func TestRecordingAFetchReleasesTheFrontierItem(t *testing.T) {
 	for _, status := range []URLStatus{URLFetched, URLFailed} {
 		raw := "http://example.com/" + string(status)
 		hash := URLHash(e.ID, raw)
-		if err := s.PushQueue(ctx, e.ID, 1, hash, []byte("req")); err != nil {
+		if err := s.PushQueue(ctx, jobFor(t, s, e).ID, 1, hash, []byte("req")); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.LeaseQueue(ctx, e.ID, time.Minute); err != nil {
+		if _, err := s.LeaseQueue(ctx, jobFor(t, s, e).ID, time.Minute); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.RecordFetch(ctx, Fetched{
-			ItemID: e.ID, URL: raw, Status: status, StatusCode: 200,
+			ItemID: e.ID, JobID: jobFor(t, s, e).ID, URL: raw, Status: status, StatusCode: 200,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -608,7 +620,7 @@ func TestAnItemNothingReportsIsEventuallyAbandoned(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := URLHash(e.ID, "http://example.com/declined")
-	if err := s.PushQueue(ctx, e.ID, 1, hash, []byte("req")); err != nil {
+	if err := s.PushQueue(ctx, jobFor(t, s, e).ID, 1, hash, []byte("req")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -621,12 +633,12 @@ func TestAnItemNothingReportsIsEventuallyAbandoned(t *testing.T) {
 	}
 
 	for i := range MaxAttempts {
-		if _, err := s.LeaseQueue(ctx, e.ID, time.Minute); err != nil {
+		if _, err := s.LeaseQueue(ctx, jobFor(t, s, e).ID, time.Minute); err != nil {
 			t.Fatalf("hand-out %d: %v", i+1, err)
 		}
 		expire()
 	}
-	if _, err := s.LeaseQueue(ctx, e.ID, time.Minute); !errors.Is(err, ErrQueueEmpty) {
+	if _, err := s.LeaseQueue(ctx, jobFor(t, s, e).ID, time.Minute); !errors.Is(err, ErrQueueEmpty) {
 		t.Errorf("err = %v, want the item abandoned after %d attempts", err, MaxAttempts)
 	}
 }
@@ -649,7 +661,7 @@ func TestLeasingSkipsHostsAskedTooRecently(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.PushQueue(ctx, e.ID, 1, URLHash(e.ID, raw), data); err != nil {
+		if err := s.PushQueue(ctx, jobFor(t, s, e).ID, 1, URLHash(e.ID, raw), data); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -669,19 +681,19 @@ func TestLeasingSkipsHostsAskedTooRecently(t *testing.T) {
 
 	// With that host cooling, only the other one is handed out, however many
 	// of its URLs are waiting and whatever their score.
-	data, err := s.LeaseQueueSkipping(ctx, e.ID, time.Minute, []string{"busy.example"})
+	data, err := s.LeaseQueueSkipping(ctx, jobFor(t, s, e).ID, time.Minute, []string{"busy.example"})
 	if err != nil {
 		t.Fatalf("nothing handed out while another host was ready: %v", err)
 	}
 	if got := hostOfRequest(data); got != "other.example" {
 		t.Fatalf("handed out %q while it was cooling", got)
 	}
-	if _, err := s.LeaseQueueSkipping(ctx, e.ID, time.Minute, []string{"busy.example"}); !errors.Is(err, ErrQueueEmpty) {
+	if _, err := s.LeaseQueueSkipping(ctx, jobFor(t, s, e).ID, time.Minute, []string{"busy.example"}); !errors.Is(err, ErrQueueEmpty) {
 		t.Errorf("err = %v, want nothing left once the ready host is exhausted", err)
 	}
 
 	// Once it has cooled, its work is available again.
-	got, err := s.LeaseQueueSkipping(ctx, e.ID, time.Minute, nil)
+	got, err := s.LeaseQueueSkipping(ctx, jobFor(t, s, e).ID, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("a cooled host was not handed out: %v", err)
 	}
@@ -692,6 +704,10 @@ func TestLeasingSkipsHostsAskedTooRecently(t *testing.T) {
 
 // Pausing keeps everything: the frontier, its order and its leases. It stops
 // work being handed out, and nothing else.
+//
+// Pausing the item is the broad stroke: it stops every job of that item. A job
+// carries its own state for stopping one crawl while another keeps running,
+// which TestPausingAJobLeavesItsSiblingRunning covers.
 func TestPausingHidesAnItemFromTheDispatcher(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
@@ -704,14 +720,20 @@ func TestPausingHidesAnItemFromTheDispatcher(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	jobs := map[string]*Job{}
 	for _, e := range []*Item{busy, quiet} {
+		job, err := s.JobForItem(ctx, e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		jobs[e.Name] = job
 		raw := "http://example.com/" + e.Name
-		if err := s.PushQueue(ctx, e.ID, 1, URLHash(e.ID, raw), []byte(`{"URL":"`+raw+`"}`)); err != nil {
+		if err := s.PushQueue(ctx, job.ID, 1, URLHash(e.ID, raw), []byte(`{"URL":"`+raw+`"}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	ids, err := s.QueuedItems(ctx)
+	ids, err := s.QueuedJobs(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -722,17 +744,17 @@ func TestPausingHidesAnItemFromTheDispatcher(t *testing.T) {
 	if err := s.SetPaused(ctx, quiet.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	ids, err = s.QueuedItems(ctx)
+	ids, err = s.QueuedJobs(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ids) != 1 || ids[0] != busy.ID {
-		t.Errorf("got %v, want only the item that is not paused", ids)
+	if len(ids) != 1 || ids[0] != jobs["busy"].ID {
+		t.Errorf("got %v, want only the job of the item that is not paused", ids)
 	}
 
 	// The frontier is untouched, so resuming carries on rather than restarting.
 	var queued int64
-	if err := s.DB().Model(&QueueItem{}).Where("item_id = ?", quiet.ID).
+	if err := s.DB().Model(&QueueItem{}).Where("job_id = ?", jobs["quiet"].ID).
 		Count(&queued).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -743,7 +765,7 @@ func TestPausingHidesAnItemFromTheDispatcher(t *testing.T) {
 	if err := s.SetPaused(ctx, quiet.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	if ids, err = s.QueuedItems(ctx); err != nil || len(ids) != 2 {
+	if ids, err = s.QueuedJobs(ctx); err != nil || len(ids) != 2 {
 		t.Errorf("resuming did not bring the item back: %v %v", ids, err)
 	}
 }
@@ -918,12 +940,12 @@ func TestLeaseOrderFollowsTheSchedulingPolicy(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := s.PushQueue(ctx, e.ID, q.score, URLHash(e.ID, q.url), data); err != nil {
+				if err := s.PushQueue(ctx, jobFor(t, s, e).ID, q.score, URLHash(e.ID, q.url), data); err != nil {
 					t.Fatal(err)
 				}
 			}
 
-			data, err := s.LeaseQueueOrdered(ctx, e.ID, time.Minute, nil, tc.order)
+			data, err := s.LeaseQueueOrdered(ctx, jobFor(t, s, e).ID, time.Minute, nil, tc.order)
 			if err != nil {
 				t.Fatalf("lease: %v", err)
 			}
@@ -958,11 +980,11 @@ func TestLeaseQueueStillMeansBestFirst(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.PushQueue(ctx, e.ID, q.score, URLHash(e.ID, q.url), data); err != nil {
+		if err := s.PushQueue(ctx, jobFor(t, s, e).ID, q.score, URLHash(e.ID, q.url), data); err != nil {
 			t.Fatal(err)
 		}
 	}
-	data, err := s.LeaseQueue(ctx, e.ID, time.Minute)
+	data, err := s.LeaseQueue(ctx, jobFor(t, s, e).ID, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -984,4 +1006,69 @@ func jobOf(t *testing.T, s *Store, item *Item) *Job {
 		t.Fatal(err)
 	}
 	return job
+}
+
+// The point of the frontier belonging to a job: two crawls of one item keep
+// separate work, and pausing one leaves the other running.
+//
+// Before this, both drew from a single queue keyed on the item, so a second job
+// over different sites drained the first one's work and pausing either stopped
+// both.
+func TestTwoJobsOfOneItemHaveSeparateFrontiers(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+	daily, err := s.CreateJob(ctx, "daily", item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := s.CreateJob(ctx, "archive", item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i, j := range []*Job{daily, daily, archive} {
+		raw := fmt.Sprintf("http://example.com/%d", i)
+		if err := s.PushQueue(ctx, j.ID, 1, URLHash(item.ID, raw), []byte(raw)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if n, err := s.QueueSize(ctx, daily.ID); err != nil || n != 2 {
+		t.Errorf("daily has %d queued, want 2 (%v)", n, err)
+	}
+	if n, err := s.QueueSize(ctx, archive.ID); err != nil || n != 1 {
+		t.Errorf("archive has %d queued, want 1 (%v)", n, err)
+	}
+
+	// Leasing from one must not take the other's work.
+	if _, err := s.LeaseQueue(ctx, daily.ID, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.QueueSize(ctx, archive.ID); err != nil || n != 1 {
+		t.Errorf("leasing from daily left archive with %d, want its own 1 untouched (%v)", n, err)
+	}
+
+	// Pausing one job stops it being dispatched; the other keeps running.
+	if err := s.SetJobState(ctx, daily.ID, JobPaused); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := s.QueuedJobs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != archive.ID {
+		t.Errorf("dispatcher offered %v, want only the job that is not paused", ids)
+	}
+
+	// And the paused job keeps its frontier, so resuming carries on.
+	if err := s.SetJobState(ctx, daily.ID, JobReady); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.QueueSize(ctx, daily.ID); err != nil || n != 1 {
+		t.Errorf("daily resumed with %d queued, want the 1 it had left (%v)", n, err)
+	}
 }

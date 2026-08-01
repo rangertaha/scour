@@ -35,6 +35,7 @@ func (s *BusSink) Fetched(ctx context.Context, f store.Fetched) error {
 		bus.Fetched{
 			Item:        s.item,
 			ItemID:      f.ItemID,
+			JobID:       f.JobID,
 			URL:         f.URL,
 			ParentURL:   f.ParentURL,
 			Depth:       f.Depth,

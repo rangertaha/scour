@@ -22,6 +22,7 @@ import (
 type Fetched struct {
 	Item        string        `json:"item"`
 	ItemID      uint          `json:"item_id"`
+	JobID       uint          `json:"job_id,omitempty"`
 	URL         string        `json:"url"`
 	ParentURL   string        `json:"parent_url,omitempty"`
 	Depth       int           `json:"depth"`
@@ -36,8 +37,11 @@ type Fetched struct {
 
 // Discovered is published when a link is found and scored.
 type Discovered struct {
-	Item      string  `json:"item"`
-	ItemID    uint    `json:"item_id"`
+	Item   string `json:"item"`
+	ItemID uint   `json:"item_id"`
+	// JobID is whose frontier a discovered link joins. Omitted by a publisher
+	// that has no job, in which case the consumer resolves the item's.
+	JobID     uint    `json:"job_id,omitempty"`
 	URL       string  `json:"url"`
 	ParentURL string  `json:"parent_url,omitempty"`
 	Depth     int     `json:"depth"`

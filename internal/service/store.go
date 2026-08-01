@@ -143,8 +143,14 @@ func (s *StoreService) handleFetched(ctx context.Context, data []byte) error {
 		return nil //nolint:nilerr // deliberate: poison message, see comment
 	}
 
-	err := s.store.RecordFetch(ctx, store.Fetched{
+	jobID, err := s.jobFor(ctx, ev.ItemID, ev.JobID)
+	if err != nil {
+		return fmt.Errorf("resolve job for %s: %w", ev.URL, err)
+	}
+
+	err = s.store.RecordFetch(ctx, store.Fetched{
 		ItemID:      ev.ItemID,
+		JobID:       jobID,
 		URL:         ev.URL,
 		ParentURL:   ev.ParentURL,
 		Depth:       ev.Depth,
@@ -198,9 +204,36 @@ func (s *StoreService) handleDiscovered(ctx context.Context, data []byte) error 
 		// retrying the message for.
 		return nil //nolint:nilerr // deliberate: unusable link, see comment
 	}
-	err = s.store.PushQueue(ctx, ev.ItemID, ev.Score, store.URLHash(ev.ItemID, ev.URL), data)
+	jobID, err := s.jobFor(ctx, ev.ItemID, ev.JobID)
+	if err != nil {
+		return fmt.Errorf("resolve job for %s: %w", ev.URL, err)
+	}
+	err = s.store.PushQueue(ctx, jobID, ev.Score, store.URLHash(ev.ItemID, ev.URL), data)
 	if err != nil {
 		return fmt.Errorf("queue discovered %s: %w", ev.URL, err)
 	}
 	return nil
+}
+
+// jobFor is whose frontier an event belongs to.
+//
+// A crawler handed its work does not know the job: it was given a frontier and
+// a scope, and publishes what it finds against the item. So the id is optional
+// on the wire, and an event that arrives without one is attributed to the
+// item's implicit job, which is the same one a local crawl of that item uses.
+// That keeps a distributed crawl and a local one writing to one queue rather
+// than two that each hold half the work.
+func (s *StoreService) jobFor(ctx context.Context, itemID, jobID uint) (uint, error) {
+	if jobID != 0 {
+		return jobID, nil
+	}
+	item, err := s.store.ItemByID(ctx, itemID)
+	if err != nil {
+		return 0, err
+	}
+	job, err := s.store.JobForItem(ctx, item)
+	if err != nil {
+		return 0, err
+	}
+	return job.ID, nil
 }

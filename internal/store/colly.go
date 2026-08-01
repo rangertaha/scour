@@ -97,12 +97,12 @@ func (s *Store) Cookies(ctx context.Context, itemID uint, host string) (string, 
 // at once: the crawler that found it queues it, and the store queues it again
 // when the discovery is reported. Either way, fetching it twice is not what
 // anyone wanted.
-func (s *Store) PushQueue(ctx context.Context, itemID uint, score float64, hash string, data []byte) error {
+func (s *Store) PushQueue(ctx context.Context, jobID uint, score float64, hash string, data []byte) error {
 	if hash != "" {
 		var n int64
 		err := s.db.WithContext(ctx).
 			Model(&QueueItem{}).
-			Where("item_id = ? AND hash = ?", itemID, hash).
+			Where("job_id = ? AND hash = ?", jobID, hash).
 			Count(&n).Error
 		if err != nil {
 			return fmt.Errorf("check queue for %s: %w", hash, err)
@@ -113,7 +113,7 @@ func (s *Store) PushQueue(ctx context.Context, itemID uint, score float64, hash 
 	}
 
 	item := QueueItem{
-		ItemID: itemID, Score: score, Hash: hash,
+		JobID: jobID, Score: score, Hash: hash,
 		Host: hostOfRequest(data), Data: data,
 	}
 	if err := s.db.WithContext(ctx).Create(&item).Error; err != nil {
@@ -161,8 +161,8 @@ func hostOfRequest(data []byte) string {
 // recorded; if nothing reports back before the lease expires it is handed out
 // again, which is what makes a crawler dying mid-page cost a retry rather than
 // a silently missing page.
-func (s *Store) LeaseQueue(ctx context.Context, itemID uint, lease time.Duration) ([]byte, error) {
-	return s.LeaseQueueSkipping(ctx, itemID, lease, nil)
+func (s *Store) LeaseQueue(ctx context.Context, jobID uint, lease time.Duration) ([]byte, error) {
+	return s.LeaseQueueSkipping(ctx, jobID, lease, nil)
 }
 
 // LeaseQueueSkipping is LeaseQueue, ignoring items for hosts that have been
@@ -173,8 +173,8 @@ func (s *Store) LeaseQueue(ctx context.Context, itemID uint, lease time.Duration
 // the sum, and no crawler can see the others. The dispatcher can: it is the one
 // component handing out every URL, so pacing here bounds what a site actually
 // receives however many crawlers there are.
-func (s *Store) LeaseQueueSkipping(ctx context.Context, itemID uint, lease time.Duration, cooling []string) ([]byte, error) {
-	return s.LeaseQueueOrdered(ctx, itemID, lease, cooling, schedule.ByScore)
+func (s *Store) LeaseQueueSkipping(ctx context.Context, jobID uint, lease time.Duration, cooling []string) ([]byte, error) {
+	return s.LeaseQueueOrdered(ctx, jobID, lease, cooling, schedule.ByScore)
 }
 
 // orderBy turns a scheduling order into the clause that implements it.
@@ -200,7 +200,7 @@ func orderBy(o schedule.Order) string {
 
 // LeaseQueueOrdered is LeaseQueueSkipping with the order chosen by a scheduling
 // policy rather than fixed.
-func (s *Store) LeaseQueueOrdered(ctx context.Context, itemID uint, lease time.Duration, cooling []string, order schedule.Order) ([]byte, error) {
+func (s *Store) LeaseQueueOrdered(ctx context.Context, jobID uint, lease time.Duration, cooling []string, order schedule.Order) ([]byte, error) {
 	if lease <= 0 {
 		lease = DefaultLease
 	}
@@ -211,7 +211,7 @@ func (s *Store) LeaseQueueOrdered(ctx context.Context, itemID uint, lease time.D
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var item QueueItem
 		q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("item_id = ? AND (leased_until IS NULL OR leased_until < ?)", itemID, now)
+			Where("job_id = ? AND (leased_until IS NULL OR leased_until < ?)", jobID, now)
 		if len(cooling) > 0 {
 			// An item with no host recorded predates the column and is never
 			// skipped: it would otherwise be stuck for the life of the queue.
@@ -253,12 +253,12 @@ func (s *Store) LeaseQueueOrdered(ctx context.Context, itemID uint, lease time.D
 }
 
 // ReleaseQueue removes a leased item once its fetch has been reported.
-func (s *Store) ReleaseQueue(ctx context.Context, itemID uint, hash string) error {
+func (s *Store) ReleaseQueue(ctx context.Context, jobID uint, hash string) error {
 	if hash == "" {
 		return nil
 	}
 	err := s.db.WithContext(ctx).
-		Where("item_id = ? AND hash = ?", itemID, hash).
+		Where("job_id = ? AND hash = ?", jobID, hash).
 		Delete(&QueueItem{}).Error
 	if err != nil {
 		return fmt.Errorf("release queue item: %w", err)
@@ -270,11 +270,11 @@ func (s *Store) ReleaseQueue(ctx context.Context, itemID uint, hash string) erro
 // already in flight are not waiting, so they are not counted: colly ends its
 // loop when the queue reports empty, and counting in-flight work would keep it
 // spinning on requests it has already been given.
-func (s *Store) QueueSize(ctx context.Context, itemID uint) (int, error) {
+func (s *Store) QueueSize(ctx context.Context, jobID uint) (int, error) {
 	var n int64
 	err := s.db.WithContext(ctx).
 		Model(&QueueItem{}).
-		Where("item_id = ? AND (leased_until IS NULL OR leased_until < ?)", itemID, time.Now().UTC()).
+		Where("job_id = ? AND (leased_until IS NULL OR leased_until < ?)", jobID, time.Now().UTC()).
 		Count(&n).Error
 	if err != nil {
 		return 0, fmt.Errorf("queue size: %w", err)
@@ -282,35 +282,46 @@ func (s *Store) QueueSize(ctx context.Context, itemID uint) (int, error) {
 	return int(n), nil
 }
 
-// ClearCrawlState drops the visited set, the queue and the cookies for an
-// item, which is what makes a re-crawl start over rather than resume.
+// ClearCrawlState drops the visited set, the queue and the cookies for an item,
+// which is what makes a re-crawl start over rather than resume.
+//
+// It takes an item because the visited set and the cookie jar are the item's:
+// two jobs over one site should not refetch each other's pages, and a session
+// is owed to the site. The queue is each job's, so it is cleared for all of
+// them.
 func (s *Store) ClearCrawlState(ctx context.Context, itemID uint) error {
 	db := s.db.WithContext(ctx)
-	for _, model := range []any{&Visit{}, &QueueItem{}, &Cookie{}} {
+	for _, model := range []any{&Visit{}, &Cookie{}} {
 		if err := db.Where("item_id = ?", itemID).Delete(model).Error; err != nil {
 			return fmt.Errorf("clear %T: %w", model, err)
 		}
 	}
+	err := db.Where("job_id IN (SELECT id FROM jobs WHERE item_id = ?)", itemID).
+		Delete(&QueueItem{}).Error
+	if err != nil {
+		return fmt.Errorf("clear queue: %w", err)
+	}
 	return nil
 }
 
-// QueuedItems lists the items with work waiting in the frontier, so a
-// dispatcher can find what to hand out without being told which items are
-// being crawled.
+// QueuedJobs lists the jobs with work waiting, so a dispatcher can find what to
+// hand out without being told which crawls are running.
 //
-// A paused item is not among them, which is the whole of what pausing does to
-// a dispatcher: it keeps its frontier, its order and its leases, and simply
-// stops being asked about.
-func (s *Store) QueuedItems(ctx context.Context) ([]uint, error) {
+// A paused one is not among them, which is the whole of what pausing does to a
+// dispatcher: the job keeps its frontier, its order and its leases, and simply
+// stops being asked about. Both pauses count, the job's own state and the
+// item's flag, because either is a statement that this work should wait.
+func (s *Store) QueuedJobs(ctx context.Context) ([]uint, error) {
 	var ids []uint
 	err := s.db.WithContext(ctx).
 		Model(&QueueItem{}).
-		Distinct("queue_items.item_id").
-		Joins("JOIN items ON items.id = queue_items.item_id AND NOT items.paused").
+		Distinct("queue_items.job_id").
+		Joins("JOIN jobs ON jobs.id = queue_items.job_id AND jobs.state != ?", JobPaused).
+		Joins("JOIN items ON items.id = jobs.item_id AND NOT items.paused").
 		Where("leased_until IS NULL OR leased_until < ?", time.Now().UTC()).
-		Pluck("queue_items.item_id", &ids).Error
+		Pluck("queue_items.job_id", &ids).Error
 	if err != nil {
-		return nil, fmt.Errorf("items with queued work: %w", err)
+		return nil, fmt.Errorf("jobs with queued work: %w", err)
 	}
 	return ids, nil
 }
@@ -321,10 +332,10 @@ func (s *Store) QueuedItems(ctx context.Context) ([]uint, error) {
 // on purpose should not make the frontier wait for it: everything it had taken
 // and not fetched is available again immediately, which is what makes a crawl
 // stopped on its budget resumable rather than resumable in ten minutes.
-func (s *Store) ReturnLeases(ctx context.Context, itemID uint) error {
+func (s *Store) ReturnLeases(ctx context.Context, jobID uint) error {
 	err := s.db.WithContext(ctx).
 		Model(&QueueItem{}).
-		Where("item_id = ? AND leased_until IS NOT NULL", itemID).
+		Where("job_id = ? AND leased_until IS NOT NULL", jobID).
 		Update("leased_until", nil).Error
 	if err != nil {
 		return fmt.Errorf("return leases: %w", err)
@@ -340,12 +351,12 @@ func (s *Store) ReturnLeases(ctx context.Context, itemID uint) error {
 // thousands of URLs it has not got to. Left unbounded the frontier drains into
 // a crawler's memory, which is the failure lazy seeding was introduced to cure,
 // one layer further along.
-func (s *Store) InFlight(ctx context.Context, itemID uint) (int, error) {
+func (s *Store) InFlight(ctx context.Context, jobID uint) (int, error) {
 	var n int64
 	err := s.db.WithContext(ctx).
 		Model(&QueueItem{}).
-		Where("item_id = ? AND leased_until IS NOT NULL AND leased_until >= ?",
-			itemID, time.Now().UTC()).
+		Where("job_id = ? AND leased_until IS NOT NULL AND leased_until >= ?",
+			jobID, time.Now().UTC()).
 		Count(&n).Error
 	if err != nil {
 		return 0, fmt.Errorf("in-flight count: %w", err)

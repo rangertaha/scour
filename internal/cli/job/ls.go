@@ -93,9 +93,18 @@ func List(a *cli.App) *ucli.Command {
 				if err != nil {
 					return err
 				}
-				// The frontier and the records are still counted per item, so
-				// two jobs of one item report the same figures until the
-				// frontier moves onto the job.
+				// Queued is this job's own frontier: what it has left to
+				// hand out, which is the number that differs between two jobs
+				// of one item.
+				queued, err := s.QueueSize(c, j.ID)
+				if err != nil {
+					return err
+				}
+				// Visited and records are the item's, and deliberately so.
+				// Both jobs of an item draw on one corpus, and a page already
+				// fetched is not fetched again for the second job, so counting
+				// them per job would report work that was never repeated as
+				// though it had not happened.
 				st, err := s.Status(c, j.ItemID)
 				if err != nil {
 					return err
@@ -106,7 +115,7 @@ func List(a *cli.App) *ucli.Command {
 				}
 				rows = append(rows, row{
 					Name: j.Name, Item: it.Name, Targets: len(j.Targets),
-					Queued: st.Queued, Visited: st.Visited, Records: st.Matches,
+					Queued: int64(queued), Visited: st.Visited, Records: st.Matches,
 					State: string(j.State), LastRun: last,
 				})
 			}
