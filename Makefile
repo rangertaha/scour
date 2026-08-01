@@ -18,7 +18,7 @@ help: ## Show this help
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: all
-all: fmt-check vet lint test build ## Run every check, then build
+all: fmt-check vet lint test build docs-check ## Run every check, then build
 
 .PHONY: build
 build: ## Build the binary into bin/
@@ -29,6 +29,10 @@ build: ## Build the binary into bin/
 build-cloud: ## Build with the S3 and GCS page stores included
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build -trimpath -tags cloud -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BIN) $(CMD)
+
+.PHONY: docs-check
+docs-check: build ## Check the docs still describe the code
+	python3 scripts/check-docs.py
 
 .PHONY: install
 install: ## Install the binary into GOBIN

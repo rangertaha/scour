@@ -47,6 +47,13 @@ jobs:
 
       - run: go test -race -count=1 ./...
 
+      # The documentation makes claims about this binary: command names, config
+      # keys, registry entries. Nothing else fails when those drift.
+      - name: Check the docs describe the code
+        run: |
+          make build
+          python3 scripts/check-docs.py
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
