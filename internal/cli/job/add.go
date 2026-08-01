@@ -15,6 +15,7 @@ import (
 )
 
 type addFlags struct {
+	file       string
 	item       string
 	domains    []string
 	urls       []string
@@ -46,8 +47,15 @@ func Add(a *cli.App) *ucli.Command {
 		UsageText: "  scour job add uk -i vehicle\n" +
 			"  scour job add uk -d example.co.uk --subdomains\n" +
 			"  scour job add uk -u https://www.example.co.uk/cars/\n" +
-			"  scour job add uk -t html -t pdf",
+			"  scour job add uk -t html -t pdf\n" +
+			"  scour job add -f uk.toml",
 		Flags: []ucli.Flag{
+			&ucli.StringFlag{
+				Name:        "file",
+				Aliases:     []string{"f"},
+				Usage:       "apply a job config `file` instead of flags",
+				Destination: &f.file,
+			},
 			&ucli.StringFlag{
 				Name:        "item",
 				Aliases:     []string{"i"},
@@ -79,6 +87,14 @@ func Add(a *cli.App) *ucli.Command {
 			},
 		},
 		Action: func(c context.Context, cmd *ucli.Command) error {
+			if f.file != "" {
+				// The file carries the name, so a positional one would be a
+				// second answer to a question already answered.
+				if cmd.Args().Len() > 0 {
+					return fmt.Errorf("with -f the name comes from the file, so %q is a second one", cmd.Args().First())
+				}
+				return runAddFile(c, a, f.file)
+			}
 			args, err := cli.Need(cmd, 1, "one job name")
 			if err != nil {
 				return err
@@ -155,6 +171,78 @@ func runAdd(c context.Context, a *cli.App, name string, f addFlags) error {
 		// someone their command worked when it left them where they were.
 		a.Printf("\nsay where to look, then run it:\n")
 		a.Printf("  scour job add %s -d <domain>\n  scour run %s\n", name, name)
+	}
+	return nil
+}
+
+// runAddFile applies a job config.
+//
+// It is the same act as runAdd and goes through the same store calls, so a job
+// built from a file and one built from flags cannot end up different. What the
+// file adds is the bounds, which flags put under `job set`: a config describes
+// a whole job, and splitting it across two commands to apply one would make the
+// round trip lossy.
+func runAddFile(c context.Context, a *cli.App, path string) error {
+	f, err := parseFile(path)
+	if err != nil {
+		return err
+	}
+	if problems := f.validate(); len(problems) > 0 {
+		for _, p := range problems {
+			a.Errorf("  %s\n", p)
+		}
+		return fmt.Errorf("%s: %d %s", path, len(problems), plural("problem", len(problems)))
+	}
+
+	s, err := a.Store()
+	if err != nil {
+		return err
+	}
+
+	item, err := s.Item(c, f.Item)
+	if err != nil {
+		return err
+	}
+	job, err := s.CreateJob(c, f.Name, item.ID)
+	if err != nil {
+		return err
+	}
+	a.Printf("%s: job for %s\n", job.Name, item.Name)
+
+	maxTime, err := f.maxTime()
+	if err != nil {
+		return err
+	}
+	policy := store.JobPolicy{Depth: &f.Depth, MaxPages: &f.MaxPages, MaxTime: &maxTime}
+	if err := s.SetJobPolicy(c, job.ID, policy); err != nil {
+		return err
+	}
+
+	for _, d := range f.Domains {
+		host, err := cli.NormaliseDomain(d.Value)
+		if err != nil {
+			return err
+		}
+		if err := s.AddTarget(c, job.ID, store.TargetDomain, host, d.Subdomains, d.Depth); err != nil {
+			return err
+		}
+		a.Printf("%s: domain %s\n", job.Name, host)
+	}
+	for _, u := range f.URLs {
+		normalised, err := cli.NormaliseURL(u.Value)
+		if err != nil {
+			return err
+		}
+		if err := s.AddTarget(c, job.ID, store.TargetURL, normalised, false, u.Depth); err != nil {
+			return err
+		}
+		a.Printf("%s: url %s\n", job.Name, normalised)
+	}
+	for _, t := range f.Types {
+		if err := s.AddContentType(c, job.ID, strings.ToLower(t)); err != nil {
+			return err
+		}
+		a.Printf("%s: type %s\n", job.Name, t)
 	}
 	return nil
 }

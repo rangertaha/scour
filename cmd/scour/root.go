@@ -113,6 +113,7 @@ func newRootCmd() *ucli.Command {
 			// one canonical command, so there is one place the behaviour lives.
 			job.Run(a),
 			job.Status(a),
+			record.SearchShortcut(a),
 			node.TopShortcut(a),
 
 			// These act on the install rather than on any one noun, so they

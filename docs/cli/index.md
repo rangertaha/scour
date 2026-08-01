@@ -106,6 +106,10 @@ for `rm` and `ls` under every noun.
 | `scour job rm <name> [-d/-u]` | Remove a job, or one of its targets |
 | `scour job ls` | A line per job: item, targets, progress, state |
 | `scour job show <name>` | Everything about one job |
+| `scour job show <name> --toml` | The same, as a config file |
+| `scour job config` | Print a commented sample config |
+| `scour job validate -f <file>` | Check a config without applying it |
+| `scour job add -f <file>` | Apply one |
 | `scour job start <name>` | Start a search. `crawl` is an alias |
 | `scour job pause <name>` | Pause it, keeping the frontier |
 | `scour job stop <name> --force` | Stop it, discarding the frontier |
@@ -164,9 +168,11 @@ no rows.
 
 > This surface is the [command surface design]({{ '/cli/design.html' | relative_url }})
 > as far as it has been built. The five nouns, the one rule and the shortcuts are
-> in place; several verbs from the design are not yet, among them `record
-> search`, `record write`, `job runs`, `job log`, `job config`, `job validate`
-> and `node ls`. The tables above are what the binary answers to today.
+> in place, and so is every verb under `item`, `job`, `record` and `model` that
+> the design names. What is left is the cluster half: `node ls`, `node show` and
+> `node leave`, which are not commands so much as a subsystem, since nothing
+> registers a node or reports its health yet. The tables above are what the
+> binary answers to today.
 >
 > One collision the design called out has now resolved in both directions at
 > once: `scour run` starts a job, while `run` under `node` is an alias for

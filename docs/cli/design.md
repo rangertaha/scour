@@ -669,11 +669,12 @@ because "no records above 0.9 yet" is an answer, not a failure.
 > Built: every verb under `item`, `job`, `model` and `node` that this document
 > names, plus `record ls` and `record mark`.
 >
-> Not built: `record search`, `record show`, `record write`, `record rm`,
-> `job runs`, `job log`, `job config`, `job validate`, `node ls`, `node show`
-> and `node leave`. The `scour search` shortcut is not there either, and the
-> word is currently unused: `record ls` answers to `stream`, not to `search`,
-> which leaves the name free for the query this document gives it.
+> Not built: `node ls`, `node show` and `node leave`. Those three are a
+> subsystem rather than three commands: nothing registers a node, heartbeats
+> one, or reports its queue depth and throughput, so there is no source of
+> truth for a listing to read. Everything else this document names is built,
+> including the `scour search` shortcut, which took the word `record ls` had
+> left free.
 >
 > [What the binary answers to today]({{ '/cli/' | relative_url }}).
 

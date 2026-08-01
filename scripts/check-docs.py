@@ -43,7 +43,7 @@ DOCS = "docs"
 DESIGN = ("cli/design.md", "server/api.md", "plan/index.md")
 
 NOUNS = {"item", "job", "record", "model", "node"}
-SHORTCUTS = {"run", "crawl", "start", "status", "top", "server", "mcp", "version", "help"}
+SHORTCUTS = {"run", "crawl", "start", "status", "search", "top", "server", "mcp", "version", "help"}
 
 failures: list[str] = []
 notes: list[str] = []
