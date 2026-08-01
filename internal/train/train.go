@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -73,15 +74,15 @@ func New(cfg config.Config, s *store.Store, c cache.Store) *Trainer {
 
 // Result reports what a training run did.
 type Result struct {
-	Pages     int
-	Bytes     int64
-	Skipped   int
-	Rules     int
-	Records   int
-	Corrected int
-	ModelPath string
-	Score     *ScoreResult
-	Chain     *ChainResult
+	Pages      int
+	Bytes      int64
+	Skipped    int
+	Rules      int
+	Records    int
+	Corrected  int
+	ModelPaths []string
+	Score      *ScoreResult
+	Chain      *ChainResult
 	// Matcher is set only when a matcher other than the heuristic ran.
 	Matcher *MatcherResult
 	// Classify is set only when a page classifier ran.
@@ -138,49 +139,101 @@ func (t *Trainer) Run(ctx context.Context, item *store.Item, opts Options) (*Res
 		womOpts = append(womOpts, wom.WithMatcher(m))
 	}
 
-	loaded, err := parse.Load(ctx, t.store, t.cache, item.ID, parse.Options{
-		Limit: opts.Limit,
-		Types: opts.Types,
-		WOM:   womOpts,
-	})
+	// Induction runs once per format the corpus holds, because a rule set
+	// describes a shape and two formats are not the same shape. Induced
+	// together, the stronger signal took the whole item and the other format
+	// got nothing: a feed's repeating <item> elements beat the article pages it
+	// links to, and its XPaths then matched no article. That is the ordinary
+	// shape of a news crawl rather than a corner case.
+	formats, total, err := t.corpusFormats(ctx, item.ID, opts.Types)
 	if err != nil {
 		return nil, err
 	}
-
-	model, err := loaded.Graph.Model(props...)
-	if err != nil {
-		return nil, fmt.Errorf("induce model for %s: %w", item.Name, err)
+	if len(formats) == 0 {
+		return nil, parse.ErrNoPages
 	}
 
-	// A taught pattern is authoritative over the synthesized one. Induction
-	// generalizes from what it saw, which is the right default and the wrong
-	// answer whenever someone has looked at the site and knows better.
-	applyTaughtPatterns(model.Items, props)
+	var (
+		rules     []store.Rule
+		paths     []string
+		extracted []store.Extracted
+		matches   = map[string]int{}
+		pages     int
+		read      int64
+		corrected int
+	)
 
-	if err := t.saveFieldChain(ctx, model); err != nil {
-		return nil, err
+	for _, format := range formats {
+		only, err := content.New([]string{format}, nil)
+		if err != nil {
+			return nil, fmt.Errorf("select format %s: %w", format, err)
+		}
+		loaded, err := parse.Load(ctx, t.store, t.cache, item.ID, parse.Options{
+			Limit: opts.Limit,
+			Types: only,
+			WOM:   womOpts,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if loaded.Pages == 0 {
+			continue
+		}
+		pages += loaded.Pages
+		read += loaded.Bytes
+
+		model, err := loaded.Graph.Model(props...)
+		if err != nil {
+			return nil, fmt.Errorf("induce %s model for %s: %w", format, item.Name, err)
+		}
+
+		// A taught pattern is authoritative over the synthesized one. Induction
+		// generalizes from what it saw, which is the right default and the
+		// wrong answer whenever someone has looked at the site and knows
+		// better.
+		applyTaughtPatterns(model.Items, props)
+
+		// Field order is a property of the schema rather than of a format, and
+		// the chain accumulates across runs anyway, so each format refines the
+		// same prior in turn.
+		if err := t.saveFieldChain(ctx, model); err != nil {
+			return nil, err
+		}
+
+		// Corrections are authoritative in wom, so labelled records feed
+		// straight back into the chain. Without labels there is nothing to
+		// correct and the prior stands.
+		n, err := t.applyLabels(ctx, item, model, loaded.Graph)
+		if err != nil {
+			return nil, err
+		}
+		corrected += n
+
+		path, err := t.saveModel(item, format, model)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, path)
+
+		rules = append(rules, flatten(model.Items, format)...)
+
+		found, counts := t.extract(model, loaded)
+		extracted = append(extracted, found...)
+		for url, n := range counts {
+			matches[url] += n
+		}
 	}
 
-	// Corrections are authoritative in wom, so labelled records feed straight
-	// back into the chain. Without labels there is nothing to correct and the
-	// prior stands.
-	corrected, err := t.applyLabels(ctx, item, model, loaded.Graph)
-	if err != nil {
-		return nil, err
-	}
-
-	path, err := t.saveModel(item, model)
-	if err != nil {
-		return nil, err
-	}
-
-	rules := flatten(model.Items)
+	// Both are written once, after every format, because each replaces the
+	// item's whole set: a per-format write would delete the format before it.
 	if err := t.store.ReplaceRules(ctx, item.ID, rules); err != nil {
 		return nil, err
 	}
-
-	records, err := t.extract(ctx, item, model, loaded)
+	records, err := t.store.SaveRecords(ctx, item.ID, extracted)
 	if err != nil {
+		return nil, err
+	}
+	if err := t.store.SetURLMatches(ctx, item.ID, matches); err != nil {
 		return nil, err
 	}
 
@@ -221,16 +274,16 @@ func (t *Trainer) Run(ctx context.Context, item *store.Item, opts Options) (*Res
 	}
 
 	result := &Result{
-		Pages:     loaded.Pages,
-		Bytes:     loaded.Bytes,
-		Skipped:   loaded.Skipped,
-		Rules:     len(rules),
-		Records:   records,
-		Corrected: corrected,
-		ModelPath: path,
-		Score:     scoring,
-		Chain:     chain,
-		Elapsed:   time.Since(start),
+		Pages:      pages,
+		Bytes:      read,
+		Skipped:    total - pages,
+		Rules:      len(rules),
+		Records:    records,
+		Corrected:  corrected,
+		ModelPaths: paths,
+		Score:      scoring,
+		Chain:      chain,
+		Elapsed:    time.Since(start),
 	}
 	if matcherStats != nil {
 		result.Matcher = matcherStats()
@@ -261,23 +314,71 @@ func (t *Trainer) applyLabels(ctx context.Context, item *store.Item, model *wom.
 	return int(total), nil
 }
 
-func (t *Trainer) saveModel(item *store.Item, model *wom.Model) (string, error) {
+func (t *Trainer) saveModel(item *store.Item, format string, model *wom.Model) (string, error) {
 	dir := t.cfg.ModelsDir()
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", fmt.Errorf("create models directory: %w", err)
 	}
-	path := t.cfg.ExtractModelPath(item.Name)
+	path := t.cfg.ExtractModelPath(item.Name, format)
 	if err := model.Save(path); err != nil {
 		return "", fmt.Errorf("save model: %w", err)
 	}
 	return path, nil
 }
 
-// extract applies the model and stores what it finds.
-func (t *Trainer) extract(ctx context.Context, item *store.Item, model *wom.Model, loaded *parse.Result) (int, error) {
+// allowsFormat reports whether a restriction admits a shorthand, by asking it
+// about the MIME types that shorthand stands for. A Set answers about MIME
+// types and paths; a corpus is grouped by shorthand.
+func allowsFormat(types *content.Set, format string) bool {
+	for _, m := range content.Shorthands[format] {
+		if types.AllowsMIME(m) {
+			return true
+		}
+	}
+	return false
+}
+
+// corpusFormats lists the extractable formats an item's fetched pages hold, in
+// a stable order, along with how many fetched pages there are in total.
+//
+// The total is what makes the skipped count still mean what it did: loading one
+// format at a time makes every other format look skipped, so it is counted once
+// here rather than summed over the passes.
+func (t *Trainer) corpusFormats(ctx context.Context, itemID uint, types *content.Set) ([]string, int, error) {
+	rows, err := t.store.FetchedURLs(ctx, itemID)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	seen := map[string]bool{}
+	var out []string
+	for _, row := range rows {
+		f := row.ContentType
+		if f == "" || seen[f] || !content.Extractable[f] {
+			continue
+		}
+		if types != nil && !allowsFormat(types, f) {
+			continue
+		}
+		seen[f] = true
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out, len(rows), nil
+}
+
+// extract applies one format's model and returns what it found, along with how
+// many records each URL yielded.
+//
+// It does not store anything. [store.Store.SaveRecords] replaces an item's
+// whole set, deleting every record not in the batch handed to it, so saving
+// once per format would leave only the last format's records behind. The
+// batches are collected across formats and written once, which is the same
+// reason the rules are.
+func (t *Trainer) extract(model *wom.Model, loaded *parse.Result) ([]store.Extracted, map[string]int) {
 	found := model.Extract(loaded.Graph)
 	if len(found) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 
 	formats := formatByURL(loaded.URLs)
@@ -300,15 +401,7 @@ func (t *Trainer) extract(ctx context.Context, item *store.Item, model *wom.Mode
 			counts[url]++
 		}
 	}
-
-	saved, err := t.store.SaveRecords(ctx, item.ID, records)
-	if err != nil {
-		return 0, err
-	}
-	if err := t.store.SetURLMatches(ctx, item.ID, counts); err != nil {
-		return 0, err
-	}
-	return saved, nil
+	return records, counts
 }
 
 // resolveProps picks one row per property name.
@@ -429,12 +522,13 @@ func schemaOf(item *store.Item) []wom.Prop {
 // flatten turns wom's nested items into rule rows. A child's ParentID holds
 // its parent's index in the returned slice, which the store resolves to a real
 // id as it writes them.
-func flatten(items []wom.Item) []store.Rule {
+func flatten(items []wom.Item, format string) []store.Rule {
 	var out []store.Rule
 	var walk func(item wom.Item, parent *uint)
 	walk = func(item wom.Item, parent *uint) {
 		rule := store.Rule{
 			ParentID:    parent,
+			Format:      format,
 			Prop:        item.Name,
 			XPath:       item.XPath,
 			Selector:    item.Selector,

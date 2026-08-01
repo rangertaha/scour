@@ -135,32 +135,26 @@ func TestExtractingRecordsFromNewsArticles(t *testing.T) {
 		}
 	}
 
-	// Every record above came out of the feed. See
-	// TestArticlePagesYieldRecordsOfTheirOwn for why the article pages did not
-	// contribute any, which is a gap in induction rather than in the crawl.
-	if !strings.Contains(records, "feed") {
-		t.Errorf("expected the feed's own records:\n%s", records)
+	// Both shapes contribute. The titles above could be satisfied by the feed
+	// alone, and were until induction learned to model more than one format.
+	for _, format := range []string{"feed", "html"} {
+		if !strings.Contains(records, format) {
+			t.Errorf("nothing was extracted from the %s pages:\n%s", format, records)
+		}
 	}
 }
 
 // The whole reason to follow a feed to its articles is that the article page
-// carries what the feed's summary leaves out: the full body, the section, the
-// modified date. Today it carries none of it, because the crawl reaches the
-// pages and induction cannot model them.
+// carries what the feed's summary leaves out.
 //
-// store.Rule has no format column. Rules are induced per item, so one corpus
-// gets one rule set, and a corpus holding both a feed and the HTML it links to
-// gets rules for whichever shape induction found first. Here that is the feed:
-// three <item> elements repeating inside one document is a stronger signal than
-// three separate pages sharing a template. The resulting XPaths match nothing
-// in an article page, so three fetched articles yield zero records.
-//
-// This is the ordinary shape of a news crawl, not a corner case, so it is
-// recorded rather than worked around. Fixing it means induction producing a
-// rule set per format, and rules carrying the format they were induced from.
+// This did not work while rules were induced per item rather than per format.
+// One corpus got one rule set, and a corpus holding both a feed and the HTML it
+// links to got rules for whichever shape induction found first: three <item>
+// elements repeating inside one document beats three pages sharing a template,
+// so the feed won and its XPaths matched nothing in an article. Three fetched
+// articles yielded zero records, which is the ordinary shape of a news crawl
+// failing rather than a corner case.
 func TestArticlePagesYieldRecordsOfTheirOwn(t *testing.T) {
-	t.Skip("induction produces one rule set per item, so a feed and its articles cannot both be modelled")
-
 	srv := newsroom(t)
 	dir := newsDir(t, srv)
 
@@ -170,8 +164,14 @@ func TestArticlePagesYieldRecordsOfTheirOwn(t *testing.T) {
 	}
 
 	fromPages := runOK(t, dir, "record", "ls", "article", "-t", "html")
+	t.Logf("records from the article pages:\n%s", fromPages)
 	if strings.Contains(fromPages, "no records") {
 		t.Errorf("the three article pages produced no records of their own:\n%s", fromPages)
+	}
+	for _, a := range stories {
+		if !strings.Contains(fromPages, a.author) {
+			t.Errorf("no article-page record carries the byline %q:\n%s", a.author, fromPages)
+		}
 	}
 }
 

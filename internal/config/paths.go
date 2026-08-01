@@ -105,14 +105,25 @@ func (c Config) ScoreModelPath(item string) string {
 	return filepath.Join(c.ModelsDir(), item+".score.json")
 }
 
-// ExtractModelPath is where an item's extraction model lives. It decides
-// what to pull out of a page once crawled.
+// ExtractModelPath is where an item's extraction model for one format lives.
+// It decides what to pull out of a page of that format once crawled.
 //
-// The two are separate files because they are separate models with different
-// lifetimes: scoring is retrained from crawl outcomes, extraction is induced
-// from page structure, and either can be discarded without the other.
-func (c Config) ExtractModelPath(item string) string {
-	return filepath.Join(c.ModelsDir(), item+".extract.json")
+// Extraction is separate from scoring because they are separate models with
+// different lifetimes: scoring is retrained from crawl outcomes, extraction is
+// induced from page structure, and either can be discarded without the other.
+//
+// It is per format because a model describes a shape. One file per item meant
+// a corpus holding a feed and the HTML it links to got a model for whichever
+// shape induction found first, and nothing at all for the other.
+func (c Config) ExtractModelPath(item, format string) string {
+	return filepath.Join(c.ModelsDir(), item+"."+format+".extract.json")
+}
+
+// ExtractModelGlob matches every format's extraction model for an item, for
+// the caller that has to remove them all without knowing which formats a crawl
+// happened to meet.
+func (c Config) ExtractModelGlob(item string) string {
+	return filepath.Join(c.ModelsDir(), item+".*.extract.json")
 }
 
 // PagesDir is where fetched page bodies are cached.

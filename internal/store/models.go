@@ -220,9 +220,18 @@ type Response struct {
 // produces. ParentID links a field rule to the container rule it is addressed
 // relative to.
 type Rule struct {
-	ID          uint  `gorm:"primaryKey"`
-	ItemID      uint  `gorm:"index;not null"`
-	ParentID    *uint `gorm:"index"`
+	ID       uint  `gorm:"primaryKey"`
+	ItemID   uint  `gorm:"index;not null"`
+	ParentID *uint `gorm:"index"`
+	// Format is the content type this rule was induced from.
+	//
+	// A rule set describes a shape, and a feed and the HTML it links to are not
+	// the same shape. Induced together the stronger signal takes the whole
+	// item: three <item> elements repeating inside one feed beats three article
+	// pages sharing a template, and the winning XPaths then match nothing on an
+	// article. Since a news crawl is exactly that corpus, the format a rule was
+	// learned from is part of what the rule is.
+	Format      string `gorm:"index"`
 	Prop        string
 	XPath       string
 	Selector    string

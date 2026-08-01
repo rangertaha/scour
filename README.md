@@ -621,7 +621,7 @@ Working data lives outside the config directory, so it can be cleared without
 losing your setup:
 
 * `~/.local/share/scour/scour.db`: the single store for items, jobs, properties, targets, the frontier, rules, matches and labels
-* `~/.local/share/scour/models/<name>.score.json` and `<name>.extract.json`: the URL scoring model and the extraction model for one item
+* `~/.local/share/scour/models/<name>.score.json` and `<name>.<format>.extract.json`: the URL scoring model, and one extraction model per format the crawl met
 * `~/.cache/scour/pages/<domain>/`: fetched page bodies, so a re-crawl doesn't re-download
 * `~/.local/share/scour/exports/<name>/<domain>/<date>.csv`: extracted records, with a `label` column holding `valid`, `invalid` or `unlabelled`
 
@@ -681,7 +681,7 @@ the filesystem hierarchy standard rather than the per-user paths above:
 | --- | --- |
 | `/etc/scour/config.toml` | crawl defaults, listen address, and per-host overrides |
 | `/var/lib/scour/scour.db` | the single store for items, jobs, properties, targets, the frontier, rules, matches and labels |
-| `/var/lib/scour/models/<name>.score.json` `<name>.extract.json` | the URL scoring model and the extraction model for one item |
+| `/var/lib/scour/models/<name>.score.json` `<name>.<format>.extract.json` | the URL scoring model, and one extraction model per format the crawl met |
 | `/var/cache/scour/pages/<domain>/` | fetched page bodies, so a re-crawl doesn't re-download |
 | `/var/lib/scour/exports/<name>/<domain>/<date>.csv` | extracted records, with a `label` column holding `valid`, `invalid` or `unlabelled` |
 

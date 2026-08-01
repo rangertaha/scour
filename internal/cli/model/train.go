@@ -146,7 +146,9 @@ func runTrain(c context.Context, a *cli.App, name string, f trainFlags) error {
 		}
 	}
 
-	fmt.Fprintf(out, "\nmodel written to %s\n", result.ModelPath)
+	for _, p := range result.ModelPaths {
+		fmt.Fprintf(out, "\nmodel written to %s\n", p)
+	}
 	if sc := result.Score; sc != nil {
 		fmt.Fprintf(out, "scorer written to %s\n", sc.Path)
 	}

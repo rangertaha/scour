@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 
 	ucli "github.com/urfave/cli/v3"
 
@@ -55,10 +56,14 @@ func Remove(a *cli.App) *ucli.Command {
 			// The files on disk are the model; the rows are what points at
 			// them. Leaving the files would let a later run load a model the
 			// database no longer knows about.
-			for _, path := range []string{
-				a.Cfg.ExtractModelPath(item.Name),
-				a.Cfg.ScoreModelPath(item.Name),
-			} {
+			//
+			// Extraction is one file per format, and which formats a crawl met
+			// is not knowable from here, so they are matched rather than named.
+			extracts, err := filepath.Glob(a.Cfg.ExtractModelGlob(item.Name))
+			if err != nil {
+				return err
+			}
+			for _, path := range append(extracts, a.Cfg.ScoreModelPath(item.Name)) {
 				if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 					return err
 				}
