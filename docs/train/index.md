@@ -16,7 +16,7 @@ extraction is cheap and happens per page.</p>
 ## Running it
 
 ```
-scour train vehicle
+scour model train vehicle
 
 pages       412 cached
 examples    138 positive / 274 negative  (bootstrapped from property examples)
@@ -73,7 +73,7 @@ at once.
 ## Reading the rules back
 
 ```
-scour rules vehicle
+scour model rules vehicle
 
 ID  PID   HIT  PROP   XPATH                       SELECTOR          REGEX        URL
 --  ---  ----  -----  --------------------------  ----------------  -----------  --------------------------
@@ -90,14 +90,14 @@ rule fires, and the first row having no `PROP` is the container itself.
 ## What a correction changes
 
 ```
-scour mark vehicle 1088 --invalid
-scour mark vehicle 1042 1043 --valid
-scour train vehicle
+scour record mark vehicle 1088 --invalid
+scour record mark vehicle 1042 1043 --valid
+scour model train vehicle
 ```
 
 A record marked wrong is held out of the next training run, so both the scoring
 model and the extraction rules stop making that mistake. One marked right is
-what tells `scour train` to fit the field-order chain at all.
+what tells `scour model train` to fit the field-order chain at all.
 
 A verdict is a *mark*, not a label, because a label here is a tag: the words a
 page might name a property with, which is what `scour item tag` edits. The two

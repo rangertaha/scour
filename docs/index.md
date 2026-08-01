@@ -81,9 +81,9 @@ learns from the last run.
 ```
 scour item add vehicle --alias car -d example.com
 scour item add vehicle -p make -e Ford -p model -e 'F-Series'
-scour start vehicle --depth 3
-scour train vehicle
-scour stream vehicle
+scour run vehicle --depth 3
+scour model train vehicle
+scour record ls vehicle
 ```
 
 `scour item templates` lists the schemas that ship with it, so a common shape

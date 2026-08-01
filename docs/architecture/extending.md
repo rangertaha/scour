@@ -28,7 +28,7 @@ of extension appeared. One generic registry serves them all.
 | [classify]({{ '/classify/' | relative_url }}) | `Classifier` | `llm` | `[model] classifier` |
 | [nodeclass]({{ '/classify/' | relative_url }}#nodeclass) | `Classifier` | `recency`*, `topic`* | not yet wired |
 | [cache]({{ '/cache/' | relative_url }}) | `Store` | `local`, `s3`†, `gcs`† | `[cache] driver` |
-| [export]({{ '/export/' | relative_url }}) | `Exporter` | `csv`, `json`, `webhook` | `scour stream --write` |
+| [export]({{ '/export/' | relative_url }}) | `Exporter` | `csv`, `json`, `webhook` | `scour record ls --write` |
 | [schedule]({{ '/schedule/' | relative_url }}) | `Policy` | `best`, `breadth`, `depth`, `random`, `warmup` | `[crawl] scheduler` |
 | [refresh]({{ '/schedule/' | relative_url }}#refresh) | `Refresh` | `cron`* | `[crawl] refresh` |
 | ai | `Provider` | `anthropic`, `ollama` | `[[ai]] provider` |

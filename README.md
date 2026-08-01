@@ -182,9 +182,9 @@ scour item add vehicle -d 'example.com' --subdomains
 scour item add vehicle -u 'http://www.example.com/cars/'
 scour item add vehicle -u 'http://www.example.co.uk/others/'
 
-scour import vehicle --urls urls.txt
-scour import vehicle --domains domains.txt
-scour import vehicle --props props.csv
+scour job import vehicle --urls urls.txt
+scour job import vehicle --domains domains.txt
+scour job import vehicle --props props.csv
 ```
 
 Describe the properties that item should have, with an example value for each:
@@ -266,7 +266,7 @@ scores links from the aliases and property examples alone; every later crawl
 uses the model you trained from the run before:
 
 ```
-scour start vehicle --depth 10
+scour run vehicle --depth 10
 
 PROBABILITY  MATCHES  SPEED   LATENCY  RATE  200  300  400  500  URL
 -----------  -------  ------  -------  ----  ---  ---  ---  ---  ---------------------------------------
@@ -285,8 +285,8 @@ scour follows HTML only by default. Widen or narrow that with `--type`, which
 takes a MIME type, a wildcard, or one of the shorthands below:
 
 ```
-scour start vehicle --depth 10 --type html --type pdf
-scour start vehicle --depth 10 --type 'text/*' --exclude-type 'text/css'
+scour run vehicle --depth 10 --type html --type pdf
+scour run vehicle --depth 10 --type 'text/*' --exclude-type 'text/css'
 ```
 
 | Shorthand | Expands to |
@@ -332,7 +332,7 @@ by fetching the page again in a real browser and carrying on with the rendered
 DOM:
 
 ```
-scour start vehicle --browser auto
+scour run vehicle --browser auto
 ```
 
 | `--browser` | What happens |
@@ -371,7 +371,7 @@ text contains them is a positive, one that was crawled and matched nothing is a
 negative. Accuracy is measured on a held-out fifth of those pages:
 
 ```
-scour train vehicle
+scour model train vehicle
 
 pages       412 cached
 examples    138 positive / 274 negative  (bootstrapped from property examples)
@@ -386,7 +386,7 @@ children pull one property out of that record. `HIT` is the share of matching
 pages where the rule fires:
 
 ```
-scour rules vehicle
+scour model rules vehicle
 
 ID  PID   HIT  PROP   XPATH                       SELECTOR          REGEX        URL
 --  ---  ----  -----  --------------------------  ----------------  -----------  --------------------------
@@ -403,7 +403,7 @@ the same 0 to 1 scale as everything else, and IDs are stable record IDs, so they
 stay valid across queries and reruns:
 
 ```
-scour stream vehicle --confidence 0.5 --limit 20
+scour record ls vehicle --confidence 0.5 --limit 20
 
   ID  CONF  FORMAT  MAKE       MODEL      YEAR  TYPE
 ----  ----  ------  ---------  ---------  ----  ----------------
@@ -419,9 +419,9 @@ Narrow a search to the formats a record was extracted from with the same
 is dragging your results down, without re-crawling:
 
 ```
-scour stream vehicle --type pdf
-scour stream vehicle --type html --confidence 0.9
-scour stream vehicle --exclude-type pdf --limit 50
+scour record ls vehicle --type pdf
+scour record ls vehicle --type html --confidence 0.9
+scour record ls vehicle --exclude-type pdf --limit 50
 ```
 
 `--format` is accepted as an alias for `--type` here, since a `TYPE` column may
@@ -430,14 +430,14 @@ already belong to one of your own properties, as it does above.
 Record 1088 is a false positive: scour read prose off the page as if it were a
 spec table. A record marked wrong is held out of the next training run, so both
 the scoring model and the extraction rules stop making that mistake, and one
-marked right is what tells `scour train` to fit the field-order chain at all.
+marked right is what tells `scour model train` to fit the field-order chain at all.
 
 ```
-scour mark vehicle 1088 --invalid
-scour mark vehicle 1042 1043 --valid
-scour mark vehicle 1088 --clear        # a verdict given in error
+scour record mark vehicle 1088 --invalid
+scour record mark vehicle 1042 1043 --valid
+scour record mark vehicle 1088 --clear        # a verdict given in error
 
-scour train vehicle
+scour model train vehicle
 ```
 
 A verdict is a *mark*, not a label, because a label here is a tag: the words a
@@ -501,37 +501,37 @@ output, and `--limit <n>` to cap the rows returned.
 | `scour item tag <name> -p <prop> -a <word>` | Add a word (repeatable) |
 | `scour item tag <name> -p <prop> -d <word>` | Remove a word (repeatable) |
 | `scour item tag <name> -p <prop> -u <word>` | Replace the whole set (repeatable) |
-| `scour import <name> --urls <file>` | Load URLs from a file, one per line |
-| `scour import <name> --domains <file>` | Load domains from a file, one per line |
-| `scour import <name> --props <file>` | Load properties and examples from a CSV |
-| `scour start <name> --depth <n>` | Crawl, and rank discovered URLs by probability |
-| `scour start <name> --type <type>` | Limit this crawl to a content type |
-| `scour start <name> --exclude-type <type>` | Skip a content type in this crawl |
-| `scour start <name> --max-pages <n>` | Stop after this many pages, keeping the frontier |
-| `scour start <name> --max-time <d>` | Stop after this long, keeping the frontier |
-| `scour train <name>` | Train the model and extraction rules on the cached pages |
-| `scour rules <name>` | List the extraction rules learned for an item |
-| `scour mark <name> <id>... --valid\|--invalid\|--clear` | Mark extracted records right or wrong |
-| `scour stream <name> --marked <verdict>` | Only records carrying a verdict |
-| `scour stream <name> --confidence <p>` | Search extracted records at or above a confidence |
-| `scour stream <name> --type <type>` | Search only records extracted from a content type |
-| `scour stream <name> --exclude-type <type>` | Search everything except a content type |
-| `scour stream <name> --follow` | Keep printing records as they are extracted |
-| `scour stream <name> --write csv --to <dir>` | Write records out as CSV, JSON, or to a webhook |
+| `scour job import <name> --urls <file>` | Load URLs from a file, one per line |
+| `scour job import <name> --domains <file>` | Load domains from a file, one per line |
+| `scour job import <name> --props <file>` | Load properties and examples from a CSV |
+| `scour run <name> --depth <n>` | Crawl, and rank discovered URLs by probability |
+| `scour run <name> --type <type>` | Limit this crawl to a content type |
+| `scour run <name> --exclude-type <type>` | Skip a content type in this crawl |
+| `scour run <name> --max-pages <n>` | Stop after this many pages, keeping the frontier |
+| `scour run <name> --max-time <d>` | Stop after this long, keeping the frontier |
+| `scour model train <name>` | Train the model and extraction rules on the cached pages |
+| `scour model rules <name>` | List the extraction rules learned for an item |
+| `scour record mark <name> <id>... --valid\|--invalid\|--clear` | Mark extracted records right or wrong |
+| `scour record ls <name> --verdict <verdict>` | Only records carrying a verdict |
+| `scour record ls <name> --confidence <p>` | Search extracted records at or above a confidence |
+| `scour record ls <name> --type <type>` | Search only records extracted from a content type |
+| `scour record ls <name> --exclude-type <type>` | Search everything except a content type |
+| `scour record ls <name> --follow` | Keep printing records as they are extracted |
+| `scour record ls <name> --write csv --to <dir>` | Write records out as CSV, JSON, or to a webhook |
 | `scour status` | A line per item: what it has, how far it got, whether it is trained |
 | `scour status <name>` | Everything known about one item |
 | `scour top` | Monitor engine activity, live |
-| `scour pause <name>` | Pause a search, keeping its frontier |
-| `scour stop <name> --force` | Stop a search, discarding its frontier |
+| `scour job pause <name>` | Pause a search, keeping its frontier |
+| `scour job stop <name> --force` | Stop a search, discarding its frontier |
 | `scour item ls` | A line per item: what it has, how far it got, whether it is trained |
 | `scour item ls <name>` | Everything known about one item |
-| `scour export <name>` | Write an item's domains and urls back out to files |
+| `scour job export <name>` | Write an item's domains and urls back out to files |
 | `scour item rm <name> [-d/-u/-p/--rule]` | Remove an item, or one of its targets, properties or rules |
 | `scour item rm <name> -p <prop> --regex\|--label\|--example` | Clear one detail, keeping the property |
 | `scour item templates` | List the built-in schemas `--template` accepts |
 | `scour mcp` | Run as an MCP server over stdio |
 | `scour server --listen <addr>` | Run as a service, serving the HTTP API and MCP |
-| `scour join --role <role>` | Join a cluster for distributed workload |
+| `scour node join --role <role>` | Join a cluster for distributed workload |
 
 `--depth` has no short form, because `-d` already means domain. On `scour item
 tag`, `-d` means `--delete` and a domain is given with `--on`.
@@ -550,23 +550,23 @@ hours of it.
 ### Getting the records out
 
 The records are the product, so they belong wherever the rest of your pipeline
-reads. `scour stream` prints them, follows them as they are extracted, or writes
+reads. `scour record ls` prints them, follows them as they are extracted, or writes
 them out:
 
 ```
-scour stream vehicle
-scour stream vehicle --follow
-scour --json stream vehicle --follow | jq .
+scour record ls vehicle
+scour record ls vehicle --follow
+scour --json record ls vehicle --follow | jq .
 ```
 
 Written out, records are grouped by the domain they came from, one file per
 site, so an export is diffable and a site that changed is a changed file:
 
 ```
-scour stream vehicle --write csv
-scour stream vehicle --write json --to ./out
-scour stream vehicle --write csv --confidence 0.8
-scour stream vehicle --write webhook --to https://example.com/ingest
+scour record ls vehicle --write csv
+scour record ls vehicle --write json --to ./out
+scour record ls vehicle --write csv --confidence 0.8
+scour record ls vehicle --write webhook --to https://example.com/ingest
 ```
 
 ```
@@ -585,13 +585,13 @@ Re-running on the same day overwrites rather than accumulating. The webhook
 posts in batches and reports what it delivered before any failure, so a retry
 does not double-deliver.
 
-`scour export` is a different job, and the other half of `import`: it writes the
+`scour job export` is a different job, and the other half of `import`: it writes the
 domains and urls an item was built from, so a list assembled over a long crawl
 can be moved between databases or kept under version control.
 
 ```
-scour export vehicle --domains domains.txt --urls urls.txt
-scour import other --domains domains.txt --urls urls.txt
+scour job export vehicle --domains domains.txt --urls urls.txt
+scour job import other --domains domains.txt --urls urls.txt
 ```
 
 A domain that covers its subdomains is written `*.example.com`, which is how
@@ -603,8 +603,8 @@ Both budgets end a crawl the way an exhausted frontier does: everything fetched
 is kept, everything still queued stays queued, and the next run resumes.
 
 ```
-scour start vehicle --max-pages 500
-scour start vehicle --max-time 30m
+scour run vehicle --max-pages 500
+scour run vehicle --max-time 30m
 ```
 
 A crawl that stopped on a budget says so, because that means there is more to
@@ -791,18 +791,18 @@ transport = "webdriver"
 
 `rate` and `concurrency` are per host, not global, so raising `crawl.concurrency`
 widens how many hosts are in flight at once rather than how hard any one of them
-is hit. The `RATE` column in `scour start` output shows the value actually
+is hit. The `RATE` column in `scour run` output shows the value actually
 applied to each URL, which is where a `[[host]]` override becomes visible.
 
 ## Running across machines
 
-A single `scour start` needs nothing installed: the components talk over a
+A single `scour run` needs nothing installed: the components talk over a
 broker, and with no broker configured one runs embedded in the process. The same
 code spread over several machines is the same components pointed at a real one.
 
 ```
-scour join --role store --bus-url nats://broker:4222
-scour join --role crawl --bus-url nats://broker:4222     # as many as you like
+scour node join --role store --bus-url nats://broker:4222
+scour node join --role crawl --bus-url nats://broker:4222     # as many as you like
 ```
 
 The store owns the database and the frontier; crawlers own the network and

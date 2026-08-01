@@ -18,9 +18,9 @@ to install.</p>
 {: #roles }
 
 ```
-scour start vehicle                                       # every role, one process
-scour join --role store --bus-url nats://broker:4222
-scour join --role crawl --bus-url nats://broker:4222      # as many as you like
+scour run vehicle                                       # every role, one process
+scour node join --role store --bus-url nats://broker:4222
+scour node join --role crawl --bus-url nats://broker:4222      # as many as you like
 ```
 
 | Role | Owns |
@@ -38,7 +38,7 @@ machine, which is how the topology stays honest without a cluster to test
 against:
 
 ```
-scour start vehicle --bus
+scour run vehicle --bus
 ```
 
 The components are identical in both topologies, which is a property the

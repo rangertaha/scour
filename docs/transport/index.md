@@ -33,7 +33,7 @@ exactly like any other, and nothing downstream can tell the difference.
 ## The policy
 
 ```
-scour start vehicle --browser auto
+scour run vehicle --browser auto
 ```
 
 | `--browser` | What happens |

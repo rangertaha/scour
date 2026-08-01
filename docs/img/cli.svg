@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 340" role="img"
-     aria-label="Say what you are hunting for, then crawl, train, and mark what came back wrong, and crawl again. Records leave through stream.">
+     aria-label="Say what you are hunting for, then run the crawl, train a model, and mark what came back wrong, and run again. Records leave through record ls.">
   <style>
     .b{fill:#f6f8fa;stroke:#57606a;stroke-width:1.5;rx:6}
     .s{fill:#ddf4ff;stroke:#0969da;stroke-width:1.5;rx:6}
@@ -28,19 +28,19 @@
   <text class="i" x="115" y="180" text-anchor="middle">what you want</text>
 
   <rect class="b" x="250" y="60" width="170" height="60"/>
-  <text class="l" x="335" y="86" text-anchor="middle">start</text>
+  <text class="l" x="335" y="86" text-anchor="middle">run</text>
   <text class="i" x="335" y="104" text-anchor="middle">crawl, ranked</text>
 
   <rect class="b" x="470" y="60" width="170" height="60"/>
-  <text class="l" x="555" y="86" text-anchor="middle">train</text>
+  <text class="l" x="555" y="86" text-anchor="middle">model train</text>
   <text class="i" x="555" y="104" text-anchor="middle">model and rules</text>
 
   <rect class="b" x="470" y="212" width="170" height="60"/>
-  <text class="l" x="555" y="238" text-anchor="middle">mark</text>
+  <text class="l" x="555" y="238" text-anchor="middle">record mark</text>
   <text class="i" x="555" y="256" text-anchor="middle">right, or wrong</text>
 
   <rect class="s" x="690" y="136" width="160" height="60"/>
-  <text class="l" x="770" y="162" text-anchor="middle">stream</text>
+  <text class="l" x="770" y="162" text-anchor="middle">record ls</text>
   <text class="i" x="770" y="180" text-anchor="middle">the records</text>
 
   <path class="f" d="M200,152 C230,146 236,98 246,90"/>

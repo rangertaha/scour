@@ -51,8 +51,8 @@ scour follows HTML only by default. Widen or narrow that with `--type`, which
 takes a MIME type, a wildcard, or one of the shorthands:
 
 ```
-scour start vehicle --depth 10 --type html --type pdf
-scour start vehicle --depth 10 --type 'text/*' --exclude-type 'text/css'
+scour run vehicle --depth 10 --type html --type pdf
+scour run vehicle --depth 10 --type 'text/*' --exclude-type 'text/css'
 ```
 
 | Shorthand | Expands to |
@@ -89,8 +89,8 @@ the item's own setting, which beats `content_types` in `config.toml`.
 ## Budgets
 
 ```
-scour start vehicle --max-pages 500
-scour start vehicle --max-time 30m
+scour run vehicle --max-pages 500
+scour run vehicle --max-time 30m
 ```
 
 Both budgets end a crawl the way an exhausted frontier does: everything fetched
@@ -108,11 +108,11 @@ To throw the frontier away and begin from the seeds in one step, without
 stopping first:
 
 ```
-scour start vehicle --reset
+scour run vehicle --reset
 ```
 
 The cached bodies survive that too, so a reset crawl re-decides what to fetch
-without re-downloading what it already has. `scour start --debug` additionally
+without re-downloading what it already has. `scour run --debug` additionally
 logs colly's own request trace, which is what to reach for when a site behaves
 differently from the way the frontier says it should.
 
@@ -151,7 +151,7 @@ server by choosing badly.
 ## Watching one happen
 
 ```
-scour start vehicle --depth 10
+scour run vehicle --depth 10
 
 PROBABILITY  MATCHES  SPEED   LATENCY  RATE  200  300  400  500  URL
 -----------  -------  ------  -------  ----  ---  ---  ---  ---  --------------------------------

@@ -17,10 +17,10 @@ pipeline reads.</p>
 ## Writing them out
 
 ```
-scour stream vehicle --write csv
-scour stream vehicle --write json --to ./out
-scour stream vehicle --write csv --confidence 0.8
-scour stream vehicle --write webhook --to https://example.com/ingest
+scour record ls vehicle --write csv
+scour record ls vehicle --write json --to ./out
+scour record ls vehicle --write csv --confidence 0.8
+scour record ls vehicle --write webhook --to https://example.com/ingest
 ```
 
 ```
@@ -72,7 +72,7 @@ If the endpoint needs a bearer token, the flag names the environment variable
 holding it rather than the token itself:
 
 ```
-scour stream vehicle --write webhook --to https://example.com/ingest \
+scour record ls vehicle --write webhook --to https://example.com/ingest \
   --token-env INGEST_TOKEN
 ```
 
@@ -80,15 +80,15 @@ That is the same rule the [cache]({{ '/cache/' | relative_url }}) drivers
 follow. scour takes no secrets in its configuration, so the file that says what
 to crawl is never the file that has to be kept unreadable.
 
-## Not to be confused with `scour export`
+## Not to be confused with `scour job export`
 
-`scour export` is a different job, and the other half of `scour import`: it
+`scour job export` is a different job, and the other half of `scour job import`: it
 writes the domains and urls an item was built from, so a target list assembled
 over a long crawl can be moved between databases or kept under version control.
 
 ```
-scour export vehicle --domains domains.txt --urls urls.txt
-scour import other   --domains domains.txt --urls urls.txt
+scour job export vehicle --domains domains.txt --urls urls.txt
+scour job import other   --domains domains.txt --urls urls.txt
 ```
 
 A domain that covers its subdomains is written `*.example.com`, which is how
@@ -104,7 +104,7 @@ func init() {
 }
 ```
 
-Selected by `scour stream --write <name>`. See
+Selected by `scour record ls --write <name>`. See
 [extending it]({{ '/architecture/extending.html' | relative_url }}).
 
 <div class="pager" markdown="1">

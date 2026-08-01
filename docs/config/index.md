@@ -175,7 +175,7 @@ host      = "app.example.com"
 transport = "webdriver"
 ```
 
-The `RATE` column in `scour start` output shows the value actually applied to
+The `RATE` column in `scour run` output shows the value actually applied to
 each URL, which is where an override becomes visible.
 
 ## Every implementation is a name
