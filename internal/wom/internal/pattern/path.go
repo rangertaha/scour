@@ -39,16 +39,20 @@ func Coarse(path string) string {
 // Generalize merges the paths of a group into one pattern, keeping the indices
 // the instances agreed on and dropping the ones that varied.
 func Generalize(paths []string) string {
-	return generalizeWith(paths, indexRe)
+	return generalizeWith(paths, indexRe, stripFirst)
 }
 
 // GeneralizeSelector is Generalize for CSS selectors, where the positional
 // marker is :nth-of-type().
 func GeneralizeSelector(selectors []string) string {
-	return generalizeWith(selectors, nthRe)
+	return generalizeWith(selectors, nthRe, commonDescendantSuffix)
 }
 
-func generalizeWith(paths []string, marker *regexp.Regexp) string {
+// fallback decides what a group generalizes to when its instances do not
+// decompose into the same literals. It is dialect specific, so it is passed in.
+type fallback func(paths []string, marker *regexp.Regexp) string
+
+func generalizeWith(paths []string, marker *regexp.Regexp, onDiffer fallback) string {
 	paths = dedupe(paths)
 	switch len(paths) {
 	case 0:
@@ -65,15 +69,14 @@ func generalizeWith(paths []string, marker *regexp.Regexp) string {
 	}
 
 	// Instances that do not decompose identically cannot be merged
-	// position-by-position; drop every index instead, which is always a valid
-	// generalization of the group.
+	// position-by-position.
 	for i := 1; i < len(paths); i++ {
 		if len(lits[i]) != len(lits[0]) || len(idxs[i]) != len(idxs[0]) {
-			return marker.ReplaceAllString(paths[0], "")
+			return onDiffer(paths, marker)
 		}
 		for j := range lits[i] {
 			if lits[i][j] != lits[0][j] {
-				return marker.ReplaceAllString(paths[0], "")
+				return onDiffer(paths, marker)
 			}
 		}
 	}
@@ -97,6 +100,70 @@ func generalizeWith(paths []string, marker *regexp.Regexp) string {
 	}
 	return b.String()
 }
+
+// stripFirst is the fallback for path dialects: drop every index from the first
+// instance.
+//
+// It is only a generalization when the instances differ by position alone,
+// which for XPath and JSONPath is the ordinary case, because there the varying
+// part is the index and the index is what gets dropped.
+func stripFirst(paths []string, marker *regexp.Regexp) string {
+	return marker.ReplaceAllString(paths[0], "")
+}
+
+// commonDescendantSuffix is the fallback for CSS, where the varying part is a
+// literal rather than an index.
+//
+// A site that wraps each article in an id unique to the page, #asset-<uuid>,
+// gives every instance a different first segment. Keeping the first instance
+// there is not a generalization at all: it is a selector matching exactly the
+// one page it was induced from, while the XPath for the same field stays
+// generic. That is how the two dialects came to disagree on a corpus where the
+// XPath worked across 660 records.
+//
+// What the group does share is its tail, and a CSS selector is already
+// descendant-anchored, so the shared tail selects the same elements without
+// claiming anything about what encloses them. With no shared tail there is
+// nothing to say, and no selector is better than one that fits a single page.
+func commonDescendantSuffix(paths []string, marker *regexp.Regexp) string {
+	segs := make([][]string, len(paths))
+	for i, p := range paths {
+		segs[i] = splitSelector(marker.ReplaceAllString(p, ""))
+	}
+
+	n := 0
+	for {
+		var want string
+		for i, s := range segs {
+			if n >= len(s) {
+				return joinSelector(segs[0][len(segs[0])-n:])
+			}
+			seg := s[len(s)-1-n]
+			if i == 0 {
+				want = seg
+				continue
+			}
+			if seg != want {
+				return joinSelector(segs[0][len(segs[0])-n:])
+			}
+		}
+		n++
+	}
+}
+
+// splitSelector breaks a selector into its combinator-separated steps. Only the
+// child and descendant combinators are produced by the emitter, and both are
+// generalized the same way, so both are treated as one separator.
+func splitSelector(sel string) []string {
+	fields := strings.FieldsFunc(sel, func(r rune) bool { return r == '>' })
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		out = append(out, strings.Fields(f)...)
+	}
+	return out
+}
+
+func joinSelector(segs []string) string { return strings.Join(segs, " > ") }
 
 // Discriminator is a semantic attribute that tells sibling elements apart when
 // their position cannot. Meta tags are the clearest case: every one of them is

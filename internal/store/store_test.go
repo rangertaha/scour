@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -664,16 +665,12 @@ func TestLeasingSkipsHostsAskedTooRecently(t *testing.T) {
 
 	// With that host cooling, only the other one is handed out, however many
 	// of its URLs are waiting and whatever their score.
-	for range 2 {
-		data, err := s.LeaseQueueSkipping(ctx, e.ID, time.Minute, []string{"busy.example"})
-		if err != nil {
-			t.Fatalf("nothing handed out while another host was ready: %v", err)
-		}
-		if got := hostOfRequest(data); got != "other.example" {
-			t.Fatalf("handed out %q while it was cooling", got)
-		}
-		// Only one URL for that host, so the second pass must find nothing.
-		break
+	data, err := s.LeaseQueueSkipping(ctx, e.ID, time.Minute, []string{"busy.example"})
+	if err != nil {
+		t.Fatalf("nothing handed out while another host was ready: %v", err)
+	}
+	if got := hostOfRequest(data); got != "other.example" {
+		t.Fatalf("handed out %q while it was cooling", got)
 	}
 	if _, err := s.LeaseQueueSkipping(ctx, e.ID, time.Minute, []string{"busy.example"}); !errors.Is(err, ErrQueueEmpty) {
 		t.Errorf("err = %v, want nothing left once the ready host is exhausted", err)
@@ -786,5 +783,43 @@ func TestFetchRateComesFromTheDatabase(t *testing.T) {
 	}
 	if old != 0 {
 		t.Errorf("rate over a past window = %v, want 0", old)
+	}
+}
+
+// A property type the engine does not know must be refused where it is given.
+//
+// It used to be stored and only refused when a schema was built out of it, so a
+// typo in --prop-type survived the crawl and surfaced at train time as a
+// complaint about a property nobody had touched since.
+func TestUnknownPropertyTypeIsRefused(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "vehicle")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = s.AddPropertyDetail(ctx, item.ID, PropertyDetail{Name: "make", Type: "strng"})
+	if err == nil {
+		t.Fatal("a misspelled type must be refused")
+	}
+	if !strings.Contains(err.Error(), "string") {
+		t.Errorf("the refusal should name the types that work: %v", err)
+	}
+
+	// Nothing was written.
+	props, err := s.PropertiesFor(ctx, item.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(props) != 0 {
+		t.Errorf("the property was stored despite the bad type: %+v", props)
+	}
+
+	// Every advertised type is accepted, and so is none at all.
+	for _, ty := range append(PropertyTypes(), "") {
+		if err := s.AddPropertyDetail(ctx, item.ID, PropertyDetail{Name: "p" + ty, Type: ty}); err != nil {
+			t.Errorf("type %q was refused: %v", ty, err)
+		}
 	}
 }

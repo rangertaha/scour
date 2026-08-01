@@ -4,6 +4,7 @@ package pattern
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -300,5 +301,40 @@ func TestSynthesizeURIKeepsTrailingSlash(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A selector induced from several pages must match all of them.
+//
+// Taken from a real corpus: a news site wraps each article in
+// #asset-<uuid>, unique per page. The instances then fail to decompose
+// identically, and falling back to the first one keeps that page's own id, so
+// the rule matches exactly the page it was induced from and nothing else. The
+// XPath for the same field is generic and works across 660 records, which is
+// how the two dialects came to disagree.
+func TestGeneralizeSelectorDropsAPerPageID(t *testing.T) {
+	t.Parallel()
+
+	got := GeneralizeSelector([]string{
+		`#asset-59da10e1-2aaf-551b-9193-e922ee64d633 > div > header > meta[itemprop="dateModified"]`,
+		`#asset-7c2b91ff-0e14-4a7d-8a55-1f0b3d9c2e77 > div > header > meta[itemprop="dateModified"]`,
+		`#asset-1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d > div > header > meta[itemprop="dateModified"]`,
+	})
+	if strings.Contains(got, "asset-") {
+		t.Errorf("the selector kept one page's id: %q", got)
+	}
+	want := `div > header > meta[itemprop="dateModified"]`
+	if got != want {
+		t.Errorf("GeneralizeSelector = %q, want %q", got, want)
+	}
+}
+
+// Where the differing part is all there is, there is nothing the group shares
+// and no selector is better than one that matches a single page.
+func TestGeneralizeSelectorGivesUpWhenNothingIsShared(t *testing.T) {
+	t.Parallel()
+
+	if got := GeneralizeSelector([]string{"#one", "#two"}); got != "" {
+		t.Errorf("GeneralizeSelector = %q, want an empty selector", got)
 	}
 }

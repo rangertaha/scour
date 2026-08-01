@@ -91,7 +91,7 @@ func Add(a *cli.App) *ucli.Command {
 			},
 			&ucli.StringFlag{
 				Name:        "prop-type",
-				Usage:       "the property's type: string, number, bool, date, url, email (date covers times)",
+				Usage:       "the property's `type`: " + strings.Join(store.PropertyTypes(), ", ") + " (date covers times)",
 				Destination: &f.propType,
 			},
 			&ucli.StringFlag{

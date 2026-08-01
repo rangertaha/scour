@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/rangertaha/scour/internal/fuzzy"
+	"github.com/rangertaha/scour/internal/wom"
 	"gorm.io/gorm/clause"
 )
 
@@ -214,6 +215,15 @@ func (s *Store) AddPropertyDetail(ctx context.Context, itemID uint, d PropertyDe
 		return errors.New("property name must not be empty")
 	}
 	domain := NormaliseDomain(d.Domain)
+
+	// A type the engine does not know must fail here too. It was accepted and
+	// stored, and only refused when a schema was built out of it, so a typo in
+	// --prop-type survived the crawl and surfaced at train time as a complaint
+	// about a property nobody had touched since.
+	if !wom.Type(d.Type).Valid() {
+		return fmt.Errorf("property %q has unknown type %q, want one of: %s",
+			name, d.Type, strings.Join(PropertyTypes(), ", "))
+	}
 
 	// A pattern that does not compile must fail here rather than mid-crawl,
 	// where it would look like a site that stopped publishing the field.
@@ -672,4 +682,16 @@ func trimAll(in []string) []string {
 		out = append(out, w)
 	}
 	return out
+}
+
+// PropertyTypes are the value types a property may declare, in the order the
+// help lists them.
+//
+// Named here rather than spelled into a flag's usage string, so the thing that
+// checks and the thing that documents cannot drift apart.
+func PropertyTypes() []string {
+	return []string{
+		string(wom.TypeString), string(wom.TypeNumber), string(wom.TypeBool),
+		string(wom.TypeDate), string(wom.TypeURL), string(wom.TypeEmail),
+	}
 }

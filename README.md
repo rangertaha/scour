@@ -79,15 +79,26 @@ English. Nothing was tuned against it.
 algorithm had never seen than on the ones it was built against, which is the
 opposite of what overfitting looks like.
 
-Three faults it exposed, all open:
+What it exposed, and what came of it:
 
-- `published` and `modified` resolve to the same node on 59% of records, so two
-  fields are claiming one value.
-- The CSS dialect pins a per-page id, `#asset-59da10e1-...`, while the XPath for
-  the same field is generic and works across 660 records. The two dialects are
-  meant to agree.
-- 118 of 867 titles are `"Politics"`, `"News"`, `"Community"`: section pages
-  being extracted as articles, which inflates every number above.
+- **The CSS dialect pinned a per-page id.** `#asset-59da10e1-...` led the
+  selector for `published` and `modified`, so the rule matched exactly the page
+  it was induced from, while the XPath for the same field stayed generic and
+  worked across 660 records. *Fixed.* Where a group's instances share no leading
+  segment, the selector generalizes to the tail they do share, which CSS already
+  reads as descendant-anchored. Re-inducing both corpora changes no extraction
+  number and removes the id.
+
+- **`published` and `modified` were thought to be one node.** They are not. The
+  locators are `dateCreated` and `dateModified`, distinct and correct, and 273
+  of the 660 records carrying both hold *different* values, which could not
+  happen if one node fed them. The 387 that agree are articles that were never
+  edited. *Not a fault.*
+
+- **118 of 867 titles are shorter than twenty characters**: `"Page A1"`,
+  `"Ads"`, `"Community"`. Most are distinct rather than one section name
+  repeated, so this is a mix of section pages read as articles and titles that
+  really are that short. *Open*, and the reason `internal/classify` exists.
 
 ### What the corpora exposed
 
