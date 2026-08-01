@@ -30,7 +30,7 @@ of extension appeared. One generic registry serves them all.
 | [cache]({{ '/cache/' | relative_url }}) | `Store` | `local`, `s3`†, `gcs`† | `[cache] driver` |
 | [export]({{ '/export/' | relative_url }}) | `Exporter` | `csv`, `json`, `webhook` | `scour record ls --write` |
 | [schedule]({{ '/schedule/' | relative_url }}) | `Policy` | `best`, `breadth`, `depth`, `random`, `warmup` | `[crawl] scheduler` |
-| [refresh]({{ '/schedule/' | relative_url }}#refresh) | `Refresh` | `cron`* | `[crawl] refresh` |
+| [refresh]({{ '/schedule/' | relative_url }}#refresh) | `Refresh` | `cron`* | not yet selectable |
 | ai | `Provider` | `anthropic`, `ollama` | `[[ai]] provider` |
 
 \* registered, not written yet: they answer `ErrNotImplemented`.

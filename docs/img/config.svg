@@ -53,15 +53,15 @@
 
   <rect class="b" x="470" y="62" width="386" height="112"/>
   <text class="l" x="486" y="84">per user</text>
-  <text class="m" x="486" y="106">~/.config/scour/config.toml · scour.db · models/</text>
-  <text class="m" x="486" y="128">~/.cache/scour/pages/</text>
-  <text class="m" x="486" y="150">~/.local/share/scour/exports/</text>
-  <text class="i" x="486" y="167">working data outside the config directory, so it can be cleared</text>
+  <text class="m" x="486" y="106">~/.config/scour/config.toml   the config file only</text>
+  <text class="m" x="486" y="128">~/.local/share/scour/   scour.db · models/ · exports/</text>
+  <text class="m" x="486" y="150">~/.cache/scour/pages/</text>
+  <text class="i" x="486" y="167">only the config file is in the config directory</text>
 
   <rect class="b" x="470" y="186" width="386" height="116"/>
   <text class="l" x="486" y="208">packaged</text>
   <text class="m" x="486" y="230">/etc/scour/config.toml</text>
-  <text class="m" x="486" y="252">/var/lib/scour/  scour.db · models/ · exports/</text>
+  <text class="m" x="486" y="252">/var/lib/scour/   scour.db · models/ · exports/</text>
   <text class="m" x="486" y="274">/var/cache/scour/pages/</text>
   <text class="i" x="486" y="291">chosen by /etc/scour/config.toml existing, not by a flag</text>
 

@@ -66,15 +66,18 @@ one server by choosing badly. See
 ## Refresh
 {: #refresh }
 
-```toml
-[crawl]
-refresh = "cron"
-```
+`Refresh` answers which already-fetched URLs are due again.
 
-`Refresh` answers which already-fetched URLs are due again. It is registered and
-not yet written: asking for `cron` today resolves to `ErrNoSchedule`, which says
-"this is planned" rather than "unknown", so a name in a config file is not
-mistaken for a typo.
+It is the least built of the extension points, and worth being exact about how
+little: the interface and its registry exist, `cron` is registered against it
+and answers `ErrNoSchedule`, and that is all. **There is no config key that
+selects one**, and nothing outside the registry calls `NewRefresh`. Naming a
+refresh policy is not yet something a configuration can do.
+
+Registering a name that is not written is deliberate even so. It makes the name
+resolve to "this is planned" rather than to "unknown", which reads as a typo,
+and it is the same courtesy the
+[node classifiers]({{ '/classify/' | relative_url }}#nodeclass) get.
 
 The distinction it will carry is the one the [crawl chain]({{ '/score/' | relative_url }})
 already draws. A hub is worth revisiting because its contents change; a detail

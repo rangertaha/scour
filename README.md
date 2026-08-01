@@ -377,7 +377,7 @@ pages       412 cached
 examples    138 positive / 274 negative  (bootstrapped from property examples)
 accuracy    0.91  (held out)
 
-model written to ~/.config/scour/models/vehicle.json
+model written to ~/.local/share/scour/models/vehicle.score.json
 ```
 
 Training also produces the extraction rules. List them to see what scour
@@ -614,13 +614,14 @@ fetch rather than nothing left.
 
 Created in your OS user config directory the first time you run `scour`:
 
-* `~/.config/scour/config.toml`: crawl defaults, including concurrency, rate limits, user agent, allowed content types, scoring algorithm, and directory paths
-* `~/.config/scour/scour.db`: the single store for items, properties, targets, the frontier, rules, matches and labels
-* `~/.config/scour/models/<name>.json`: one scoring model per item, holding the feature weights used to rank URLs
+* `~/.config/scour/config.toml`: crawl defaults, including concurrency, rate limits, user agent, allowed content types, scoring algorithm, and directory paths. This is the only thing in the config directory
+
 
 Working data lives outside the config directory, so it can be cleared without
 losing your setup:
 
+* `~/.local/share/scour/scour.db`: the single store for items, jobs, properties, targets, the frontier, rules, matches and labels
+* `~/.local/share/scour/models/<name>.score.json` and `<name>.extract.json`: the URL scoring model and the extraction model for one item
 * `~/.cache/scour/pages/<domain>/`: fetched page bodies, so a re-crawl doesn't re-download
 * `~/.local/share/scour/exports/<name>/<domain>/<date>.csv`: extracted records, with a `label` column holding `valid`, `invalid` or `unlabelled`
 
@@ -679,8 +680,8 @@ the filesystem hierarchy standard rather than the per-user paths above:
 | Path | Contents |
 | --- | --- |
 | `/etc/scour/config.toml` | crawl defaults, listen address, and per-host overrides |
-| `/var/lib/scour/scour.db` | the single store for items, properties, targets, the frontier, rules, matches and labels |
-| `/var/lib/scour/models/<name>.json` | one scoring model per item, holding the feature weights used to rank URLs |
+| `/var/lib/scour/scour.db` | the single store for items, jobs, properties, targets, the frontier, rules, matches and labels |
+| `/var/lib/scour/models/<name>.score.json` `<name>.extract.json` | the URL scoring model and the extraction model for one item |
 | `/var/cache/scour/pages/<domain>/` | fetched page bodies, so a re-crawl doesn't re-download |
 | `/var/lib/scour/exports/<name>/<domain>/<date>.csv` | extracted records, with a `label` column holding `valid`, `invalid` or `unlabelled` |
 

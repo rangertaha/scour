@@ -22,7 +22,7 @@ pages       412 cached
 examples    138 positive / 274 negative  (bootstrapped from property examples)
 accuracy    0.91  (held out)
 
-model written to ~/.config/scour/models/vehicle.json
+model written to ~/.local/share/scour/models/vehicle.score.json
 ```
 
 Until you have marked anything, scour bootstraps its labels from your property

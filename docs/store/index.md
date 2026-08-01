@@ -115,8 +115,9 @@ listing still names the same record on the next, and a mark put on it survives.
 
 | Path | Contents |
 | --- | --- |
-| `~/.config/scour/scour.db` | Items, properties, targets, the frontier, rules, records and marks |
-| `~/.config/scour/models/<name>.json` | One scoring model per item |
+| `~/.local/share/scour/scour.db` | Items, jobs, properties, targets, the frontier, rules, records and marks |
+| `~/.local/share/scour/models/<item>.score.json` | The URL scoring model, which decides what to crawl next |
+| `~/.local/share/scour/models/<item>.extract.json` | The extraction model, which decides what to pull out |
 | `/var/lib/scour/scour.db` | The same, on a packaged install |
 
 Only the [cache]({{ '/cache/' | relative_url }}) is safe to delete. Everything

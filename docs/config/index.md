@@ -200,18 +200,27 @@ unknown scorer "bays", have [bayes embed]
 
 ## What is safe to delete
 
+Only the config file lives in the config directory. Everything scour writes
+goes to the data directory or the cache directory, which is what lets the
+working data be cleared without losing the setup.
+
 | Path | Contents | Safe to delete |
 | --- | --- | --- |
-| `~/.cache/scour/pages/` | Fetched page bodies | Yes, at the cost of re-crawling |
-| `~/.config/scour/scour.db` | Items, targets, frontier, rules, records, marks | No |
-| `~/.config/scour/models/` | One scoring model per item | No, though training rebuilds it |
+| `~/.config/scour/config.toml` | The config file, and nothing else | It is your setup |
+| `~/.local/share/scour/scour.db` | Items, jobs, targets, frontier, rules, records, marks | No |
+| `~/.local/share/scour/models/` | Two model files per item, `.score.json` and `.extract.json` | No, though training rebuilds them |
 | `~/.local/share/scour/exports/` | Written-out records | Yes, they are a copy |
+| `~/.cache/scour/pages/` | Fetched page bodies | Yes, at the cost of re-crawling |
 
-Under a packaged install the same four are `/var/cache/scour/pages/`,
-`/var/lib/scour/scour.db`, `/var/lib/scour/models/` and
-`/var/lib/scour/exports/`. Only `/var/cache/scour` is safe to delete, and the
-marks on records are the one thing in there that could not be rebuilt by
-crawling again.
+The data directory is `$XDG_DATA_HOME/scour` when that is set, and the cache
+directory follows the platform's own convention, so neither is guaranteed to be
+the path above. `scour --json status` reports what they resolved to.
+
+Under a packaged install, with `/etc/scour/config.toml` present, the data
+directory is `/var/lib/scour` and the cache is `/var/cache/scour`, and the four
+rows move with them. Only the cache is safe to delete, and the marks on records
+are the one thing in the data directory that could not be rebuilt by crawling
+again.
 
 <div class="pager" markdown="1">
 <span markdown="1">&larr; [command line]({{ '/cli/' | relative_url }})</span>
