@@ -992,12 +992,25 @@ Same files as wom, same targets, so muscle memory carries over:
    `page_roles`, and reports them in `scour item ls`. Detail is the role that
    means "this page holds the records".
 
-   Nothing reads it. Outside the hmm package, `hmm.Detail` has no callers, so
-   extraction runs over every fetched page whatever the crawl graph concluded
-   about it. That is why 118 of 867 titles on the second corpus are `"Page A1"`,
-   `"Ads"`, `"Community"`: index and section URLs producing records because
-   nobody asked the classifier which pages were record pages. Fixing it is
-   reading a decision that is already made and already stored.
+   Nothing reads it, and reading it would not help, because the role is derived
+   from extraction. In one training run `Trainer.extract` writes a match count
+   per URL and `Trainer.trainChain` fits the chain from those counts;
+   `observationsOf` tests `Matches > 0` before `Links > 0`, so a page a record
+   came out of is observed as `Records` and decoded as `Detail`. Gating
+   extraction on the role would gate it on its own output.
+
+   Measured: 866 of news2's 867 records already come from pages labelled
+   `detail`, and all 118 short titles are among them. The gate drops one record
+   and fixes nothing.
+
+   The fault is in two parts. `/news/community/` is decoded `detail` when it is
+   a hub, which is the circularity. `/eedition/.../page_...`, `/ads/sale/...`
+   and `/helpcenter/article_...` genuinely are detail pages and are not
+   articles, which is a topic question, not a role one.
+
+   So the chain needs evidence extraction did not produce: outlink count, URL
+   shape, whether a page's children were worth fetching. All are known before
+   anything is extracted and none is among the four observations it reads.
 
    Inference does some of this work instead, in the wrong place. `variety`
    halves a location whose value never changes, which is what caught `section`

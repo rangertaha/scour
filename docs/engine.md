@@ -127,13 +127,35 @@ fresh it is: different questions, different vocabularies, different evidence. So
 a classifier declares its `Kind`, and verdicts are held per kind. Two
 classifiers of one kind are alternatives; two of different kinds both run.
 
-The role question already has an answer that nothing reads. `internal/score/hmm`
-decodes six roles over the parent path of every URL, stores them, and `scour
-item ls` prints them. Outside that package `hmm.Detail` has no callers, so
-extraction runs over every fetched page whatever the crawl graph concluded. That
-is why 118 of 867 titles on the second corpus are `"Page A1"`, `"Ads"`,
-`"Community"`. Moving that decoder behind `nodeclass` and reading its answer is
-the next piece of work, and it is reading a decision already made.
+The role question has an answer that nothing reads, and reading it would not
+help. `internal/score/hmm` decodes six roles over the parent path of every URL,
+stores them, and `scour item ls` prints them. Outside that package `hmm.Detail`
+has no callers, so extraction runs over every fetched page whatever the crawl
+graph concluded.
+
+Gating extraction on that role was the obvious fix and it is the wrong one,
+because the role is derived from extraction. Within one training run,
+`Trainer.extract` writes a match count per URL and `Trainer.trainChain` then
+fits the chain from those counts; `observationsOf` tests `Matches > 0` before
+`Links > 0`, so any page a record came out of is observed as `Records` and
+decoded as `Detail`. Gating extraction on the role would gate it on its own
+output.
+
+The corpus says so plainly: 866 of news2's 867 records come from pages already
+labelled `detail`, and every one of the 118 short titles is among them. The gate
+would drop one record and fix nothing. That figure is not the classifier
+agreeing with extraction, it is the classifier restating it.
+
+What the fault actually is, in two parts. Section index URLs like
+`/news/community/` are decoded `detail` when they are hubs, which is the
+circularity above. And `/eedition/special_section/page_...`, `/ads/sale/...` and
+`/helpcenter/article_...` really are detail pages, just not articles: a
+different subject, which is a topic question and not a role one.
+
+So the chain needs evidence that does not come from extraction. Outlink count,
+URL shape, whether a page's children were themselves worth fetching: all are
+known before anything is extracted, and none is in the four observations it
+reads today. That is the work, and it is larger than reading a stored answer.
 
 ## Scoring, which is per graph
 
