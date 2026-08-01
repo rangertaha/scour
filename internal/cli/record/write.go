@@ -30,6 +30,9 @@ type exportFlags struct {
 	// the same way a listing can.
 	types       []string
 	excludeType []string
+	// job narrows to what one job fetched, resolved to an id by the caller so
+	// an unknown job name fails before anything is written.
+	jobID uint
 
 	// terms is the search a listing was narrowed by, so exporting what is on
 	// screen does not mean restating it as filter flags.
@@ -62,6 +65,7 @@ func runExport(c context.Context, a *cli.App, name string, f exportFlags) error 
 
 	rows, total, err := s.SearchRecords(c, item.ID, store.RecordQuery{
 		Terms:         q.Terms,
+		JobID:         f.jobID,
 		MinConfidence: f.confidence,
 		Formats:       f.types,
 		ExcludeFormat: f.excludeType,
@@ -172,6 +176,13 @@ func Write(a *cli.App) *ucli.Command {
 			}
 			if f.out.format == "" {
 				return cli.Usagef("record write needs --format: %s", exportFormats())
+			}
+			s, err := a.Store()
+			if err != nil {
+				return err
+			}
+			if f.out.jobID, err = jobFilter(c, s, f.job); err != nil {
+				return err
 			}
 			f.out.confidence, f.out.label, f.out.limit = f.confidence, f.label, a.Limit
 			f.out.types, f.out.excludeType = f.types, f.excludeType

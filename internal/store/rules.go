@@ -189,6 +189,12 @@ type RecordQuery struct {
 	// removing a named few reuse the same read as a listing.
 	IDs []uint
 
+	// JobID narrows to what one job produced, which is a fact about the page a
+	// record was read out of rather than about the record: training runs over
+	// the item's whole corpus, so the job that produced a record is the job
+	// that paid to fetch its page.
+	JobID uint
+
 	MinConfidence float64
 	Formats       []string
 	ExcludeFormat []string
@@ -234,6 +240,10 @@ func (s *Store) SearchRecords(ctx context.Context, itemID uint, q RecordQuery) (
 	}
 	if len(q.IDs) > 0 {
 		base = base.Where("id IN ?", q.IDs)
+	}
+	if q.JobID > 0 {
+		base = base.Where(
+			"EXISTS (SELECT 1 FROM urls u WHERE u.id = records.url_id AND u.job_id = ?)", q.JobID)
 	}
 	for _, t := range q.Terms {
 		cond, args := termWhere(t)

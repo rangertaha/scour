@@ -85,6 +85,7 @@ func (s *Store) RecordFetch(ctx context.Context, f Fetched) error {
 
 	u := URL{
 		ItemID:      f.ItemID,
+		JobID:       f.JobID,
 		Hash:        URLHash(f.ItemID, f.URL),
 		URL:         f.URL,
 		ParentID:    parentID,
@@ -112,6 +113,12 @@ func (s *Store) RecordFetch(ctx context.Context, f Fetched) error {
 	}
 	if parentID != nil {
 		columns = append(columns, "parent_id")
+	}
+	// Only when this fetch had a job. A crawler handed its work does not know
+	// which job sent it, and writing its zero would erase an attribution an
+	// earlier fetch had already made.
+	if f.JobID != 0 {
+		columns = append(columns, "job_id")
 	}
 
 	err := s.db.WithContext(ctx).

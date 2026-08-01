@@ -174,8 +174,13 @@ const (
 // ParentID and Role are what the crawl chain needs: the parent edge
 // reconstructs the path for decoding, and the role is the decoded state.
 type URL struct {
-	ID          uint   `gorm:"primaryKey"`
-	ItemID      uint   `gorm:"index;not null"`
+	ID     uint `gorm:"primaryKey"`
+	ItemID uint `gorm:"index;not null"`
+	// JobID is the job that fetched this page, which is the only sense in
+	// which a page or a record belongs to one: the item owns the corpus, and
+	// a job is what paid to put this page in it. Zero until something fetches
+	// it, since a URL is discovered before it is fetched.
+	JobID       uint   `gorm:"index"`
 	Hash        string `gorm:"uniqueIndex;not null"`
 	URL         string `gorm:"not null"`
 	ParentID    *uint  `gorm:"index"`

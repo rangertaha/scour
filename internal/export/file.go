@@ -18,6 +18,7 @@ import (
 func init() {
 	Register("csv", func(cfg Config) (Exporter, error) { return newFile(cfg, csvWriter{}) })
 	Register("json", func(cfg Config) (Exporter, error) { return newFile(cfg, jsonWriter{}) })
+	Register("jsonl", func(cfg Config) (Exporter, error) { return newFile(cfg, jsonlWriter{}) })
 }
 
 // format writes one domain's records in a particular encoding.
@@ -149,7 +150,8 @@ type jsonWriter struct{}
 
 func (jsonWriter) ext() string { return "json" }
 
-// jsonRecord is the exported shape.
+// jsonRecord is the exported shape. An explicit empty values object rather
+// than null, so a consumer can index it without a nil check.
 //
 // It is flatter than the database row on purpose: an export is read by
 // something that does not know scour's tables, and internal ids for the item
@@ -166,20 +168,7 @@ type jsonRecord struct {
 func (jsonWriter) write(w *os.File, rows []store.RecordRow) error {
 	out := make([]jsonRecord, 0, len(rows))
 	for _, row := range rows {
-		values := row.Values
-		if values == nil {
-			// An explicit empty object rather than null, so a consumer can
-			// index it without a nil check.
-			values = map[string]string{}
-		}
-		out = append(out, jsonRecord{
-			ID:         row.ID,
-			URL:        row.URL,
-			Confidence: row.Confidence,
-			Format:     row.Format,
-			Label:      string(row.Label),
-			Values:     values,
-		})
+		out = append(out, exported(row))
 	}
 
 	enc := json.NewEncoder(w)
@@ -188,4 +177,43 @@ func (jsonWriter) write(w *os.File, rows []store.RecordRow) error {
 		return fmt.Errorf("encode records: %w", err)
 	}
 	return nil
+}
+
+// jsonlWriter is one record per line, the same shape json writes as an array.
+//
+// Worth having as well as json because the two are read differently: an array
+// has to be parsed whole before anything in it can be used, and a file of lines
+// can be streamed, split, or fed to something a line at a time. That matters at
+// the size an export actually reaches, and it is the format every log pipeline
+// already expects.
+type jsonlWriter struct{}
+
+func (jsonlWriter) ext() string { return "jsonl" }
+
+func (jsonlWriter) write(w *os.File, rows []store.RecordRow) error {
+	// No indenting and no array: a line that wraps is a line that cannot be
+	// split on newlines, which is the whole point of the format.
+	enc := json.NewEncoder(w)
+	for _, row := range rows {
+		if err := enc.Encode(exported(row)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// exported is the flat shape both json formats write.
+func exported(row store.RecordRow) jsonRecord {
+	values := row.Values
+	if values == nil {
+		values = map[string]string{}
+	}
+	return jsonRecord{
+		ID:         row.ID,
+		URL:        row.URL,
+		Confidence: row.Confidence,
+		Format:     row.Format,
+		Label:      string(row.Label),
+		Values:     values,
+	}
 }

@@ -23,6 +23,7 @@ type streamFlags struct {
 	types       []string
 	excludeType []string
 	label       string
+	job         string
 	follow      bool
 
 	// out carries the record to somewhere other than the terminal. Records
@@ -84,6 +85,13 @@ func runStream(c context.Context, a *cli.App, name string, f streamFlags) error 
 		return err
 	}
 
+	// Resolved before anything else uses it, so an unknown job name fails
+	// before a file is written rather than after.
+	jobID, err := jobFilter(c, s, f.job)
+	if err != nil {
+		return err
+	}
+
 	// Writing records somewhere is a different job from printing them, and
 	// following a destination that is a file would mean rewriting it every
 	// second.
@@ -92,6 +100,7 @@ func runStream(c context.Context, a *cli.App, name string, f streamFlags) error 
 			return fmt.Errorf("--write and --follow are different jobs: one ends, the other does not")
 		}
 		f.out.confidence, f.out.label, f.out.limit = f.confidence, f.label, a.Limit
+		f.out.types, f.out.excludeType, f.out.jobID = f.types, f.excludeType, jobID
 		return runExport(c, a, name, f.out)
 	}
 
@@ -101,6 +110,7 @@ func runStream(c context.Context, a *cli.App, name string, f streamFlags) error 
 	}
 
 	query := store.RecordQuery{
+		JobID:         jobID,
 		MinConfidence: f.confidence,
 		Formats:       f.types,
 		ExcludeFormat: f.excludeType,
@@ -116,7 +126,8 @@ func runStream(c context.Context, a *cli.App, name string, f streamFlags) error 
 		return cli.WriteJSON(a.Out(), rows)
 	}
 	if len(rows) == 0 && !f.follow {
-		filtered := f.confidence > 0 || len(f.types) > 0 || len(f.excludeType) > 0 || label != ""
+		filtered := f.confidence > 0 || len(f.types) > 0 || len(f.excludeType) > 0 ||
+			label != "" || jobID > 0
 		if filtered {
 			// total is already filtered, so it says nothing about whether the
 			// item has records at all. Ask again without the filters rather
@@ -323,7 +334,29 @@ func filterFlags(f *streamFlags) []ucli.Flag {
 			Usage:       "only records carrying this `verdict`: valid, invalid, none",
 			Destination: &f.label,
 		},
+		&ucli.StringFlag{
+			Name:        "job",
+			Aliases:     []string{"j"},
+			Usage:       "only records read out of pages this `job` fetched",
+			Destination: &f.job,
+		},
 	}
+}
+
+// jobFilter resolves --job to the id the query filters on.
+//
+// A record carries no job. The job it came from is the job that fetched the
+// page it was read out of, which is a fact recorded at fetch time, so this
+// resolves a name to an id and the query joins through the url.
+func jobFilter(c context.Context, s *store.Store, name string) (uint, error) {
+	if name == "" {
+		return 0, nil
+	}
+	job, err := s.Job(c, name)
+	if err != nil {
+		return 0, err
+	}
+	return job.ID, nil
 }
 
 // destinationFlags say where records go when they are not being printed.

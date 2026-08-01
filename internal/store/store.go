@@ -183,6 +183,47 @@ func (s *Store) migrate() error {
 	if err := s.db.AutoMigrate(tables()...); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	// After AutoMigrate, because it fills in the column AutoMigrate adds.
+	if err := s.attributePagesToJobs(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// attributePagesToJobs says which job fetched each page already on record.
+//
+// The column is new, so every page fetched before it existed has a zero in it,
+// and a filter by job would report those pages as belonging to no job rather
+// than to the one that fetched them.
+//
+// It can only be answered where the answer is not a guess. An item with one job
+// has all its pages from that job, which is every item that existed when this
+// was written, since a second job was not expressible before. An item with
+// several is left alone: the fetch that would say which is long gone, and a
+// wrong attribution is worse than an absent one, because a `record rm -j` acts
+// on it.
+func (s *Store) attributePagesToJobs() error {
+	var pending int64
+	if err := s.db.Raw("SELECT count(*) FROM urls WHERE job_id = 0 OR job_id IS NULL").
+		Scan(&pending).Error; err != nil {
+		return fmt.Errorf("count unattributed pages: %w", err)
+	}
+	if pending == 0 {
+		return nil
+	}
+
+	res := s.db.Exec(`UPDATE urls SET job_id = (
+		SELECT j.id FROM jobs j WHERE j.item_id = urls.item_id
+	)
+	WHERE (job_id = 0 OR job_id IS NULL)
+	  AND (SELECT count(*) FROM jobs j WHERE j.item_id = urls.item_id) = 1`)
+	if res.Error != nil {
+		return fmt.Errorf("attribute pages to jobs: %w", res.Error)
+	}
+	if res.RowsAffected > 0 {
+		slog.Info("migrated: pages now say which job fetched them",
+			"attributed", res.RowsAffected, "left", pending-res.RowsAffected)
+	}
 	return nil
 }
 

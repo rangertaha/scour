@@ -84,8 +84,13 @@ func runSearch(c context.Context, a *cli.App, name string, terms []string, f str
 		return cli.Usagef("search needs something to look for: scour record search %s <query>", name)
 	}
 
+	jobID, err := jobFilter(c, s, f.job)
+	if err != nil {
+		return err
+	}
 	rq := store.RecordQuery{
 		Terms:         q.Terms,
+		JobID:         jobID,
 		MinConfidence: f.confidence,
 		Formats:       f.types,
 		ExcludeFormat: f.excludeType,
@@ -100,6 +105,7 @@ func runSearch(c context.Context, a *cli.App, name string, terms []string, f str
 			return fmt.Errorf("--write and --follow are different jobs: one ends, the other does not")
 		}
 		f.out.confidence, f.out.label, f.out.limit = f.confidence, f.label, a.Limit
+		f.out.types, f.out.excludeType, f.out.jobID = f.types, f.excludeType, jobID
 		f.out.terms = terms
 		return runExport(c, a, name, f.out)
 	}

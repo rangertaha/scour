@@ -45,8 +45,9 @@ func Remove(a *cli.App) *ucli.Command {
 			"Everything a query matches, checked first:\n" +
 			"  scour record search vehicle make:Ford\n" +
 			"  scour record rm vehicle make:Ford --force\n\n" +
-			"Everything the model was least sure of:\n" +
-			"  scour record rm vehicle --confidence 0..0.3 --force",
+			"Everything one job's pages produced, or everything at once:\n" +
+			"  scour record rm vehicle -j uk --force\n" +
+			"  scour record rm vehicle --all --force",
 		Flags: append([]ucli.Flag{
 			&ucli.BoolFlag{
 				Name:        "force",
@@ -94,8 +95,13 @@ func runRemove(c context.Context, a *cli.App, name string, rest []string, force,
 	if err != nil {
 		return err
 	}
+	jobID, err := jobFilter(c, s, f.job)
+	if err != nil {
+		return err
+	}
 	rq := store.RecordQuery{
 		Terms:         q.Terms,
+		JobID:         jobID,
 		MinConfidence: f.confidence,
 		Formats:       f.types,
 		ExcludeFormat: f.excludeType,
@@ -107,7 +113,7 @@ func runRemove(c context.Context, a *cli.App, name string, rest []string, force,
 	// empty query, because an empty query is what a shell expanding a variable
 	// to nothing also produces.
 	narrowed := !q.Empty() || rq.MinConfidence > 0 || len(rq.Formats) > 0 ||
-		len(rq.ExcludeFormat) > 0 || rq.Label != ""
+		len(rq.ExcludeFormat) > 0 || rq.Label != "" || rq.JobID > 0
 	if !narrowed && !all {
 		return cli.Usagef("record rm needs ids, a query, or --all\n"+
 			"  some:  scour record rm %s 1042 1043\n"+
@@ -128,10 +134,16 @@ func runRemove(c context.Context, a *cli.App, name string, rest []string, force,
 	}
 	if !force {
 		a.Printf("this removes %d of %s's %d records\n", total, item.Name, countAll(c, s, item.ID))
-		if all {
+		// Whatever narrowed the set is what should be echoed back, or the
+		// suggestion to look first shows a different set than the one about to
+		// go, which is worse than no suggestion at all.
+		switch {
+		case all:
 			a.Println("the pages and the model are kept, so `scour model train` fills them back in")
-		} else {
-			a.Printf("see them first: scour record search %s %s\n", name, q)
+		case q.Empty():
+			a.Printf("see them first: scour record ls %s%s\n", name, filterArgs(f))
+		default:
+			a.Printf("see them first: scour record search %s %s%s\n", name, q, filterArgs(f))
 		}
 		a.Println("re-run with --force to confirm")
 		return cli.ErrSilent
@@ -189,4 +201,26 @@ func countAll(c context.Context, s *store.Store, itemID uint) int64 {
 		return 0
 	}
 	return total
+}
+
+// filterArgs renders the narrowing flags back as they were typed, so the
+// suggestion to look at a set before removing it names that exact set.
+func filterArgs(f streamFlags) string {
+	var b strings.Builder
+	if f.job != "" {
+		fmt.Fprintf(&b, " -j %s", f.job)
+	}
+	if f.confidence > 0 {
+		fmt.Fprintf(&b, " --confidence %v", f.confidence)
+	}
+	for _, t := range f.types {
+		fmt.Fprintf(&b, " -t %s", t)
+	}
+	for _, t := range f.excludeType {
+		fmt.Fprintf(&b, " --exclude-type %s", t)
+	}
+	if f.label != "" {
+		fmt.Fprintf(&b, " --verdict %s", f.label)
+	}
+	return b.String()
 }

@@ -494,3 +494,105 @@ func TestDeleteRecordsIsScopedToTheItem(t *testing.T) {
 		t.Errorf("the other item has %d records, want its %d untouched", after, before)
 	}
 }
+
+// A record carries no job, so "which job produced this" is answered by the page
+// it was read out of: training runs over the item's whole corpus, and the job
+// that produced a record is the job that paid to fetch its page.
+func TestSearchRecordsByJob(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "vehicle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uk, err := s.CreateJob(ctx, "uk", item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	us, err := s.CreateJob(ctx, "us", item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Two pages, fetched by different jobs, each yielding a record.
+	for i, spec := range []struct {
+		url  string
+		job  *Job
+		make string
+	}{
+		{"https://example.co.uk/a", uk, "Vauxhall"},
+		{"https://example.com/b", us, "Ford"},
+	} {
+		if err := s.RecordFetch(ctx, Fetched{
+			ItemID: item.ID, JobID: spec.job.ID, URL: spec.url,
+			Status: URLFetched, StatusCode: 200,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		id, err := s.urlID(ctx, item.ID, spec.url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := Record{
+			ItemID: item.ID, URLID: id, Confidence: 0.9,
+			Fingerprint: fmt.Sprintf("fp-%d", i), Format: "html",
+			Values: []Value{{Prop: "make", Text: spec.make}},
+		}
+		if err := s.DB().Create(&rec).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, tc := range []struct {
+		job  *Job
+		want string
+	}{{uk, "Vauxhall"}, {us, "Ford"}} {
+		rows, total, err := s.SearchRecords(ctx, item.ID, RecordQuery{JobID: tc.job.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 1 || len(rows) != 1 {
+			t.Fatalf("job %s matched %d records, want 1", tc.job.Name, total)
+		}
+		if rows[0].Values["make"] != tc.want {
+			t.Errorf("job %s produced %q, want %q", tc.job.Name, rows[0].Values["make"], tc.want)
+		}
+	}
+}
+
+// A crawler handed its work does not know which job sent it, and its zero must
+// not erase an attribution an earlier fetch already made.
+func TestRefetchingWithoutAJobKeepsTheAttribution(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "vehicle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := s.CreateJob(ctx, "uk", item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const raw = "https://example.co.uk/a"
+
+	if err := s.RecordFetch(ctx, Fetched{
+		ItemID: item.ID, JobID: job.ID, URL: raw, Status: URLFetched, StatusCode: 200,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The same page again, this time from a crawler that was handed its work.
+	if err := s.RecordFetch(ctx, Fetched{
+		ItemID: item.ID, URL: raw, Status: URLFetched, StatusCode: 200,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var got uint
+	if err := s.db.Raw("SELECT job_id FROM urls WHERE hash = ?", URLHash(item.ID, raw)).
+		Scan(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got != job.ID {
+		t.Errorf("job_id is %d after a refetch, want the %d that first fetched it", got, job.ID)
+	}
+}
