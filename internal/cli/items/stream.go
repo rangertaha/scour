@@ -72,8 +72,9 @@ func Stream(a *cli.App) *ucli.Command {
 				Destination: &f.excludeType,
 			},
 			&ucli.StringFlag{
-				Name:        "label",
-				Usage:       "only records with this label: valid, invalid, unlabelled",
+				Name:        "marked",
+				Aliases:     []string{"label"},
+				Usage:       "only records carrying this `verdict`: valid, invalid, unlabelled",
 				Destination: &f.label,
 			},
 			&ucli.StringSliceFlag{

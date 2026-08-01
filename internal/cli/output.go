@@ -132,3 +132,11 @@ func FormatBytes(n int64) string {
 		return fmt.Sprintf("%dB", n)
 	}
 }
+
+// plural renders a count's noun, so a summary line reads as a sentence.
+func Plural(n int, noun string) string {
+	if n == 1 {
+		return noun
+	}
+	return noun + "s"
+}

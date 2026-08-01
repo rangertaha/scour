@@ -103,6 +103,7 @@ func newRootCmd() *ucli.Command {
 			items.Stream(a),
 			learn.Rules(a),
 			learn.Train(a),
+			learn.Mark(a),
 			search.Status(a),
 			search.Top(a),
 			search.Start(a),

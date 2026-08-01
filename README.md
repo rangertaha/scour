@@ -379,18 +379,26 @@ spec table. A record marked wrong is held out of the next training run, so both
 the scoring model and the extraction rules stop making that mistake, and one
 marked right is what tells `scour train` to fit the field-order chain at all.
 
-Labelling has no command of its own. It is done over the HTTP API or MCP, which
-accept `valid`, `invalid` and `unlabelled`:
-
 ```
-curl -X POST http://localhost:8080/v1/items/vehicle/records/1088/label \
-  -H 'Content-Type: application/json' -d '{"label":"invalid"}'
+scour mark vehicle 1088 --invalid
+scour mark vehicle 1042 1043 --valid
+scour mark vehicle 1088 --clear        # a verdict given in error
 
 scour train vehicle
 ```
 
-A record keeps its id and its label across retraining, so an id read off one
-listing still names the same record on the next.
+A verdict is a *mark*, not a label, because a label here is a tag: the words a
+page might name a property with, which is what `scour item tag` edits. The two
+were one word for a while and it was never clear which was meant.
+
+A record keeps its id and its mark across retraining, so an id read off one
+listing still names the same record on the next. The same verdicts are reachable
+over the HTTP API and MCP, which have always called the field `label`:
+
+```
+curl -X POST http://localhost:8080/v1/items/vehicle/records/1088/label \
+  -H 'Content-Type: application/json' -d '{"label":"invalid"}'
+```
 
 Check on a crawl in progress, or on where one left off. Crawls resume from the
 stored frontier:
@@ -450,6 +458,8 @@ output, and `--limit <n>` to cap the rows returned.
 | `scour start <name> --max-time <d>` | Stop after this long, keeping the frontier |
 | `scour train <name>` | Train the model and extraction rules on the cached pages |
 | `scour rules <name>` | List the extraction rules learned for an item |
+| `scour mark <name> <id>... --valid\|--invalid\|--clear` | Mark extracted records right or wrong |
+| `scour stream <name> --marked <verdict>` | Only records carrying a verdict |
 | `scour stream <name> --confidence <p>` | Search extracted records at or above a confidence |
 | `scour stream <name> --type <type>` | Search only records extracted from a content type |
 | `scour stream <name> --exclude-type <type>` | Search everything except a content type |

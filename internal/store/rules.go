@@ -269,6 +269,31 @@ func (s *Store) SearchRecords(ctx context.Context, itemID uint, q RecordQuery) (
 
 // LabelRecords marks records valid or invalid. Unknown ids are reported rather
 // than ignored, since a mistyped id would otherwise look like success.
+// MarkRecords is LabelRecords under the name the command line uses.
+//
+// A label is a tag here: the words a page might name a property with. A mark is
+// the other thing, a person's verdict on a record already extracted. The column
+// keeps its name because the API and MCP have always called it label and that
+// is a published contract.
+func (s *Store) MarkRecords(ctx context.Context, itemID uint, ids []uint, label Label) (int64, error) {
+	return s.LabelRecords(ctx, itemID, ids, label)
+}
+
+// MarkedCount counts an item's records carrying one verdict.
+//
+// Worth its own query because "is anything marked valid" decides whether
+// training fits the field order chain at all, and answering it by listing every
+// record to count them reads the whole table to learn one number.
+func (s *Store) MarkedCount(ctx context.Context, itemID uint, label Label) (int64, error) {
+	var n int64
+	err := s.db.WithContext(ctx).Model(&Record{}).
+		Where("item_id = ? AND label = ?", itemID, label).Count(&n).Error
+	if err != nil {
+		return 0, fmt.Errorf("count %s records: %w", label, err)
+	}
+	return n, nil
+}
+
 func (s *Store) LabelRecords(ctx context.Context, itemID uint, ids []uint, label Label) (int64, error) {
 	res := s.db.WithContext(ctx).
 		Model(&Record{}).

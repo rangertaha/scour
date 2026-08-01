@@ -100,16 +100,8 @@ func runExport(c context.Context, a *cli.App, name string, f exportFlags) error 
 
 	a.Printf("\n%d of %d records exported as %s to %d %s\n",
 		result.Records, total, exporter.Name(),
-		len(result.Destinations), plural(len(result.Destinations), "destination"))
+		len(result.Destinations), cli.Plural(len(result.Destinations), "destination"))
 	return nil
-}
-
-// plural renders a count's noun, so a summary line reads as a sentence.
-func plural(n int, noun string) string {
-	if n == 1 {
-		return noun
-	}
-	return noun + "s"
 }
 
 // exportFormats is the help text listing what is registered.

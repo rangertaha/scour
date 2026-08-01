@@ -102,7 +102,7 @@ func runTrain(c context.Context, a *cli.App, name string, f trainFlags) error {
 	out := a.Out()
 	fmt.Fprintf(out, "pages       %d read, %d skipped, %s\n", result.Pages, result.Skipped, cli.FormatBytes(result.Bytes))
 	if result.Corrected > 0 {
-		fmt.Fprintf(out, "labels      %d valid records fed back in\n", result.Corrected)
+		fmt.Fprintf(out, "marks       %s fed back in\n", cli.Plural(result.Corrected, "valid record"))
 	}
 	fmt.Fprintf(out, "rules       %d\n", result.Rules)
 	fmt.Fprintf(out, "records     %d\n", result.Records)
