@@ -13,12 +13,23 @@ discovers rather than being told.</p>
 ## What an item owns
 
 <figure>
-<img src="{{ '/img/model.svg' | relative_url }}" alt="An item owns its definition: aliases, content types, targets, and properties which own their own aliases. A crawl fills urls, responses, queue items and page roles. Training fills rules, which nest, and records which own values.">
+<img src="{{ '/img/model.svg' | relative_url }}" alt="An item owns its aliases, its properties which own their own aliases, and its jobs, which own the targets and content types. A crawl fills urls, responses, queue items and page roles. Training fills rules, which nest, and records which own values.">
 </figure>
 
 An item is the thing you are hunting for, and everything hangs off it in three
-columns: what you teach, what the crawl fills in, and what training produces.
+columns: what you define, what the crawl fills in, and what training produces.
 Deleting an item cascades through all three.
+
+**Targets belong to a job rather than to the item.** An item says what you are
+hunting and knows nothing about where it might be found, so two jobs can send
+one item at two different sets of sites under two different policies. The item
+used to carry a definition, a target list, a budget, a frontier and a run state
+at once, which left nowhere to put a second crawl and nowhere to say that one of
+them was paused while the other was not.
+
+The frontier and the records stay keyed to the item even so, because two jobs
+hunting one item are filling one queue and one table, and one model is trained
+from every page all of its jobs cached.
 
 Two tables sit outside that. `hosts` and `cookies` are keyed by site rather than
 by item, because politeness and session state are owed to a server and not to

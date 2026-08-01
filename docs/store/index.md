@@ -10,8 +10,8 @@ the gorm models, the migrations, and every query; nothing else in the program
 talks to the database.</p>
 
 <figure>
-<img src="{{ '/img/model.svg' | relative_url }}" alt="An item owns its definition: aliases, content types, targets, and properties which own their own aliases. A crawl fills urls, responses, queue items and page roles. Training fills rules, which nest, and records which own values.">
-<figcaption>What you teach, what the crawl fills in, and what training produces. Deleting an item cascades through all three.</figcaption>
+<img src="{{ '/img/model.svg' | relative_url }}" alt="An item owns its aliases, its properties which own their own aliases, and its jobs, which own the targets and content types. A crawl fills urls, responses, queue items and page roles. Training fills rules, which nest, and records which own values.">
+<figcaption>What you define, what the crawl fills in, and what training produces. Deleting an item cascades through all three.</figcaption>
 </figure>
 
 ## Why one package owns it
@@ -24,6 +24,40 @@ and losing one cost only the lease on whatever it was holding.
 That property only survives if there is exactly one place the schema is known.
 A second package writing its own query is a second place to update when the
 frontier grows a column, and a second opinion about what a lease means.
+
+## Jobs
+
+A job is a crawl: one item, a set of targets, and a policy. It exists because
+the item was carrying five things at once, a definition, a target list, a
+budget, a frontier and a run state, which left nowhere to put a second crawl of
+the same item over a different set of sites and nowhere to say that one of them
+was paused while the other was not.
+
+`targets` and `content_types` hang off the job. The frontier and the records do
+not: two jobs hunting one item fill one queue and one table, and one model is
+trained from every page all of its jobs cached.
+
+A job is in exactly one state, and the state says what starting it would do:
+
+| State | Means | `start` does |
+| --- | --- | --- |
+| `ready` | Created, never run | Begins from the seeds |
+| `running` | A run is in flight | Nothing, reports the run |
+| `paused` | Frozen, frontier kept | Resumes where it stopped |
+| `budget` | Hit `--max-pages` or `--max-time`, frontier kept | Resumes, on a fresh budget |
+| `done` | Frontier exhausted | Begins from the seeds again |
+| `stopped` | Frontier discarded | Begins from the seeds |
+| `failed` | The last run died | Resumes, frontier permitting |
+
+`budget` is a separate state from `done` on purpose. Both end a run with the
+frontier intact, but one means there is more to fetch and the other means there
+is not, and a caller that cannot tell them apart cannot decide whether running
+again is worth anything.
+
+A job is created by the first crawl and named after the item, so nobody has to
+learn the word before crawling anything. It becomes worth naming when one item
+needs two target sets or two policies. See
+[the command surface]({{ '/cli/design.html' | relative_url }}#do-you-need-to-define-a-job).
 
 ## The tables that sit outside an item
 

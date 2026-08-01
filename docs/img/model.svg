@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" role="img"
-     aria-label="The data model. An item owns its definition: aliases, content types, targets, and properties which own their own aliases. A crawl fills urls, responses, queue items and page roles. Training fills rules, which nest, and records which own values.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 500" role="img"
+     aria-label="The data model. An item owns its aliases, its properties which own their own aliases, and its jobs, which own the targets and content types. A crawl fills urls, responses, queue items and page roles. Training fills rules, which nest, and records which own values.">
   <style>
     .def  { fill: #dafbe1; stroke: #1a7f37; stroke-width: 1.5; rx: 5; }
     .crawl{ fill: #ddf4ff; stroke: #0969da; stroke-width: 1.5; rx: 5; }
@@ -23,16 +23,19 @@
   <text class="t" x="440" y="34" text-anchor="middle">item</text>
   <text class="n" x="440" y="49" text-anchor="middle">the thing you hunt</text>
 
-  <text class="t h" x="120" y="92" text-anchor="middle" fill="#1a7f37">what you teach</text>
+  <text class="t h" x="120" y="92" text-anchor="middle" fill="#1a7f37">what you define</text>
   <text class="t h" x="440" y="92" text-anchor="middle" fill="#0969da">what the crawl fills</text>
   <text class="t h" x="762" y="92" text-anchor="middle" fill="#9a6700">what training fills</text>
 
-  <rect class="def" x="20" y="108" width="200" height="34"/><text class="t" x="120" y="130" text-anchor="middle">targets</text>
-  <rect class="def" x="20" y="152" width="200" height="34"/><text class="t" x="120" y="174" text-anchor="middle">aliases</text>
-  <rect class="def" x="20" y="196" width="200" height="34"/><text class="t" x="120" y="218" text-anchor="middle">content_types</text>
-  <rect class="def" x="20" y="240" width="200" height="34"/><text class="t" x="120" y="262" text-anchor="middle">properties</text>
-  <rect class="def" x="56" y="284" width="164" height="34"/><text class="t" x="138" y="306" text-anchor="middle">property_aliases</text>
-  <text class="n" x="120" y="336" text-anchor="middle">a property's own words</text>
+  <rect class="def" x="20" y="108" width="200" height="34"/><text class="t" x="120" y="130" text-anchor="middle">aliases</text>
+  <rect class="def" x="20" y="152" width="200" height="34"/><text class="t" x="120" y="174" text-anchor="middle">properties</text>
+  <rect class="def" x="56" y="196" width="164" height="34"/><text class="t" x="138" y="218" text-anchor="middle">property_aliases</text>
+  <text class="n" x="120" y="242" text-anchor="middle">a property's own words</text>
+
+  <rect class="def" x="20" y="258" width="200" height="34"/><text class="t" x="120" y="280" text-anchor="middle">jobs</text>
+  <rect class="def" x="56" y="302" width="164" height="34"/><text class="t" x="138" y="324" text-anchor="middle">targets</text>
+  <rect class="def" x="56" y="346" width="164" height="34"/><text class="t" x="138" y="368" text-anchor="middle">content_types</text>
+  <text class="n" x="120" y="392" text-anchor="middle">where to look, and how far</text>
 
   <rect class="crawl" x="360" y="108" width="160" height="34"/><text class="t" x="440" y="130" text-anchor="middle">queue_items</text>
   <text class="n" x="440" y="152" text-anchor="middle">the frontier, leased</text>
@@ -55,12 +58,15 @@
   <path class="own" d="M440,58 V104"/>
   <path class="own" d="M510,44 H640 C654,44 660,52 660,66 V104"/>
 
-  <path class="edge" d="M120,274 V284"/>
+  <path class="edge" d="M120,186 V196"/>
+  <path class="edge" d="M120,292 V302"/>
+  <path class="edge" d="M40,292 V363 H52"/>
   <path class="edge" d="M440,200 C470,200 458,204 458,206"/>
   <path class="edge" d="M760,142 V152"/>
   <path class="edge" d="M760,256 V266"/>
 
-  <text class="n" x="440" y="392" text-anchor="middle">Deleting an item cascades through all three columns: the definition, the crawl, and what was learned.</text>
-  <text class="n" x="440" y="410" text-anchor="middle">A record keeps its id and its mark across retraining, so an id read off one listing still names the same record.</text>
-  <text class="n" x="440" y="440" text-anchor="middle">hosts, cookies and judgements are shared across items: politeness and cached answers are owed to a site, not to one hunt.</text>
+  <text class="n" x="440" y="422" text-anchor="middle">Targets and content types hang off a job, not the item: an item says what you are hunting and knows nothing about where it is.</text>
+  <text class="n" x="440" y="440" text-anchor="middle">The frontier and the records stay keyed to the item, because two jobs hunting one item fill one queue and one table.</text>
+  <text class="n" x="440" y="464" text-anchor="middle">Deleting an item cascades through all three columns: the definition, the crawl, and what was learned.</text>
+  <text class="n" x="440" y="490" text-anchor="middle">hosts, cookies and judgements are shared across items: politeness and cached answers are owed to a site, not to one hunt.</text>
 </svg>
