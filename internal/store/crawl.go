@@ -297,27 +297,73 @@ func (s *Store) Status(ctx context.Context, itemID uint) (*Status, error) {
 	return st, nil
 }
 
-// ResetFrontier clears an item's crawl state, leaving its definition intact.
-// The cached bodies survive, so a re-crawl is cheap.
+// StopJob discards one job's frontier, leaving everything else alone.
 //
-// This includes the visited set. Clearing the frontier without it would leave
-// colly believing it had already seen every URL, so the re-crawl would fetch
-// nothing at all, which is the opposite of starting over.
-func (s *Store) ResetFrontier(ctx context.Context, itemID uint) error {
-	db := s.db.WithContext(ctx)
-	var ids []uint
-	if err := db.Model(&URL{}).Where("item_id = ?", itemID).Pluck("id", &ids).Error; err != nil {
-		return fmt.Errorf("collect urls: %w", err)
+// This is what `scour job stop` does, and the design says exactly what it may
+// touch: the definition, the cached pages, the records and the model are all
+// kept, and only the frontier goes. So it takes a job rather than an item. A
+// reset scoped to the item would take the other jobs of that item with it, and
+// their frontiers are hours of deciding what to fetch that nothing recomputes.
+//
+// The visited set stays. It is the item's record of what its corpus already
+// holds, not this crawl's scratch space, and two jobs over one site are meant
+// not to refetch each other's pages. A later start therefore re-seeds and goes
+// on to find what is new rather than fetching the site again; that second
+// thing is a recrawl, and has its own function.
+func (s *Store) StopJob(ctx context.Context, jobID uint) error {
+	err := s.db.WithContext(ctx).Where("job_id = ?", jobID).Delete(&QueueItem{}).Error
+	if err != nil {
+		return fmt.Errorf("discard the frontier of job %d: %w", jobID, err)
 	}
-	if len(ids) > 0 {
-		if err := db.Where("url_id IN ?", ids).Delete(&Response{}).Error; err != nil {
-			return fmt.Errorf("delete responses: %w", err)
+	return nil
+}
+
+// RecrawlJob makes one job fetch its sites again from the seeds.
+//
+// The frontier of that job goes, and so does the item's visited set, because
+// without the second half the first does nothing: colly would decline every
+// re-seeded URL as one it had already seen, and a crawl asked to start over
+// would fetch nothing at all.
+//
+// Everything else it clears is the item's, and so reaches every job of that
+// item: the visited set, the urls and their responses all go, and a sibling
+// will fetch pages it has already fetched. That is deliberate. Starting over
+// means the item's record of what it has seen starts empty, or the counts
+// afterwards describe two crawls added together and nothing can be measured.
+// The cost is a refetch, which is a cost and not a loss.
+//
+// What a sibling does not lose is its frontier. That is the whole of the fix
+// here: the queue is the one thing nothing recomputes, hours of deciding what
+// to fetch on a large site, and it used to be cleared for every job of the
+// item whenever one of them was reset.
+//
+// The cached bodies survive either way, so a re-crawl pays for the fetching
+// rather than for the parsing.
+func (s *Store) RecrawlJob(ctx context.Context, itemID, jobID uint) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("job_id = ?", jobID).Delete(&QueueItem{}).Error; err != nil {
+			return fmt.Errorf("discard the frontier of job %d: %w", jobID, err)
 		}
-	}
-	if err := db.Where("item_id = ?", itemID).Delete(&URL{}).Error; err != nil {
-		return fmt.Errorf("delete urls: %w", err)
-	}
-	return s.ClearCrawlState(ctx, itemID)
+
+		var ids []uint
+		if err := tx.Model(&URL{}).Where("item_id = ?", itemID).Pluck("id", &ids).Error; err != nil {
+			return fmt.Errorf("collect urls: %w", err)
+		}
+		if len(ids) > 0 {
+			if err := tx.Where("url_id IN ?", ids).Delete(&Response{}).Error; err != nil {
+				return fmt.Errorf("delete responses: %w", err)
+			}
+		}
+		if err := tx.Where("item_id = ?", itemID).Delete(&URL{}).Error; err != nil {
+			return fmt.Errorf("delete urls: %w", err)
+		}
+		for _, model := range []any{&Visit{}, &Cookie{}} {
+			if err := tx.Where("item_id = ?", itemID).Delete(model).Error; err != nil {
+				return fmt.Errorf("clear %T: %w", model, err)
+			}
+		}
+		return nil
+	})
 }
 
 // SetHostTransport records that a host needs a particular transport, which is

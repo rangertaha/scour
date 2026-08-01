@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -188,16 +189,19 @@ func TestStartResumesAPausedItem(t *testing.T) {
 	}
 }
 
-// stop discards, which is the whole difference from pause, and it says so
-// rather than doing it quietly.
+// stop discards the frontier, which is the whole difference from pause, and it
+// says so rather than doing it quietly. What it must not discard is the pages
+// already fetched: those are the item's corpus, and the design keeps them.
 func TestStopNeedsForceAndThenDiscards(t *testing.T) {
 	srv := carSite(t)
 	dir := crawlDir(t)
 	runOK(t, dir, "item", "add", "vehicle", "-u", srv.URL+"/")
-	runOK(t, dir, "start", "vehicle", "--depth", "5")
+	// Budgeted, so the crawl stops with work still queued. A crawl that drains
+	// its frontier leaves stop nothing to lose and nothing to ask about.
+	runOK(t, dir, "start", "vehicle", "--depth", "5", "--max-pages", "1")
 
-	before := runOK(t, dir, "item", "ls", "vehicle")
-	if strings.Contains(before, "0 queued / 0 visited") {
+	before := runOK(t, dir, "job", "ls", "-i", "vehicle")
+	if strings.Contains(before, "no jobs") {
 		t.Fatalf("nothing was crawled, so there is nothing to discard:\n%s", before)
 	}
 
@@ -210,15 +214,42 @@ func TestStopNeedsForceAndThenDiscards(t *testing.T) {
 	if !strings.Contains(err.Error(), "scour job pause vehicle") {
 		t.Errorf("the refusal should name the non-destructive verb: %v", err)
 	}
-	if after := runOK(t, dir, "item", "ls", "vehicle"); after != before {
+	if after := runOK(t, dir, "job", "ls", "-i", "vehicle"); after != before {
 		t.Errorf("a refused stop changed something:\n%s\n%s", before, after)
 	}
+
+	visitedBefore := visitedCount(t, dir)
 
 	out := runOK(t, dir, "job", "stop", "vehicle", "--force")
 	if !strings.Contains(out, "discarded") {
 		t.Errorf("stop did not say what it threw away:\n%s", out)
 	}
-	if after := runOK(t, dir, "item", "ls", "vehicle"); !strings.Contains(after, "0 queued / 0 visited") {
+	if after := runOK(t, dir, "item", "show", "vehicle"); !strings.Contains(after, "0 queued") {
 		t.Errorf("the frontier survived a forced stop:\n%s", after)
 	}
+	// The pages are the item's corpus, and stop is documented as keeping them.
+	// Discarding them here is how a stop costs a refetch of the whole site.
+	if got := visitedCount(t, dir); got != visitedBefore {
+		t.Errorf("stop discarded %d visited pages, want the corpus kept at %d",
+			visitedBefore-got, visitedBefore)
+	}
+}
+
+// visitedCount reads the pages fetched from `scour item show`, which reports
+// them as "<queued> queued / <visited> visited".
+func visitedCount(t *testing.T, dir string) int {
+	t.Helper()
+	for _, line := range strings.Split(runOK(t, dir, "item", "show", "vehicle"), "\n") {
+		_, rest, ok := strings.Cut(line, " / ")
+		if !ok || !strings.Contains(line, "queued") {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(rest), " visited")))
+		if err != nil {
+			t.Fatalf("could not read the visited count from %q: %v", line, err)
+		}
+		return n
+	}
+	t.Fatalf("no frontier line in item show:\n%s", runOK(t, dir, "item", "show", "vehicle"))
+	return 0
 }

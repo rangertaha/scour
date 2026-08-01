@@ -83,7 +83,7 @@ func (s *Server) crawlJob(ctx context.Context, name string, req crawlRequest) (*
 	}
 
 	if req.Reset {
-		if err := s.store.ResetFrontier(ctx, item.ID); err != nil {
+		if err := s.store.RecrawlJob(ctx, item.ID, job.ID); err != nil {
 			return nil, err
 		}
 	}

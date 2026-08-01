@@ -49,12 +49,15 @@ func Stop(a *cli.App) *ucli.Command {
 		Name:      "stop",
 		ArgsUsage: "<name>",
 		Usage:     "Stop a search for items, discarding its frontier",
-		Description: "Ends the search and throws away what it had queued, so the next `scour run`\n" +
-			"begins from the seeds rather than carrying on.\n\n" +
-			"The item's definition is untouched, and so are the cached page bodies, so a\n" +
-			"fresh search costs the crawl again but not the parsing. What goes is the\n" +
-			"work of deciding what to fetch next, which on a large site is hours of it.\n\n" +
-			"Use `scour job pause` to stop a search and keep that work.",
+		Description: "Ends the search and throws away what this job had queued, so the next\n" +
+			"`scour job start` begins from the seeds rather than carrying on.\n\n" +
+			"Only this job's frontier goes. The definition, the pages already fetched,\n" +
+			"the records and the model are all kept, and so is the frontier of any other\n" +
+			"job over the same item. What goes is the work of deciding what to fetch\n" +
+			"next, which on a large site is hours of it.\n\n" +
+			"Because the pages are kept, a later start finds what is new rather than\n" +
+			"fetching the site again. Use `scour job start --reset` for that.\n\n" +
+			"Use `scour job pause` to stop a search and keep the frontier.",
 		UsageText: "  scour job pause news    # the one you probably want\n" +
 			"  scour job stop news --force",
 		Flags: []ucli.Flag{
@@ -83,7 +86,14 @@ func runStop(c context.Context, a *cli.App, name string, force bool) error {
 	if err != nil {
 		return err
 	}
-	st, err := s.Status(c, item.ID)
+	job, err := s.JobForItem(c, item)
+	if err != nil {
+		return err
+	}
+	// What stop actually discards, which is this job's frontier. The visited
+	// pages are the item's corpus and are kept, so counting them here was
+	// offering to throw away something stop does not touch.
+	queued, err := s.QueueSize(c, job.ID)
 	if err != nil {
 		return err
 	}
@@ -91,12 +101,11 @@ func runStop(c context.Context, a *cli.App, name string, force bool) error {
 	// Naming a destructive default "stop" is how someone loses a frontier they
 	// meant to keep, so the cost is stated and confirmed rather than assumed.
 	// Nothing to lose costs nothing to ask about.
-	held := st.Queued + st.Visited
-	if held > 0 && !force {
-		return fmt.Errorf("%s has %d queued and %d visited urls to discard\n"+
+	if queued > 0 && !force {
+		return fmt.Errorf("%s has %d queued urls to discard\n"+
 			"  keep them:    scour job pause %s\n"+
 			"  discard them: scour job stop %s --force",
-			item.Name, st.Queued, st.Visited, item.Name, item.Name)
+			item.Name, queued, item.Name, item.Name)
 	}
 
 	// Paused is cleared as well: the frontier is gone, so leaving the item
@@ -104,13 +113,12 @@ func runStop(c context.Context, a *cli.App, name string, force bool) error {
 	if err := s.SetPaused(c, item.ID, false); err != nil {
 		return err
 	}
-	if err := s.ResetFrontier(c, item.ID); err != nil {
+	if err := s.StopJob(c, job.ID); err != nil {
 		return err
 	}
 
-	a.Printf("%s: stopped, discarded %d queued and %d visited urls\n",
-		item.Name, st.Queued, st.Visited)
-	a.Printf("the definition and the cached pages are untouched\n")
+	a.Printf("%s: stopped, discarded %d queued urls\n", item.Name, queued)
+	a.Printf("the definition, the cached pages and the records are untouched\n")
 	a.Printf("search again from the seeds: scour run %s\n", item.Name)
 	return nil
 }

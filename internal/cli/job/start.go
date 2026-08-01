@@ -82,7 +82,7 @@ func Start(a *cli.App) *ucli.Command {
 			},
 			&ucli.BoolFlag{
 				Name:        "reset",
-				Usage:       "discard the existing frontier and start over",
+				Usage:       "discard this job's frontier and fetch the sites again",
 				Destination: &f.reset,
 			},
 			&ucli.BoolFlag{
@@ -165,7 +165,11 @@ func runCrawl(c context.Context, a *cli.App, name string, f crawlFlags) error {
 	}
 
 	if f.reset {
-		if err := s.ResetFrontier(c, item.ID); err != nil {
+		job, err := s.JobForItem(c, item)
+		if err != nil {
+			return err
+		}
+		if err := s.RecrawlJob(c, item.ID, job.ID); err != nil {
 			return err
 		}
 	}

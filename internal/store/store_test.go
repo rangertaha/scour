@@ -1117,3 +1117,99 @@ func TestRemovingAJobTakesItsFrontier(t *testing.T) {
 		t.Errorf("the surviving job has %d queued, want its own 1 (%v)", n, err)
 	}
 }
+
+// twoJobs sets up one item with two jobs, each holding a frontier, and a
+// visited page in the item's shared corpus.
+func twoJobs(t *testing.T, s *Store) (*Item, *Job, *Job) {
+	t.Helper()
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.CreateJob(ctx, "daily", item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.CreateJob(ctx, "archive", item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, j := range []*Job{a, a, b} {
+		raw := fmt.Sprintf("http://example.com/%d", i)
+		if err := s.PushQueue(ctx, j.ID, 1, URLHash(item.ID, raw), []byte(raw)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.MarkVisited(ctx, item.ID, 4242); err != nil {
+		t.Fatal(err)
+	}
+	return item, a, b
+}
+
+// Stopping a job discards its frontier and nothing else. The design says so in
+// as many words: the definition, the cached pages, the records and the model
+// are kept. An item-scoped reset here took the other job's frontier with it,
+// which is the one thing nothing can recompute.
+func TestStoppingAJobLeavesTheRestAlone(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, daily, archive := twoJobs(t, s)
+
+	if err := s.StopJob(ctx, daily.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if n, err := s.QueueSize(ctx, daily.ID); err != nil || n != 0 {
+		t.Errorf("the stopped job kept %d queued urls, want 0 (%v)", n, err)
+	}
+	if n, err := s.QueueSize(ctx, archive.ID); err != nil || n != 1 {
+		t.Errorf("the other job of the same item has %d queued, want its own 1 (%v)", n, err)
+	}
+	// The visited set is the item's record of what its corpus holds, not this
+	// crawl's scratch space.
+	visited, err := s.IsVisited(ctx, item.ID, 4242)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !visited {
+		t.Error("stopping a job forgot a page the item had already fetched")
+	}
+}
+
+// A recrawl has to clear the visited set as well, or colly declines every
+// re-seeded URL as one it has seen and the crawl asked to start over fetches
+// nothing at all. What it must not do is take another job's frontier.
+func TestRecrawlingAJobKeepsTheOtherJobsWork(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, daily, archive := twoJobs(t, s)
+
+	if err := s.RecrawlJob(ctx, item.ID, daily.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if n, err := s.QueueSize(ctx, daily.ID); err != nil || n != 0 {
+		t.Errorf("the recrawled job kept %d queued urls, want 0 (%v)", n, err)
+	}
+	if n, err := s.QueueSize(ctx, archive.ID); err != nil || n != 1 {
+		t.Errorf("recrawling one job left the other with %d queued, want 1 (%v)", n, err)
+	}
+	visited, err := s.IsVisited(ctx, item.ID, 4242)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if visited {
+		t.Error("the visited set survived a recrawl, so the re-seeded urls will all be declined")
+	}
+
+	// Starting over means the item's record of what it has seen starts empty,
+	// or the counts afterwards describe two crawls added together.
+	var urls int64
+	if err := s.DB().Model(&URL{}).Where("item_id = ?", item.ID).Count(&urls).Error; err != nil {
+		t.Fatal(err)
+	}
+	if urls != 0 {
+		t.Errorf("%d urls survived a recrawl, so its counts describe two crawls at once", urls)
+	}
+}
