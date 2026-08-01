@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rangertaha/scour/internal/schedule"
+
 	"github.com/BurntSushi/toml"
 )
 
@@ -55,6 +57,10 @@ type Crawl struct {
 	Robots       bool     `toml:"robots"`
 	ContentTypes []string `toml:"content_types"`
 	Depth        int      `toml:"depth"`
+	// Scheduler is the order the frontier is drained in: best, breadth, depth,
+	// random or warmup. Empty is best, which is what makes a focused crawl
+	// focused. See `scour start --help` for what each means.
+	Scheduler string `toml:"scheduler"`
 }
 
 // Browser configures rendering pages in a real browser, for sites that build
@@ -247,6 +253,13 @@ func (c Config) Validate() error {
 	}
 	if c.Crawl.Depth < 0 {
 		return fmt.Errorf("crawl.depth must not be negative, got %d", c.Crawl.Depth)
+	}
+	// A misspelled scheduler must fail here, not silently fall back to the
+	// default, where a crawl ordered by something other than what was asked
+	// for looks exactly like one that worked.
+	if name := strings.TrimSpace(c.Crawl.Scheduler); name != "" && !schedule.Has(name) {
+		return fmt.Errorf("crawl.scheduler %q is not one of: %s",
+			name, strings.Join(schedule.Names(), ", "))
 	}
 	if c.Browser.Pool < 0 {
 		return fmt.Errorf("browser.pool must not be negative, got %d", c.Browser.Pool)

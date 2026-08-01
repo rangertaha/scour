@@ -138,3 +138,49 @@ func TestBudgetedCrawlResumes(t *testing.T) {
 		t.Errorf("fetched %d distinct pages across two runs of 5, want 10", len(seen))
 	}
 }
+
+// The scheduling policy has to reach the frontier, or a config key that changes
+// nothing looks exactly like one that works.
+func TestSchedulerConfigReachesTheFrontier(t *testing.T) {
+	for _, tc := range []struct{ name, scheduler string }{
+		{"default", ""},
+		{"best", "best"},
+		{"breadth", "breadth"},
+		{"depth", "depth"},
+		{"random", "random"},
+		{"warmup", "warmup"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := wideSite(t, 12, 0)
+			_, s, cfg := harness(t)
+			cfg.Crawl.Scheduler = tc.scheduler
+			c := New(cfg, s, cache.Local(cfg.PagesDir()))
+			e, targets := item(t, s, srv.URL)
+
+			// Whatever the order, a bounded crawl fetches exactly its budget:
+			// the policy decides which pages, never how many.
+			result, err := c.Run(context.Background(), Options{
+				Item: e, Targets: targets, Types: types(t, "html"), Depth: 3, Limit: 5,
+			})
+			if err != nil {
+				t.Fatalf("scheduler %q: %v", tc.scheduler, err)
+			}
+			if result.Fetched != 5 {
+				t.Errorf("scheduler %q fetched %d, want 5", tc.scheduler, result.Fetched)
+			}
+		})
+	}
+}
+
+// A name nothing registers must fail where it is written, not fall back to the
+// default, where a crawl ordered by something other than what was asked for
+// looks exactly like one that worked.
+func TestUnknownSchedulerIsRefused(t *testing.T) {
+	_, _, cfg := harness(t)
+	cfg.Crawl.Scheduler = "nonsense"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("an unregistered scheduler must be refused")
+	} else if !strings.Contains(err.Error(), "breadth") {
+		t.Errorf("the refusal should list what works: %v", err)
+	}
+}

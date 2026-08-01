@@ -683,6 +683,12 @@ user_agent     = "scour/0.1 (+https://github.com/Rangertaha/scour)"
 robots         = true                # honour robots.txt
 content_types  = ["html"]            # see "Limiting content types" above
 depth          = 10
+scheduler      = "best"              # order the frontier is drained in:
+                                     #   best     highest scoring first (default)
+                                     #   breadth  oldest first, a level at a time
+                                     #   depth    newest first, down a spur
+                                     #   random   an unbiased sample
+                                     #   warmup   breadth until a model exists
 
 [browser]
 enabled   = true                     # allow rendering at all

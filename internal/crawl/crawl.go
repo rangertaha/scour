@@ -31,6 +31,7 @@ import (
 	"github.com/rangertaha/scour/internal/content"
 	crawlqueue "github.com/rangertaha/scour/internal/crawl/queue"
 	crawlstorage "github.com/rangertaha/scour/internal/crawl/storage"
+	"github.com/rangertaha/scour/internal/schedule"
 	"github.com/rangertaha/scour/internal/score"
 	"github.com/rangertaha/scour/internal/store"
 	"github.com/rangertaha/scour/internal/transport"
@@ -83,6 +84,8 @@ type Frontier interface {
 	// SetBudget is asked, before each request is handed out, whether the crawl
 	// can still pay for one, and claims the slot when it says yes.
 	SetBudget(func() bool)
+	// SetOrder is asked, before each lease, what order to drain in.
+	SetOrder(func() schedule.Order)
 }
 
 // Result reports what a crawl did.
@@ -282,6 +285,22 @@ func (c *Crawler) Run(ctx context.Context, opts Options) (*Result, error) {
 	// cannot be paid for is left in the queue rather than dispatched and then
 	// stopped on the way back, which overshot by whatever was in flight.
 	pending.SetBudget(func() bool { return st.claim(opts.Limit) })
+
+	// The scheduling policy is asked per lease, so it can change its mind as
+	// the crawl goes on. A misspelled name fails in config validation, so by
+	// here it is either registered or empty.
+	policy, err := schedule.New(c.cfg.Crawl.Scheduler, schedule.Config{})
+	if err != nil {
+		return nil, err
+	}
+	pending.SetOrder(func() schedule.Order {
+		st.mu.Lock()
+		fetched := st.fetched
+		st.mu.Unlock()
+		return policy.Order(schedule.State{
+			Item: opts.Item.ID, Fetched: fetched, Trained: trainedScorer(opts.Scorer),
+		})
+	})
 
 	q, err := collyqueue.New(threads, pending)
 	if err != nil {
@@ -761,6 +780,17 @@ func seedURLs(targets []store.Target) []string {
 		}
 	}
 	return out
+}
+
+// trainedScorer reports whether a scorer has been fitted to anything.
+//
+// A policy that waits for a model needs to know, and the scorer is the only
+// thing that can say: before one is fitted every score is equal, so ordering by
+// score is ordering by noise. A scorer with no opinion on the question is
+// treated as untrained, which is the safe answer.
+func trainedScorer(s score.Scorer) bool {
+	t, ok := s.(score.Trained)
+	return ok && t.Trained()
 }
 
 // queuedScore recovers the score a request was queued with, from the context

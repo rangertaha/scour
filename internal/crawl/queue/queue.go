@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/rangertaha/scour/internal/schedule"
 	"github.com/rangertaha/scour/internal/store"
 )
 
@@ -38,6 +39,12 @@ type Storage struct {
 	// added. It is set by the crawler, which is the only part that knows what
 	// the seeds are.
 	refill func() int
+
+	// order is asked, before each lease, what order to drain in. A policy is
+	// consulted per request rather than per crawl so it may change its mind:
+	// crawling broadly until a model exists and best first after is a policy,
+	// not a special case. Nil is best first.
+	order func() schedule.Order
 
 	// afford is asked, before a request is handed out, whether the crawl can
 	// still pay for one, and claims the slot when it says yes. It is called
@@ -82,6 +89,14 @@ func (s *Storage) SetRefill(f func() int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.refill = f
+}
+
+// SetOrder installs the function consulted for the drain order before each
+// lease. Passing nil, or never calling this, leaves the queue best first.
+func (s *Storage) SetOrder(f func() schedule.Order) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.order = f
 }
 
 // SetBudget installs the function consulted before each request is handed out.
@@ -169,10 +184,18 @@ func (s *Storage) GetRequest() ([]byte, error) {
 		return nil, store.ErrQueueEmpty
 	}
 
-	data, err := s.store.LeaseQueue(s.ctx, s.itemID, 0)
+	s.mu.Lock()
+	next := s.order
+	s.mu.Unlock()
+	order := schedule.ByScore
+	if next != nil {
+		order = next()
+	}
+
+	data, err := s.store.LeaseQueueOrdered(s.ctx, s.itemID, 0, nil, order)
 	if errors.Is(err, store.ErrQueueEmpty) && s.topUp() > 0 {
 		// Empty only meant the next batch of seeds had not been queued yet.
-		data, err = s.store.LeaseQueue(s.ctx, s.itemID, 0)
+		data, err = s.store.LeaseQueueOrdered(s.ctx, s.itemID, 0, nil, order)
 	}
 	if err != nil {
 		return nil, err

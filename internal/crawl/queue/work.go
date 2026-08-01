@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rangertaha/scour/internal/schedule"
 	"github.com/rangertaha/scour/internal/store"
 )
 
@@ -138,6 +139,11 @@ func (w *Work) SetScorer(func([]byte) float64) {}
 // SetRefill implements the frontier a crawl expects, and does nothing: there
 // are no seeds here to top up.
 func (w *Work) SetRefill(func() int) {}
+
+// SetOrder implements the frontier a crawl expects, and does nothing: a
+// crawler fed by the broker takes the work it is handed, and the order was
+// decided by whatever handed it over.
+func (w *Work) SetOrder(func() schedule.Order) {}
 
 // SetBudget installs the function consulted before each request is handed out.
 func (w *Work) SetBudget(f func() bool) {
