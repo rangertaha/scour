@@ -28,7 +28,11 @@
 //
 // Declare the interface the extension satisfies and the config it is built
 // from, make a registry for the pair, and export the four wrappers. Nothing
-// else is required, and docs/engine.md lists what exists so far.
+// else is required.
+//
+// What exists is discoverable from the code: every extension point calls
+// registry.New, so grepping for it lists them, which a document cannot go
+// stale against.
 //
 // # Adding an implementation
 //
