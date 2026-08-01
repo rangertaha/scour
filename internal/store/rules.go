@@ -185,6 +185,10 @@ type RecordQuery struct {
 	// is the whole difference between record ls and record search.
 	Terms []query.Term
 
+	// IDs narrows to particular records, which is how showing one and
+	// removing a named few reuse the same read as a listing.
+	IDs []uint
+
 	MinConfidence float64
 	Formats       []string
 	ExcludeFormat []string
@@ -227,6 +231,9 @@ func (s *Store) SearchRecords(ctx context.Context, itemID uint, q RecordQuery) (
 	}
 	if q.SinceID > 0 {
 		base = base.Where("id > ?", q.SinceID)
+	}
+	if len(q.IDs) > 0 {
+		base = base.Where("id IN ?", q.IDs)
 	}
 	for _, t := range q.Terms {
 		cond, args := termWhere(t)
@@ -468,4 +475,40 @@ func (s *Store) DeleteModel(ctx context.Context, itemID uint) error {
 		}
 		return nil
 	})
+}
+
+// RecordByID reads one record in full, with its values and the url it came
+// from. Scoped to the item so an id from another item's listing is not found
+// rather than shown.
+func (s *Store) RecordByID(ctx context.Context, itemID, id uint) (*RecordRow, error) {
+	rows, _, err := s.SearchRecords(ctx, itemID, RecordQuery{IDs: []uint{id}})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("record %d: %w", id, ErrNotFound)
+	}
+	return &rows[0], nil
+}
+
+// DeleteRecords removes records and reports how many went.
+//
+// Scoped to the item, so an id belonging to another item is a miss rather than
+// somebody else's row deleted. The values go with them: the association
+// declares the cascade, and foreign keys are enforced once migrations are done.
+//
+// The pages are left alone. A record is what was read out of a page, and
+// removing a bad reading is not a reason to refetch the site; the next train
+// reads the same page again.
+func (s *Store) DeleteRecords(ctx context.Context, itemID uint, ids []uint) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res := s.db.WithContext(ctx).
+		Where("item_id = ? AND id IN ?", itemID, ids).
+		Delete(&Record{})
+	if res.Error != nil {
+		return 0, fmt.Errorf("delete records: %w", res.Error)
+	}
+	return res.RowsAffected, nil
 }

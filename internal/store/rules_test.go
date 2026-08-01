@@ -4,6 +4,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -369,5 +370,127 @@ func TestSearchFollowKeepsArrivalOrder(t *testing.T) {
 		if r.Values["make"] == "Toyota" {
 			t.Error("a follower was given a record the query excludes")
 		}
+	}
+}
+
+// Showing a record reads it in full, and is scoped to the item so an id from
+// another item's listing is a miss rather than somebody else's row.
+func TestRecordByID(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "vehicle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.CreateItem(ctx, "boat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRecords(t, s, item)
+
+	rows, _, err := s.SearchRecords(ctx, item.ID, RecordQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := rows[0]
+
+	got, err := s.RecordByID(ctx, item.ID, want.ID)
+	if err != nil {
+		t.Fatalf("record %d: %v", want.ID, err)
+	}
+	if got.Values["make"] != want.Values["make"] || got.URL == "" {
+		t.Errorf("got %v with url %q, want the values and the page it came from",
+			got.Values, got.URL)
+	}
+
+	if _, err := s.RecordByID(ctx, other.ID, want.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("another item's record resolved: %v", err)
+	}
+}
+
+// Removing records takes their values with them and leaves the pages alone: a
+// record is what was read out of a page, and a bad reading is not a reason to
+// refetch the site.
+func TestDeleteRecords(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "vehicle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRecords(t, s, item)
+
+	rows, before, err := s.SearchRecords(ctx, item.ID, RecordQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var urlsBefore int64
+	if err := s.DB().Model(&URL{}).Where("item_id = ?", item.ID).Count(&urlsBefore).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := s.DeleteRecords(ctx, item.ID, []uint{rows[0].ID, rows[1].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("removed %d, want 2", n)
+	}
+
+	_, after, err := s.SearchRecords(ctx, item.ID, RecordQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != before-2 {
+		t.Errorf("%d records left, want %d", after, before-2)
+	}
+
+	// The values go with the record, or the next export carries fields whose
+	// record is gone.
+	var orphaned int64
+	if err := s.DB().Model(&Value{}).Where("record_id = ?", rows[0].ID).
+		Count(&orphaned).Error; err != nil {
+		t.Fatal(err)
+	}
+	if orphaned != 0 {
+		t.Errorf("%d values outlived the record they belonged to", orphaned)
+	}
+
+	var urlsAfter int64
+	if err := s.DB().Model(&URL{}).Where("item_id = ?", item.ID).Count(&urlsAfter).Error; err != nil {
+		t.Fatal(err)
+	}
+	if urlsAfter != urlsBefore {
+		t.Errorf("removing records took %d pages with them", urlsBefore-urlsAfter)
+	}
+}
+
+// An id belonging to another item must not delete that item's row.
+func TestDeleteRecordsIsScopedToTheItem(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	mine, err := s.CreateItem(ctx, "vehicle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := s.CreateItem(ctx, "boat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRecords(t, s, theirs)
+
+	rows, before, err := s.SearchRecords(ctx, theirs.ID, RecordQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.DeleteRecords(ctx, mine.ID, []uint{rows[0].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("removed %d of another item's records", n)
+	}
+	if _, after, _ := s.SearchRecords(ctx, theirs.ID, RecordQuery{}); after != before {
+		t.Errorf("the other item has %d records, want its %d untouched", after, before)
 	}
 }

@@ -288,12 +288,18 @@ func parseLabel(s string) (store.Label, error) {
 	}
 }
 
-// searchFlags are the filters record ls and record search share.
+// filterFlags are the ways to narrow a set of records, shared by every command
+// that reads them.
 //
-// One list rather than two, because the design's rule is that every ls filter
-// works on a search as well: a search can be pinned to one content type, one
-// confidence, or one verdict without learning a second set of names.
-func searchFlags(f *streamFlags) []ucli.Flag {
+// One list rather than four, because the design's rule is that every listing
+// filter works on a search and on a removal as well: the same set can be picked
+// out for printing, for writing out, or for dropping, without learning a second
+// set of names for each.
+//
+// There is no --format here. It means the output format on `record write`, and
+// a flag that means a content type under one verb and a file format under
+// another is worse than a longer name.
+func filterFlags(f *streamFlags) []ucli.Flag {
 	return []ucli.Flag{
 		&ucli.FloatFlag{
 			Name:        "confidence",
@@ -302,6 +308,7 @@ func searchFlags(f *streamFlags) []ucli.Flag {
 		},
 		&ucli.StringSliceFlag{
 			Name:        "type",
+			Aliases:     []string{"t"},
 			Usage:       "only records extracted from a content type (repeatable)",
 			Destination: &f.types,
 		},
@@ -316,11 +323,29 @@ func searchFlags(f *streamFlags) []ucli.Flag {
 			Usage:       "only records carrying this `verdict`: valid, invalid, none",
 			Destination: &f.label,
 		},
-		&ucli.StringSliceFlag{
-			Name:        "format",
-			Usage:       "alias for --type",
-			Destination: &f.types,
+	}
+}
+
+// destinationFlags say where records go when they are not being printed.
+func destinationFlags(f *streamFlags) []ucli.Flag {
+	return []ucli.Flag{
+		&ucli.StringFlag{
+			Name:        "to",
+			Usage:       "`destination`: a directory, or a URL for the webhook format",
+			Destination: &f.out.to,
 		},
+		&ucli.StringFlag{
+			Name:        "token-env",
+			Usage:       "environment `variable` holding the webhook bearer token",
+			Destination: &f.out.tokenEnv,
+		},
+	}
+}
+
+// searchFlags are what a listing or a search takes: the filters, plus following
+// and the shortcut that writes what was listed instead of printing it.
+func searchFlags(f *streamFlags) []ucli.Flag {
+	return append(append(filterFlags(f),
 		&ucli.BoolFlag{
 			Name:        "follow",
 			Aliases:     []string{"f"},
@@ -332,15 +357,5 @@ func searchFlags(f *streamFlags) []ucli.Flag {
 			Usage:       "write the records out instead of printing them: " + exportFormats(),
 			Destination: &f.out.format,
 		},
-		&ucli.StringFlag{
-			Name:        "to",
-			Usage:       "`destination` for --write: a directory, or a URL for the webhook format",
-			Destination: &f.out.to,
-		},
-		&ucli.StringFlag{
-			Name:        "token-env",
-			Usage:       "environment `variable` holding the webhook bearer token",
-			Destination: &f.out.tokenEnv,
-		},
-	}
+	), destinationFlags(f)...)
 }

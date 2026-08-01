@@ -24,6 +24,6 @@ func Record(a *cli.App) *ucli.Command {
 			"  scour record ls vehicle --follow\n" +
 			"  scour record mark vehicle 1042 --verdict invalid\n" +
 			"  scour record write vehicle --format csv --to ./out",
-		Commands: []*ucli.Command{Search(a), List(a), Mark(a)},
+		Commands: []*ucli.Command{Search(a), List(a), Show(a), Mark(a), Write(a), Remove(a)},
 	})
 }

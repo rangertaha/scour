@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	ucli "github.com/urfave/cli/v3"
+
 	"github.com/rangertaha/scour/internal/cli"
 	"github.com/rangertaha/scour/internal/query"
 
@@ -24,6 +26,10 @@ type exportFlags struct {
 	confidence float64
 	label      string
 	limit      int
+	// types and excludeType narrow to content types, so a write can be pinned
+	// the same way a listing can.
+	types       []string
+	excludeType []string
 
 	// terms is the search a listing was narrowed by, so exporting what is on
 	// screen does not mean restating it as filter flags.
@@ -57,6 +63,8 @@ func runExport(c context.Context, a *cli.App, name string, f exportFlags) error 
 	rows, total, err := s.SearchRecords(c, item.ID, store.RecordQuery{
 		Terms:         q.Terms,
 		MinConfidence: f.confidence,
+		Formats:       f.types,
+		ExcludeFormat: f.excludeType,
 		Label:         store.Label(f.label),
 		Limit:         f.limit,
 	})
@@ -117,3 +125,58 @@ func runExport(c context.Context, a *cli.App, name string, f exportFlags) error 
 
 // exportFormats is the help text listing what is registered.
 func exportFormats() string { return strings.Join(export.Names(), ", ") }
+
+// Write takes records out of scour.
+//
+// A command as well as a flag on the listing. `record ls --write csv` is how
+// you export what you were already looking at; this is how a pipeline exports
+// without pretending to be a person reading a table, and it is the form worth
+// putting in a cron entry.
+//
+// It takes the same query as `record search`, so a search that found the right
+// rows on screen exports exactly those rows rather than being restated as a set
+// of filter flags.
+func Write(a *cli.App) *ucli.Command {
+	var f streamFlags
+
+	return &ucli.Command{
+		Name:      "write",
+		Aliases:   []string{"export"},
+		ArgsUsage: "<name> [query]...",
+		Usage:     "Write records out, as csv, json, jsonl or a webhook",
+		Description: "Records are the product, so they belong wherever the rest of your pipeline\n" +
+			"reads. Written out they are grouped by the domain they came from, one file\n" +
+			"per site, so an export is diffable and a site that changed is a changed file.\n\n" +
+			"The columns are the union of every record's fields rather than the first\n" +
+			"record's, so a field only some pages carry still gets a column, and the\n" +
+			"verdict travels with the record, because an export is also how records get\n" +
+			"corrected outside scour.\n\n" +
+			"One file per day, so re-running overwrites rather than accumulating.",
+		UsageText: "  scour record write vehicle --format csv --to ./out\n" +
+			"  scour record write vehicle --format jsonl --to ./out\n\n" +
+			"Only what matches, the same query record search takes:\n" +
+			"  scour record write vehicle make:Ford --format csv --to ./out\n\n" +
+			"Post them somewhere instead:\n" +
+			"  scour record write vehicle --format webhook --to https://example.com/ingest",
+		Flags: append(append(filterFlags(&f),
+			&ucli.StringFlag{
+				Name:        "format",
+				Usage:       "`format` to write: " + exportFormats(),
+				Destination: &f.out.format,
+			},
+		), destinationFlags(&f)...),
+		Action: func(c context.Context, cmd *ucli.Command) error {
+			args, err := cli.AtLeast(cmd, 1, "an item name")
+			if err != nil {
+				return err
+			}
+			if f.out.format == "" {
+				return cli.Usagef("record write needs --format: %s", exportFormats())
+			}
+			f.out.confidence, f.out.label, f.out.limit = f.confidence, f.label, a.Limit
+			f.out.types, f.out.excludeType = f.types, f.excludeType
+			f.out.terms = args[1:]
+			return runExport(c, a, args[0], f.out)
+		},
+	}
+}
