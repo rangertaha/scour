@@ -169,11 +169,25 @@ func (s *Store) DeleteJob(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	err = s.db.WithContext(ctx).Where("id = ?", job.ID).Delete(&Job{}).Error
-	if err != nil {
-		return fmt.Errorf("delete job %q: %w", name, err)
-	}
-	return nil
+	// The frontier goes with the job. Targets and content types are carried
+	// out by their foreign keys, but the queue has none: it was rebuilt from a
+	// model that references the job by id without declaring the constraint, and
+	// adding one now would only reach databases created afterwards, since
+	// sqlite cannot add a foreign key to a table that exists. Deleting it here
+	// works on every database rather than on the new ones.
+	//
+	// Without this a removed job leaves its whole frontier behind, invisible
+	// because every reader joins jobs, and unreachable because nothing will
+	// ever hand it out. One job on a real database holds 72,491 rows.
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("job_id = ?", job.ID).Delete(&QueueItem{}).Error; err != nil {
+			return fmt.Errorf("delete the frontier of job %q: %w", name, err)
+		}
+		if err := tx.Where("id = ?", job.ID).Delete(&Job{}).Error; err != nil {
+			return fmt.Errorf("delete job %q: %w", name, err)
+		}
+		return nil
+	})
 }
 
 // JobForItem returns the job an unnamed crawl of an item means.

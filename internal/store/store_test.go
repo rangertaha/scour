@@ -1072,3 +1072,48 @@ func TestTwoJobsOfOneItemHaveSeparateFrontiers(t *testing.T) {
 		t.Errorf("daily resumed with %d queued, want the 1 it had left (%v)", n, err)
 	}
 }
+
+// Removing a job has to take its frontier. The queue has no foreign key to
+// carry it out, so a job removed without this leaves its whole frontier behind:
+// invisible, because every reader joins jobs, and unreachable, because nothing
+// will ever hand it out.
+func TestRemovingAJobTakesItsFrontier(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	item, err := s.CreateItem(ctx, "news")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doomed, err := s.CreateJob(ctx, "doomed", item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep, err := s.CreateJob(ctx, "keep", item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, j := range []*Job{doomed, doomed, keep} {
+		raw := fmt.Sprintf("http://example.com/%d", i)
+		if err := s.PushQueue(ctx, j.ID, 1, URLHash(item.ID, raw), []byte(raw)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := s.DeleteJob(ctx, "doomed"); err != nil {
+		t.Fatal(err)
+	}
+
+	var orphaned int64
+	if err := s.DB().Model(&QueueItem{}).Where("job_id = ?", doomed.ID).
+		Count(&orphaned).Error; err != nil {
+		t.Fatal(err)
+	}
+	if orphaned != 0 {
+		t.Errorf("%d queued rows outlived the job that owned them", orphaned)
+	}
+
+	// And the other job of the same item keeps everything it had.
+	if n, err := s.QueueSize(ctx, keep.ID); err != nil || n != 1 {
+		t.Errorf("the surviving job has %d queued, want its own 1 (%v)", n, err)
+	}
+}

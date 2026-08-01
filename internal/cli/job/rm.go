@@ -59,7 +59,13 @@ func Remove(a *cli.App) *ucli.Command {
 			partial := len(domains) > 0 || len(urls) > 0 || len(types) > 0
 			if !partial {
 				if !force {
-					a.Printf("this removes job %q and its frontier\n", name)
+					// The size of what is about to go, because "and its
+					// frontier" reads as a detail until it is a number.
+					queued, err := s.QueueSize(c, job.ID)
+					if err != nil {
+						return err
+					}
+					a.Printf("this removes job %q and its frontier of %d queued urls\n", name, queued)
 					a.Println("the item, its records and its model are not touched")
 					a.Println("re-run with --force to confirm")
 					return cli.ErrSilent

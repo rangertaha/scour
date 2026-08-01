@@ -199,6 +199,8 @@ type Status struct {
 	Targets    int64
 	Properties int64
 	Aliases    int64
+	// Queued is how many URLs are waiting across the item's jobs. Not a url
+	// status: see the note on the query.
 	Queued     int64
 	Visited    int64
 	Failed     int64
@@ -238,7 +240,14 @@ func (s *Store) Status(ctx context.Context, itemID uint) (*Status, error) {
 			"job_id IN (SELECT id FROM jobs WHERE item_id = ?)", itemID}},
 		{&st.Properties, &Property{}, []any{"item_id = ?", itemID}},
 		{&st.Aliases, &Alias{}, []any{"item_id = ?", itemID}},
-		{&st.Queued, &URL{}, []any{"item_id = ? AND status = ?", itemID, URLQueued}},
+		// Queued is the work waiting, which lives in the frontier and not in
+		// the url states. A url stays marked queued when its frontier entry
+		// goes without a fetch being recorded, so counting urls reported work
+		// that no crawl would ever be handed: 10,942 against a real frontier
+		// of 6,580. Everything asking this means "is there anything to do",
+		// so it is answered from the queue the dispatcher actually reads.
+		{&st.Queued, &QueueItem{}, []any{
+			"job_id IN (SELECT id FROM jobs WHERE item_id = ?)", itemID}},
 		{&st.Visited, &URL{}, []any{"item_id = ? AND status = ?", itemID, URLFetched}},
 		{&st.Failed, &URL{}, []any{"item_id = ? AND status = ?", itemID, URLFailed}},
 		{&st.Skipped, &URL{}, []any{"item_id = ? AND status = ?", itemID, URLSkipped}},
