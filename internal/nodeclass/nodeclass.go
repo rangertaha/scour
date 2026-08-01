@@ -25,7 +25,7 @@
 //
 // Implement Classifier and register it from init, the same as every other
 // extension point in scour. See internal/registry for the shape they share,
-// and PLAN.md section 4 for what exists.
+// and docs/engine.md for what exists.
 package nodeclass
 
 import (

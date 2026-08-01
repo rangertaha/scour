@@ -26,7 +26,7 @@ measured below against live sites rather than fixtures. Running the components
 across several machines works and has been tested end to end against a real
 NATS server and a real S3 endpoint. What is least settled is the extraction
 model itself: it is being changed by measurement, and the open questions are
-kept in `ALGO.md` and `PLAN.md`.
+kept in `ALGO.md`.
 
 ## Measured
 

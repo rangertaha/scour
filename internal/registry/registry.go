@@ -28,7 +28,7 @@
 //
 // Declare the interface the extension satisfies and the config it is built
 // from, make a registry for the pair, and export the four wrappers. Nothing
-// else is required, and PLAN.md section 4 lists what exists so far.
+// else is required, and docs/engine.md lists what exists so far.
 //
 // # Adding an implementation
 //
