@@ -82,6 +82,32 @@ func (v *Vectors) Mean(words []string) ([]float32, int) {
 	return sum, known
 }
 
+// Similar reports how close two bags of words are in meaning, on the same 0 to
+// 1 scale a scorer returns, and whether there was enough known vocabulary on
+// both sides to compare at all.
+//
+// The second return is not a detail. A comparison against words the file does
+// not have is not a low similarity, it is no similarity, and a caller that
+// read the zero as disagreement would be treating a gap in its dictionary as
+// evidence about the page. Callers that cannot compare should leave whatever
+// they already believed alone.
+//
+// It lives on Vectors rather than beside the scorer because the matcher asks
+// the same question about a document node that the scorer asks about a link.
+// Two copies of the arithmetic would drift apart while continuing to look like
+// they agreed.
+func (v *Vectors) Similar(a, b []string) (float64, bool) {
+	va, known := v.Mean(a)
+	if known == 0 {
+		return 0, false
+	}
+	vb, known := v.Mean(b)
+	if known == 0 {
+		return 0, false
+	}
+	return rescale(cosine(va, vb)), true
+}
+
 // maxWords bounds how many words are loaded. Vector files run to millions of
 // entries and hundreds of megabytes; the frequent words carry nearly all the
 // value for judging a link, and they come first in every published file.

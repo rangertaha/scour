@@ -30,8 +30,9 @@ func (t *Trainer) matcherFor() (wom.Matcher, func() *MatcherResult, error) {
 	}
 
 	cfg := matcher.Config{
-		Cache:  judgementCache{t.store},
-		Budget: t.cfg.Model.Budget,
+		Cache:   judgementCache{t.store},
+		Budget:  t.cfg.Model.Budget,
+		Vectors: t.cfg.Model.Vectors,
 	}
 
 	// Only build a provider if one is configured. A matcher that needs one and

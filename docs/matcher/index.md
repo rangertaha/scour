@@ -9,7 +9,7 @@ description: How strongly one node satisfies one property, and the seam where sc
 satisfies a property. It is the seam where scour's intelligence is chosen.</p>
 
 <figure>
-<img src="{{ '/img/matcher.svg' | relative_url }}" alt="A property and a candidate node go into the matcher, which answers how strongly that node is that field. Two implementations are registered: a heuristic one needing no network, and one that asks a language model.">
+<img src="{{ '/img/matcher.svg' | relative_url }}" alt="A property and a candidate node go into the matcher, which answers how strongly that node is that field. Three implementations are registered: a heuristic one needing no network, one comparing word vectors, and one that asks a language model.">
 </figure>
 
 ## What it is asked
@@ -25,11 +25,12 @@ Score(ctx context.Context, prop wom.Prop, node *wom.Node) float64
 so swapping the matcher swaps what the engine understands, without touching
 graph construction, locator synthesis, or a line of crawl code.
 
-## The two implementations
+## The three implementations
 
 | Name | Needs | Good at |
 | --- | --- | --- |
 | `heuristic` | Nothing. No network, no key, no training data | Labels that are words: `entry-title`, `byline`, `dateModified` |
+| `embed` | A word vector file, `[model] vectors` | Labels that mean the right thing in the wrong words |
 | `llm` | An [`[[ai]]` block]({{ '/ai/' | relative_url }}) | Judgements a word list cannot make |
 
 ```toml
@@ -41,6 +42,40 @@ The heuristic implementation is the default and the baseline, and everything
 richer is measured against it. That ordering is deliberate: a matcher that
 cannot be beaten by a model is a matcher worth keeping, and a model that cannot
 beat one is worth knowing about before it is in the default path.
+
+## What the heuristic cannot see
+
+It compares spellings. A page labelling its field `manufacturer` scores zero
+against a schema calling it `make`, and a Greek page labelling it anything at
+all scores zero against every English word in the schema. Those are not weak
+matches, they are invisible ones, and no weight on a token overlap finds them.
+
+`embed` compares meanings instead, against the same word vector file the
+[embed scorer]({{ '/score/' | relative_url }}) ranks links with. Naming the file
+once is what keeps a link and a node judged against the same vocabulary.
+
+```toml
+[model]
+matcher = "embed"
+vectors = "glove.6B.300d.txt"
+```
+
+It adjusts the heuristic rather than replacing it. A similarity moves the score
+by how far it sits from neutral, which is where unrelated text lands, so vectors
+that recognise nothing change nothing. That property is what makes it safe to
+leave on: the failure mode of a vector file is an absent answer rather than a
+wrong one, and an absent answer costs nothing.
+
+It speaks only inside the same undecided band the LLM matcher is consulted in,
+and for a different reason. Asking a model is expensive; asking a dictionary is
+free. The band is there because outside it the heuristic already has real
+evidence, and a dictionary that has never seen the page does not get to argue
+with it.
+
+Two limits are worth knowing before you turn it on. Published vectors are
+usually English-only, so a page in another language falls back to the heuristic
+rather than being helped. And orthogonal is not opposite: an unrelated label
+cannot argue against a match, only fail to argue for one.
 
 ## Why the expensive one is bounded
 
@@ -84,6 +119,13 @@ func init() {
     })
 }
 ```
+
+Ask `wom.Labels(node)` for the names that describe a value rather than reading
+attributes yourself. Which strings name a value is not a matter of taste: it is
+which attributes carry meaning, which tags name their content, which classes are
+layout vocabulary rather than description, and which neighbour is a label rather
+than a sibling value. All of that was settled by measurement, and each answer
+comes back with how far its source is trusted.
 
 Selected with `[model] matcher`. See
 [extending it]({{ '/architecture/extending.html' | relative_url }}).

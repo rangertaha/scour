@@ -90,7 +90,7 @@ func (s *Scorer) Trained() bool { return false }
 func (s *Scorer) Score(f score.Features) float64 {
 	tokens := plainTokens(f)
 	if len(tokens) == 0 {
-		return neutral
+		return Neutral
 	}
 
 	// Links repeat heavily across a site: the same anchor text, the same path
@@ -106,7 +106,7 @@ func (s *Scorer) Score(f score.Features) float64 {
 	}
 
 	vec, known := s.vectors.Mean(tokens)
-	result := neutral
+	result := Neutral
 	if known > 0 {
 		result = rescale(cosine(s.topic, vec))
 	}
@@ -120,11 +120,20 @@ func (s *Scorer) Score(f score.Features) float64 {
 	return result
 }
 
-// neutral is what a link whose words are all unknown scores. It is deliberately
-// mid-range rather than zero: not recognising a word is ignorance, and a
-// crawler that treated ignorance as evidence of irrelevance would never explore
-// vocabulary its vectors happen to lack.
-const neutral = 0.5
+// Neutral is what text the vectors have nothing to say about scores: an
+// unknown word here, two unrelated bags of words elsewhere.
+//
+// It is deliberately mid-range rather than zero, and for two reasons that meet
+// at the same number. Not recognising a word is ignorance, and a crawler that
+// treated ignorance as evidence of irrelevance would never explore vocabulary
+// its vectors happen to lack. And [rescale] puts a cosine of zero here, so
+// unrelated text lands on it too: in a real vector space almost nothing is
+// genuinely opposite.
+//
+// It is exported because it is the pivot any caller needs to read a similarity
+// as evidence. A score above it argues for a match, below it against, and one
+// on it argues nothing at all.
+const Neutral = 0.5
 
 // maxCache bounds the score cache. A crawl can discover millions of distinct
 // links, and an unbounded map keyed on their text would outgrow the crawl.

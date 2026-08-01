@@ -24,7 +24,7 @@ of extension appeared. One generic registry serves them all.
 | --- | --- | --- | --- |
 | [transport]({{ '/transport/' | relative_url }}) | `http.RoundTripper` | `http`, `webdriver` | `[[host]] transport` |
 | [score]({{ '/score/' | relative_url }}) | `Scorer` | `bayes`, `embed` | `[model] scorer` |
-| [matcher]({{ '/matcher/' | relative_url }}) | `wom.Matcher` | `heuristic`, `llm` | `[model] matcher` |
+| [matcher]({{ '/matcher/' | relative_url }}) | `wom.Matcher` | `heuristic`, `embed`, `llm` | `[model] matcher` |
 | [classify]({{ '/classify/' | relative_url }}) | `Classifier` | `llm` | `[model] classifier` |
 | [nodeclass]({{ '/classify/' | relative_url }}#nodeclass) | `Classifier` | `recency`*, `topic`* | not yet wired |
 | [cache]({{ '/cache/' | relative_url }}) | `Store` | `local`, `s3`†, `gcs`† | `[cache] driver` |

@@ -470,6 +470,36 @@ type weightedLabel struct {
 	weight float64
 }
 
+// Label is one name attached to a node, with how far its source is trusted.
+type Label struct {
+	// Text is the name as the page wrote it: an attribute value, a JSON key,
+	// a heading, a class.
+	Text string
+	// Weight is how reliable that source is, from 0 to 1. A declared
+	// vocabulary term is worth more than the class of an ancestor.
+	Weight float64
+}
+
+// Labels returns the names that plausibly describe the value a node holds,
+// ordered and weighted by how reliable each source is.
+//
+// It exists so that a matcher outside this package can ask the same question
+// of a node that the heuristic does, and get the same answer. Which strings
+// name a value is not a matter of opinion: it is which attributes carry
+// meaning, which tags name their content, which classes are layout vocabulary
+// rather than description, and which neighbour is a label rather than a
+// sibling value. Every one of those was settled by measurement, and a second
+// implementation would relitigate all of it and then drift, silently, because
+// nothing would fail when it did.
+func Labels(n *graph.Node) []Label {
+	ctx := labelContext(n)
+	out := make([]Label, 0, len(ctx))
+	for _, wl := range ctx {
+		out = append(out, Label{Text: wl.text, Weight: wl.weight})
+	}
+	return out
+}
+
 // labelContext gathers the strings that plausibly name the value held by n.
 // The sources are ordered by reliability: an explicit key or attribute name is
 // far better evidence than the class of a distant ancestor.

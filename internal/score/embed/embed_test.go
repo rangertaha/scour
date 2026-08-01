@@ -133,8 +133,8 @@ func TestUnknownVocabularyScoresNeutral(t *testing.T) {
 	s := scorer(t, "car")
 
 	got := s.Score(score.Features{URL: "http://example.com/qwertyuiop/", Anchor: "zxcvbnm"})
-	if got != neutral {
-		t.Errorf("an entirely unknown link scored %v, want the neutral %v", got, neutral)
+	if got != Neutral {
+		t.Errorf("an entirely unknown link scored %v, want the neutral %v", got, Neutral)
 	}
 }
 

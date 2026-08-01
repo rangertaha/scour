@@ -37,6 +37,15 @@ type Config struct {
 	// undecided, and so the only band a model is consulted in. Both zero means
 	// the measured defaults.
 	Floor, Ceiling float64
+	// Vectors is where a matcher that compares meanings loads its word vectors
+	// from. It is the same file the embed scorer reads, and naming it once in
+	// [model] is what keeps a link and a node judged against the same
+	// vocabulary.
+	Vectors string
+	// Weight is how far a second opinion may move the base score, for matchers
+	// that adjust it rather than replace it. Zero means the implementation's
+	// default.
+	Weight float64
 }
 
 // Ranks is the sort of node this registry's implementations score.

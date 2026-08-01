@@ -91,6 +91,8 @@ type (
 	MatcherFunc = match.MatcherFunc
 	// Heuristic is the built-in deterministic Matcher.
 	Heuristic = match.Heuristic
+	// Label is one name attached to a node, with how far its source is trusted.
+	Label = match.Label
 
 	// Sequence refines per-node scores using field order.
 	Sequence = seq.Sequence
@@ -104,6 +106,15 @@ type (
 	// Record is one instance of extracted data.
 	Record = model.Record
 )
+
+// Labels returns the names that plausibly describe the value a node holds,
+// ordered and weighted by how reliable each source is.
+//
+// A Matcher written outside this package needs it to ask the same question of
+// a node that the built-in Heuristic does. Which strings name a value is not a
+// matter of taste, and a second implementation of it would be a worse copy that
+// drifted without anything failing.
+func Labels(n *Node) []Label { return match.Labels(n) }
 
 // Node kinds.
 const (
