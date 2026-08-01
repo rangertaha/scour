@@ -33,7 +33,11 @@ jobs:
       - name: Build with Jekyll
         uses: actions/jekyll-build-pages@v1
         with:
-          source: ./
+          # The site lives in docs/, which is where _config.yml is. Built from
+          # the repository root instead, Jekyll finds no config and publishes
+          # the design documents at the root as untitled, unthemed pages while
+          # missing every page under docs/.
+          source: ./docs
           destination: ./_site
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
