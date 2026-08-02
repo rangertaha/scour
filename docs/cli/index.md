@@ -151,7 +151,10 @@ no rows.
 | Command | Description |
 | --- | --- |
 | `scour node top` | Monitor engine activity, live |
+| `scour node ls` | A line per node: role, health, queue depth, throughput |
+| `scour node show <node>` | Everything about one node |
 | `scour node join --role <role> --bus-url <url>` | Join a cluster. `run` is an alias here |
+| `scour node leave` | Leave it, draining what is in flight first |
 
 ### Shortcuts, and the three that act on the install
 
@@ -168,11 +171,11 @@ no rows.
 
 > This surface is the [command surface design]({{ '/cli/design.html' | relative_url }})
 > as far as it has been built. The five nouns, the one rule and the shortcuts are
-> in place, and so is every verb under `item`, `job`, `record` and `model` that
-> the design names. What is left is the cluster half: `node ls`, `node show` and
-> `node leave`, which are not commands so much as a subsystem, since nothing
-> registers a node or reports its health yet. The tables above are what the
-> binary answers to today.
+> in place, and so is every verb the design names, the cluster half included:
+> `node ls`, `node show` and `node leave` read a registry that nodes announce
+> themselves to and heartbeat, so a node that dies stops being listed rather
+> than being listed for ever. The tables above are what the binary answers to
+> today.
 >
 > One collision the design called out has now resolved in both directions at
 > once: `scour run` starts a job, while `run` under `node` is an alias for

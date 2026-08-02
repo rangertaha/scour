@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/rangertaha/scour/internal/bus"
 	"github.com/rangertaha/scour/internal/content"
@@ -33,6 +35,15 @@ type CrawlService struct {
 	feeds map[uint]*crawlqueue.Work
 	stop  []func()
 	wg    sync.WaitGroup
+	// work is what the colly loops run on, and it deliberately outlives the
+	// context that stops the service. See [CrawlService.Start].
+	work context.Context //nolint:containedctx // deliberate, see Start
+
+	// fetched is every page this process has fetched, for every item. It is
+	// what this node's throughput is differenced from, so it counts across
+	// items rather than per item: a node is a machine, and a machine has one
+	// rate however many things it is hunting.
+	fetched atomic.Int64
 }
 
 // NewCrawl returns the crawl service. The content types and browser policy come
@@ -56,6 +67,25 @@ func (c *CrawlService) Role() Role { return RoleCrawl }
 // exactly one of them and a URL whose crawler dies is redelivered. Adding a
 // second process is then the whole of scaling out.
 func (c *CrawlService) Start(ctx context.Context) error {
+	// The colly loops run on a context of their own, which outlives the one
+	// that stops this service.
+	//
+	// Stopping a loop is what closing its feed does, not what cancelling a
+	// context does, and the difference is everything a drain is for. Sharing
+	// one context threw away the pages the crawler was in the middle of: the
+	// fetch finished, the publish failed with "context canceled", and the URL
+	// went back to the frontier to be fetched all over again by somebody else.
+	// `scour node leave` is supposed to cost nothing, and that cost every page
+	// in flight.
+	//
+	// Bounded all the same, because a crawler stuck on a host that never
+	// answers must not be able to hold the process open for ever.
+	work, giveUp := context.WithCancel(context.WithoutCancel(ctx))
+	defer giveUp()
+	c.mu.Lock()
+	c.work = work
+	c.mu.Unlock()
+
 	stop, err := c.bus.Consume(ctx, bus.StreamCrawl, "crawl-work",
 		bus.AllItems(bus.SubjectWork), c.handleWork)
 	if err != nil {
@@ -76,9 +106,19 @@ func (c *CrawlService) Start(ctx context.Context) error {
 	for _, s := range stops {
 		s()
 	}
+
+	patience := time.AfterFunc(drainGrace, giveUp)
+	defer patience.Stop()
 	c.wg.Wait()
 	return nil
 }
+
+// drainGrace is how long the fetches already running have to finish and report
+// once the service has been told to stop.
+//
+// Long enough for a slow page and the write that follows it, short enough that
+// a crawler nobody can rescue is not the reason a machine will not reboot.
+const drainGrace = 30 * time.Second
 
 // handleWork hands one URL to the colly loop for its item.
 //
@@ -121,20 +161,27 @@ func (c *CrawlService) feedFor(ctx context.Context, ev bus.Work) (*crawlqueue.Wo
 	// does not touch the database, and its id and name are all the crawl needs.
 	item := &store.Item{ID: ev.ItemID, Name: ev.Item}
 	crawler := c.crawler.
-		WithSink(NewBusSink(c.bus, ev.Item)).
+		WithSink(NewBusSink(c.bus, ev.Item).Counting(&c.fetched)).
 		WithMeter(NewBusMeter(c.bus, ev.Item))
+
+	// The loop's own context, not the message's: this goroutine outlives the
+	// delivery that started it, and it has to outlive the stop signal too.
+	work := c.work
+	if work == nil {
+		work = ctx
+	}
 
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-		_, err := crawler.Run(ctx, crawl.Options{
+		_, err := crawler.Run(work, crawl.Options{
 			Item:     item,
 			Types:    c.types,
 			Browser:  c.browser,
 			Scorer:   score.Fixed(1),
 			Frontier: feed,
 		})
-		if err != nil && ctx.Err() == nil {
+		if err != nil && work.Err() == nil {
 			slog.Error("crawl loop stopped", "item", ev.Item, "err", err)
 		}
 	}()

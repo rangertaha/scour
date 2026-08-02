@@ -118,6 +118,19 @@ func (w *Work) QueueSize() (int, error) {
 	return n, nil
 }
 
+// Held is how much work this queue is actually holding.
+//
+// QueueSize cannot answer that, and deliberately so: colly reads it to decide
+// the crawl is over, so an open queue with nothing in it has to claim one. A
+// node's queue depth is a number an operator reads instead, and reporting one
+// outstanding URL per idle item would put a standing queue on every line of
+// `scour node ls` that never went away.
+func (w *Work) Held() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.ready)
+}
+
 // IsEmpty implements colly's queue.Storage.
 func (w *Work) IsEmpty() (bool, error) {
 	n, err := w.QueueSize()

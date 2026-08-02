@@ -174,3 +174,85 @@ func TestTheStoreOnlyRecordsDiscoveriesInsideTheItem(t *testing.T) {
 		t.Errorf("recorded %q, want %q", urls[0].URL, inside.URL)
 	}
 }
+
+// A crawl service that is stopped must not throw away the pages it is in the
+// middle of.
+//
+// The colly loops used to run on the same context that stops the service, so
+// stopping it cancelled them: the fetch finished, the publish failed with
+// "context canceled", and the URL went back to the frontier for somebody else
+// to fetch all over again. Leaving a cluster is supposed to cost nothing, and
+// it cost every page in flight.
+//
+// The property is not that the loop context outlives Start, which would be a
+// leak. It is that the loop context stays alive for as long as there is work
+// running, even though the service has been told to stop.
+func TestStoppingACrawlDoesNotCancelWorkInFlight(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+
+	b, err := bus.Open(ctx, bus.Options{Name: "drain-test"})
+	if err != nil {
+		t.Fatalf("bus: %v", err)
+	}
+	t.Cleanup(func() { b.Close() })
+
+	svc := NewCrawl(b, nil, nil, "never")
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- svc.Start(ctx) }()
+
+	// Wait for Start to publish the context its loops run on.
+	work := waitForWorkContext(t, svc)
+
+	// Stand in for a crawl that is mid-fetch. Registered before the stop, which
+	// is the only ordering a real one can have: Start is still consuming, so it
+	// has not reached the wait.
+	inFlight := make(chan struct{})
+	svc.wg.Add(1)
+	go func() {
+		defer svc.wg.Done()
+		<-inFlight
+	}()
+
+	cancel()
+
+	// The service is stopping and a page is still in the air. Cancelling the
+	// loop now is what threw the page away.
+	time.Sleep(100 * time.Millisecond)
+	if err := work.Err(); err != nil {
+		t.Errorf("the work in flight was cancelled by the stop: %v", err)
+	}
+
+	close(inFlight)
+	select {
+	case err := <-stopped:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Errorf("Start returned %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the service never finished draining")
+	}
+
+	// And once the work is done it is not held open, which would be a leak.
+	if err := work.Err(); err == nil {
+		t.Error("the loop context outlived the drain")
+	}
+}
+
+// waitForWorkContext returns the context the crawl loops run on, once Start has
+// installed it.
+func waitForWorkContext(t *testing.T, svc *CrawlService) context.Context {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		svc.mu.Lock()
+		work := svc.work
+		svc.mu.Unlock()
+		if work != nil {
+			return work
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("Start never published a work context")
+	return nil
+}

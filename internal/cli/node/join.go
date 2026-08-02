@@ -5,19 +5,24 @@ package node
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
+	"time"
 
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/cli"
 
 	"github.com/rangertaha/scour/internal/bus"
+	"github.com/rangertaha/scour/internal/cluster"
 	"github.com/rangertaha/scour/internal/content"
 	"github.com/rangertaha/scour/internal/crawl"
 	"github.com/rangertaha/scour/internal/service"
+	"github.com/rangertaha/scour/internal/version"
 )
 
 func Join(a *cli.App) *ucli.Command {
-	var roles, busURL string
+	var roles, busURL, name string
 
 	cmd := &ucli.Command{
 		Name:    "join",
@@ -43,6 +48,11 @@ func Join(a *cli.App) *ucli.Command {
 				Usage:       "NATS server to use instead of the embedded one (default from [bus] url in the config)",
 				Destination: &busURL,
 			},
+			&ucli.StringFlag{
+				Name:        "name",
+				Usage:       "what to register this node as (default this machine's `hostname`)",
+				Destination: &name,
+			},
 		},
 		Action: func(c context.Context, cmd *ucli.Command) error {
 			// The flag was advertised in the help and the examples before it
@@ -50,14 +60,14 @@ func Join(a *cli.App) *ucli.Command {
 			if busURL != "" {
 				a.Cfg.Bus.URL = busURL
 			}
-			return runServices(c, a, roles)
+			return runServices(c, a, roles, name)
 		},
 	}
 
 	return cmd
 }
 
-func runServices(c context.Context, a *cli.App, spec string) error {
+func runServices(c context.Context, a *cli.App, spec, name string) error {
 	cli.LogProgress()
 	wanted, err := service.ParseRoles(spec)
 	if err != nil {
@@ -108,12 +118,80 @@ func runServices(c context.Context, a *cli.App, spec string) error {
 		return fmt.Errorf("none of the requested roles can run yet")
 	}
 
+	// Register this process in the fleet, so `scour node ls` has something to
+	// list and `scour node leave` has something to ask.
+	//
+	// A registry that cannot be reached is not a reason not to crawl, which is
+	// why the failure is a warning rather than a return, and why the nil
+	// registry that follows is a working value: every call on it does nothing.
+	// An unlisted node still fetches pages, and fetching pages is the job.
+	registry, err := cluster.Open(c, b, cluster.Options{})
+	if err != nil {
+		slog.Warn("no node registry, this node will not be listed", "err", err)
+	}
+	member, err := registry.Join(c, cluster.Node{
+		Name:    name,
+		Role:    roleNames(wanted),
+		Host:    hostname(),
+		Version: version.Version(),
+	}, service.Health(services...))
+	if err != nil {
+		slog.Warn("this node will not be listed", "err", err)
+	}
+	defer func() {
+		// Its own deadline, and deliberately not the context that has just
+		// been cancelled to stop the services: removing the entry is a write,
+		// and a cancelled context writes nothing, which would leave the node
+		// looking alive until it aged out.
+		bye, cancel := context.WithTimeout(context.WithoutCancel(c), 5*time.Second)
+		defer cancel()
+		member.Close(bye)
+	}()
+
+	// `scour node leave`, typed in another process, arrives here as a closed
+	// channel. Draining is then cancelling the services, because cancelling is
+	// already what they treat as shutdown and the crawl role's shutdown is a
+	// drain: it closes its feeds, which stops new work being taken, and waits
+	// for the fetches already running to finish.
+	running, drain := context.WithCancel(c)
+	defer drain()
+	go func() {
+		select {
+		case <-running.Done():
+		case <-member.Leaving():
+			drain()
+		}
+	}()
+
 	a.Printf("scour running: %v\n", wanted)
+	if id := member.Name(); id != "" {
+		a.Printf("node %s, leave it with: scour node leave %s\n", id, id)
+	}
 	a.Println("press ctrl-c to stop")
 
-	if err := service.New(services...).Run(c); err != nil {
+	if err := service.New(services...).Run(running); err != nil {
 		return err
 	}
 	a.Println("stopped")
 	return nil
+}
+
+// roleNames is what the registry records a node as running.
+func roleNames(roles []service.Role) cluster.Roles {
+	out := make(cluster.Roles, 0, len(roles))
+	for _, r := range roles {
+		out = append(out, string(r))
+	}
+	return out
+}
+
+// hostname is the machine, kept beside the node name because the two come
+// apart: a second scour on one machine registers under a suffixed name, and
+// the host is then the only thing saying where it actually is.
+func hostname() string {
+	host, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return host
 }
