@@ -29,7 +29,7 @@ go run ./e2e/cmd/site   # browse it at http://localhost:8099/
 
 ## What it serves
 
-40 files and 22 routes, in every content type scour claims to read.
+41 files and 25 routes, in every content type scour claims to read.
 
 | Surface | Where | What it is for |
 | --- | --- | --- |
@@ -46,6 +46,7 @@ go run ./e2e/cmd/site   # browse it at http://localhost:8099/
 | Product API | `/api/products`, `/api/products/{sku}` | Search, filter, sort, page |
 | Site search | `/search?q=` | One path, unbounded documents |
 | Streams | `/stream/events`, `/stream/ws` | SSE and a WebSocket |
+| Press area | `/private/` | Basic auth, with the way in in a PDF |
 | Awkward | `/odd/`, `/dynamic/` | Mislabelled types, failures, slowness, change |
 
 ## The faults it holds
@@ -66,6 +67,24 @@ table, turned into a page that reproduces it.
 | Non-English pages, where English-only vectors fall back | `greek`, `russian`, `arabic`, `turkish` |
 | A feed skipped by its filename | `/odd/feed-as-plain-xml` |
 
+## The one that needs a credential
+
+`/private/` answers 401 to everything, with a `WWW-Authenticate` challenge and a
+page saying the credentials are in the media pack. The media pack is
+`/files/press-credentials.pdf`, and the username and password are in its text.
+
+That makes getting in a puzzle with an answer rather than a wall, and the answer
+is only available to something that can pull text out of a PDF. Basic auth
+rather than a login form because it is the one scheme a client can satisfy
+without running a browser or keeping a session, so it is the case worth being
+able to reproduce.
+
+The PDF and the door cannot drift apart: `TheCredentialsInTheMediaPackOpenThePressArea`
+fetches the PDF, parses it with the same reader scour uses, reads the username
+and password out of the extracted text rather than out of the constants, and
+uses them. The trail starts on ordinary pages, since a document nothing links to
+is a document nothing finds.
+
 ## Links, in all three forms
 
 Every content type points somewhere, because a format that cannot be followed is
@@ -80,11 +99,11 @@ rather than an href.
 
 ## The test cases, and results
 
-19 tests, one second, no network.
+23 tests, one second, no network.
 
 | Test | What it asserts | Result |
 | --- | --- | --- |
-| `EveryFileIsServed` | All 40 embedded files answer at their own path | pass |
+| `EveryFileIsServed` | All 41 embedded files answer at their own path | pass |
 | `EveryPageSaysWhyItExists` | Every HTML page carries the comment saying what it is for | pass |
 | `TheKnownFaultsAreStillHere` | Each fault above is still in the page that holds it | pass |
 | `MislabelledResponses` | The header is the authority, not the filename or the body | pass |
@@ -103,6 +122,10 @@ rather than an href.
 | `TheLiveSectionPublishesOverTime` | An unpublished article is genuinely absent | pass |
 | `TheLiveFeedGrows` | The feed gains an item per publication, addressable | pass |
 | `TheScheduleActuallySchedules` | The clock publishes, not only the test | pass |
+| `ThePressAreaRefusesAnonymousRequests` | 401 with a challenge, and a refusal that says where the key is | pass |
+| `TheCredentialsInTheMediaPackOpenThePressArea` | The PDF's own text opens the door | pass |
+| `TheMediaPackIsLinkedFromHTML` | Something links the media pack, so the trail starts somewhere | pass |
+| `TheMediaPackSurvivesBeingServed` | The served PDF is byte-identical to the embedded one | pass |
 
 These test the fixture rather than scour: they say the site still holds what it
 claims to. What tests scour against it lives with the crawler, and the first of

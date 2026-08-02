@@ -52,6 +52,7 @@ search.go       the query-string search page
 longform.go     one article across six URLs
 live.go         the section that keeps publishing
 stream.go       server-sent events and a websocket
+auth.go         the press area, and the credentials the media pack carries
 ```
 
 ## Adding a case
@@ -81,3 +82,9 @@ waiting at all. `ResetLive` puts it back.
 
 **React is vendored** under `site/vendor`, so the app renders offline. There is
 no build step: `React.createElement` rather than JSX.
+
+**`/private/` needs a credential**, and the credential is in
+`/files/press-credentials.pdf` rather than in any page. A test reads it out of
+the PDF's extracted text and uses it, so the document and the door cannot drift
+apart. If you change `PressPass`, regenerate the PDF or that test fails, which
+is the point.

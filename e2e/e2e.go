@@ -59,6 +59,7 @@ func Handler() http.Handler {
 	registerLongform(pages)
 	registerSearch(pages)
 	registerLive(pages)
+	registerPrivate(pages)
 	pages.Handle("/", http.FileServerFS(FS()))
 
 	mux := http.NewServeMux()
