@@ -117,7 +117,9 @@ cache       2,829 pages, 580.2MB
 ## What the corpora exposed
 
 Every one of these was found by running against live data and measuring, not by
-reading the code:
+reading the code. The last of them was found against the
+[e2e fixture]({{ '/e2e/' | relative_url }}) rather than a live corpus, which is
+what the fixture is for:
 
 | Fault | Effect |
 | --- | --- |
@@ -131,8 +133,25 @@ reading the code:
 | Layout classes were read as labels | `class="text-3xl"` and `class="brand"` named fields |
 | The sequence model averaged a distribution into a confidence | Every score fell by about a third, and further as the schema grew |
 | A value that never changed was still read as a field | `section` was one heading repeated on 211 records |
+| A label matched by substring rather than by word | `subtitle` contains `title`, so every page's `<title>` answered for `summary` |
 
-The last of those is worth stating on its own, because no amount of reading the
+The last one is worth stating on its own, because it was invisible in every
+number that was being watched. `summary` was filled on 100% of records, which
+reads as the field working. What it held was the `<title>` element, so `summary`
+and `title` said the same thing and one of the two was worthless on every page.
+A field that always agrees with another field is not a field, and no coverage
+figure can say so.
+
+It reached further than `summary`. Measured on the fixture over the same
+corpus, before and after: records where `title` and `summary` were identical
+went from 9 of 14 to 0 of 12, `author` from 3 to 10, `published` from 5 to 10,
+and `link` from 0 to 4. The `section` kicker above, which the table records as
+its own fault, is no longer extracted either, because it was reached through the
+same containment. That is a side effect rather than a proof: whether the
+constant-value test would also have caught it is still unknown, and the fixture
+no longer exercises it.
+
+The one before it is worth stating too, because no amount of reading the
 markup finds it. `section` resolved to
 `<p class="kicker">Other items that may interest you</p>`, and `kicker` is a
 real name for a section line, so the label was correct. What marked it was that
