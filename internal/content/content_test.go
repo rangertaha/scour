@@ -201,3 +201,34 @@ func TestFeedsAreExtractable(t *testing.T) {
 		t.Error("feeds are not extractable, so nothing would be pulled out of them")
 	}
 }
+
+// A response with no Content-Type used to be fetched, cached, counted, and then
+// never read, because an empty format is not extractable. The page was lost in
+// silence, which is the worst way to lose one.
+func TestAMissingContentTypeIsSniffed(t *testing.T) {
+	cases := []struct {
+		name, header string
+		body         string
+		want         string
+	}{
+		{"html with no header", "", "<html><body><h1>Hello</h1></body></html>", HTML},
+		{"xml with no header", "", `<?xml version="1.0"?><rss version="2.0"><channel/></rss>`, XML},
+		{"text with no header", "", "just some words, no markup at all\n", Text},
+		{"a header always wins", "application/pdf", "<html><body>not really</body></html>", PDF},
+		{"an empty body cannot be sniffed", "", "", ""},
+	}
+	for _, c := range cases {
+		if got := ShorthandOf(c.header, []byte(c.body)); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// Sniffing must never override a server that said something, however odd, since
+// the header is the authority everywhere else in this package.
+func TestSniffingNeverOverridesAHeader(t *testing.T) {
+	png := []byte("\x89PNG\r\n\x1a\n")
+	if got := ShorthandOf("text/html", png); got != HTML {
+		t.Errorf("a PNG announced as html came back %q, want %q", got, HTML)
+	}
+}

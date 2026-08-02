@@ -247,13 +247,13 @@ func TestFixtureSiteCrawl(t *testing.T) {
 		}
 	})
 
-	t.Run("records no format at all for a response without a content type", func(t *testing.T) {
-		// KNOWN GAP. /odd/no-content-type is an ordinary news article served
-		// with the header removed, and the right answer is to sniff the body,
-		// or to fall back to HTML, and extract from it like any other article.
-		// What happens is that the format is stored empty, and parse.Load
-		// treats an empty format as not extractable, so the page is fetched,
-		// cached, counted, and then never read. An article is lost in silence.
+	t.Run("sniffs a response that arrives without a content type", func(t *testing.T) {
+		// /odd/no-content-type is an ordinary news article served with the
+		// header removed. It used to be stored with an empty format, and
+		// parse.Load treats an empty format as not extractable, so the page was
+		// fetched, cached, counted and then never read: an article lost in
+		// silence. The body is sniffed now, which is what a browser does in the
+		// same position, so it comes back as html and is read like any other.
 		p, ok := pages["/odd/no-content-type"]
 		if !ok {
 			t.Fatalf("/odd/no-content-type was never fetched, out of:\n%s", paths(pages))
@@ -261,9 +261,9 @@ func TestFixtureSiteCrawl(t *testing.T) {
 		if p.Status != "fetched" {
 			t.Errorf("/odd/no-content-type came back %q, want it fetched", p.Status)
 		}
-		if p.ContentType != "" {
-			t.Errorf("/odd/no-content-type now has format %q: if it is being read, "+
-				"this gap is closed and the test should say so", p.ContentType)
+		if p.ContentType != "html" {
+			t.Errorf("/odd/no-content-type has format %q, want html: an article with no "+
+				"declared type is still an article", p.ContentType)
 		}
 	})
 

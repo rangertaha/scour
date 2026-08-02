@@ -12,6 +12,7 @@ package content
 import (
 	"fmt"
 	"mime"
+	"net/http"
 	"path"
 	"strings"
 )
@@ -249,6 +250,30 @@ func (s *Set) AllowsPath(urlPath string) bool {
 
 // Shorthand returns the friendly name for a Content-Type, or the bare MIME
 // type when there is no shorthand for it. This is the FORMAT column.
+// ShorthandOf names a response's format, sniffing the body when the server did
+// not say.
+//
+// The header is the authority everywhere else in this package, and this is what
+// happens when there is no authority to defer to. A response with no
+// Content-Type is fetched, cached and counted, and then nothing reads it,
+// because an empty format is not extractable: the page is lost in silence,
+// which is the worst way to lose one. Servers omit the header often enough that
+// this is not a curiosity.
+//
+// Sniffing is what a browser does in the same position, and
+// [http.DetectContentType] implements the algorithm browsers agreed on, so the
+// guess made here is the guess the rest of the web is already making. It is
+// only ever a fallback: a header that says anything at all still wins.
+func ShorthandOf(contentType string, body []byte) string {
+	if s := Shorthand(contentType); s != "" {
+		return s
+	}
+	if len(body) == 0 {
+		return ""
+	}
+	return Shorthand(http.DetectContentType(body))
+}
+
 func Shorthand(contentType string) string {
 	ct := strings.TrimSpace(contentType)
 	if ct == "" {

@@ -711,7 +711,7 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 			Score:       scoreFrom(r.Ctx.Get(ctxScore), opts.Scorer, rawURL, "", r.Request.Depth),
 			Status:      store.URLFetched,
 			StatusCode:  r.StatusCode,
-			ContentType: content.Shorthand(r.Headers.Get("Content-Type")),
+			ContentType: content.ShorthandOf(r.Headers.Get("Content-Type"), r.Body),
 			Size:        int64(len(r.Body)),
 			Latency:     latency,
 			CacheKey:    key,
