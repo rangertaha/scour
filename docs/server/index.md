@@ -60,6 +60,14 @@ leaves something to ask afterwards.
 | `GET` `PATCH` `DELETE` | `/v1/items/{name}/records` | Search, export, stream, mark or drop extracted records |
 | `GET` | `/v1/items/{name}/records/{id}` | One record, with the page it came from |
 | `POST` | `/v1/items/{name}/model/runs` | Start training, returns the run |
+| `GET` `POST` | `/v1/jobs` | List jobs, or create one from a config. `?validate=true` checks without creating |
+| `GET` `PATCH` `DELETE` | `/v1/jobs/{name}` | One job, its bounds, or removing it. `?format=toml` for the config |
+| `GET` `POST` | `/v1/jobs/{name}/targets` | Where a job looks |
+| `DELETE` | `/v1/jobs/{name}/targets/{id}` | Drop one of them |
+| `POST` | `/v1/jobs/{name}/types` | Allow a content type |
+| `DELETE` | `/v1/jobs/{name}/types/{type}` | Stop allowing one |
+| `GET` | `/v1/jobs/{name}/frontier` | The ranked URLs it will fetch next |
+| `GET` | `/v1/schema/job` | A commented sample config, as `job config` prints |
 | `POST` | `/v1/jobs/{name}/runs` | Start a crawl of one job, returns the run |
 | `GET` | `/v1/jobs/{name}/runs` | That job's history |
 | `GET` | `/v1/runs` | Recent runs, of every kind |

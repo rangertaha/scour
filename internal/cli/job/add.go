@@ -11,6 +11,8 @@ import (
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/cli"
+	"github.com/rangertaha/scour/internal/jobfile"
+	"github.com/rangertaha/scour/internal/normalise"
 	"github.com/rangertaha/scour/internal/store"
 )
 
@@ -137,7 +139,7 @@ func runAdd(c context.Context, a *cli.App, name string, f addFlags) error {
 
 	var changes []string
 	for _, d := range f.domains {
-		host, err := cli.NormaliseDomain(d)
+		host, err := normalise.Domain(d)
 		if err != nil {
 			return err
 		}
@@ -147,7 +149,7 @@ func runAdd(c context.Context, a *cli.App, name string, f addFlags) error {
 		changes = append(changes, "domain "+host)
 	}
 	for _, u := range f.urls {
-		normalised, err := cli.NormaliseURL(u)
+		normalised, err := normalise.URL(u)
 		if err != nil {
 			return err
 		}
@@ -183,15 +185,15 @@ func runAdd(c context.Context, a *cli.App, name string, f addFlags) error {
 // a whole job, and splitting it across two commands to apply one would make the
 // round trip lossy.
 func runAddFile(c context.Context, a *cli.App, path string) error {
-	f, err := parseFile(path)
+	f, err := jobfile.Parse(path)
 	if err != nil {
 		return err
 	}
-	if problems := f.validate(); len(problems) > 0 {
+	if problems := f.Validate(); len(problems) > 0 {
 		for _, p := range problems {
 			a.Errorf("  %s\n", p)
 		}
-		return fmt.Errorf("%s: %d %s", path, len(problems), plural("problem", len(problems)))
+		return fmt.Errorf("%s: %d %s", path, len(problems), jobfile.Plural("problem", len(problems)))
 	}
 
 	s, err := a.Store()
@@ -209,7 +211,7 @@ func runAddFile(c context.Context, a *cli.App, path string) error {
 	}
 	a.Printf("%s: job for %s\n", job.Name, item.Name)
 
-	maxTime, err := f.maxTime()
+	maxTime, err := f.TimeBound()
 	if err != nil {
 		return err
 	}
@@ -219,7 +221,7 @@ func runAddFile(c context.Context, a *cli.App, path string) error {
 	}
 
 	for _, d := range f.Domains {
-		host, err := cli.NormaliseDomain(d.Value)
+		host, err := normalise.Domain(d.Value)
 		if err != nil {
 			return err
 		}
@@ -229,7 +231,7 @@ func runAddFile(c context.Context, a *cli.App, path string) error {
 		a.Printf("%s: domain %s\n", job.Name, host)
 	}
 	for _, u := range f.URLs {
-		normalised, err := cli.NormaliseURL(u.Value)
+		normalised, err := normalise.URL(u.Value)
 		if err != nil {
 			return err
 		}

@@ -15,6 +15,7 @@ import (
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/cli"
+	"github.com/rangertaha/scour/internal/normalise"
 
 	"github.com/rangertaha/scour/internal/store"
 )
@@ -116,7 +117,7 @@ func runImport(c context.Context, a *cli.App, name string, f importFlags) error 
 	total := importResult{}
 
 	for _, path := range f.urls {
-		res, err := importTargets(c, s, job.ID, path, store.TargetURL, cli.NormaliseURL, f)
+		res, err := importTargets(c, s, job.ID, path, store.TargetURL, normalise.URL, f)
 		if err != nil {
 			return err
 		}
@@ -125,7 +126,7 @@ func runImport(c context.Context, a *cli.App, name string, f importFlags) error 
 	}
 
 	for _, path := range f.domains {
-		res, err := importTargets(c, s, job.ID, path, store.TargetDomain, cli.NormaliseDomain, f)
+		res, err := importTargets(c, s, job.ID, path, store.TargetDomain, normalise.Domain, f)
 		if err != nil {
 			return err
 		}

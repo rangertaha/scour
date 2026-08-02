@@ -11,6 +11,7 @@ import (
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/cli"
+	"github.com/rangertaha/scour/internal/normalise"
 )
 
 type tagFlags struct {
@@ -103,7 +104,7 @@ func runTag(c context.Context, a *cli.App, name string, f tagFlags) error {
 
 	scope := ""
 	if f.domain != "" {
-		if scope, err = cli.NormaliseDomain(f.domain); err != nil {
+		if scope, err = normalise.Domain(f.domain); err != nil {
 			return err
 		}
 	}

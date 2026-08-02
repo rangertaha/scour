@@ -9,6 +9,7 @@ import (
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/cli"
+	"github.com/rangertaha/scour/internal/jobfile"
 	"github.com/rangertaha/scour/internal/store"
 )
 
@@ -64,7 +65,7 @@ func showJobTOML(c context.Context, a *cli.App, s *store.Store, name string) err
 	if err != nil {
 		return err
 	}
-	a.Print(fileOf(job, item.Name).render())
+	a.Print(jobfile.Of(job, item.Name).Render())
 	return nil
 }
 

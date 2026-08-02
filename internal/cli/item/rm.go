@@ -10,6 +10,7 @@ import (
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/cli"
+	"github.com/rangertaha/scour/internal/normalise"
 )
 
 type removeFlags struct {
@@ -155,7 +156,7 @@ func runRemove(c context.Context, a *cli.App, name string, f removeFlags) error 
 		}
 		scope := ""
 		if f.on != "" {
-			if scope, err = cli.NormaliseDomain(f.on); err != nil {
+			if scope, err = normalise.Domain(f.on); err != nil {
 				return err
 			}
 		}
@@ -178,7 +179,7 @@ func runRemove(c context.Context, a *cli.App, name string, f removeFlags) error 
 	}
 
 	for _, d := range f.domains {
-		host, err := cli.NormaliseDomain(d)
+		host, err := normalise.Domain(d)
 		if err != nil {
 			return err
 		}
@@ -189,7 +190,7 @@ func runRemove(c context.Context, a *cli.App, name string, f removeFlags) error 
 	}
 
 	for _, u := range f.urls {
-		normalised, err := cli.NormaliseURL(u)
+		normalised, err := normalise.URL(u)
 		if err != nil {
 			return err
 		}

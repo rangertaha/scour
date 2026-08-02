@@ -10,6 +10,7 @@ import (
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/cli"
+	"github.com/rangertaha/scour/internal/normalise"
 
 	"github.com/rangertaha/scour/internal/store"
 )
@@ -172,7 +173,7 @@ func runAdd(c context.Context, a *cli.App, name string, f addFlags) error {
 	// With --prop the domain scopes the teaching; without it, it is a target.
 	scope := ""
 	if f.prop != "" && len(f.domains) == 1 {
-		host, err := cli.NormaliseDomain(f.domains[0])
+		host, err := normalise.Domain(f.domains[0])
 		if err != nil {
 			return err
 		}
@@ -194,7 +195,7 @@ func runAdd(c context.Context, a *cli.App, name string, f addFlags) error {
 
 	if scope == "" {
 		for _, d := range f.domains {
-			host, err := cli.NormaliseDomain(d)
+			host, err := normalise.Domain(d)
 			if err != nil {
 				return err
 			}
@@ -206,7 +207,7 @@ func runAdd(c context.Context, a *cli.App, name string, f addFlags) error {
 	}
 
 	for _, u := range f.urls {
-		normalised, err := cli.NormaliseURL(u)
+		normalised, err := normalise.URL(u)
 		if err != nil {
 			return err
 		}

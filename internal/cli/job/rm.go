@@ -9,6 +9,7 @@ import (
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/cli"
+	"github.com/rangertaha/scour/internal/normalise"
 )
 
 // Remove drops a job, or one of its targets.
@@ -82,7 +83,7 @@ func Remove(a *cli.App) *ucli.Command {
 			}
 
 			for _, d := range domains {
-				host, err := cli.NormaliseDomain(d)
+				host, err := normalise.Domain(d)
 				if err != nil {
 					return err
 				}
@@ -92,7 +93,7 @@ func Remove(a *cli.App) *ucli.Command {
 				a.Printf("%s: removed domain %s\n", name, host)
 			}
 			for _, u := range urls {
-				normalised, err := cli.NormaliseURL(u)
+				normalised, err := normalise.URL(u)
 				if err != nil {
 					return err
 				}

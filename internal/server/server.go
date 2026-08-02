@@ -92,6 +92,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/jobs/{name}/runs", s.startJobRun)
 	mux.HandleFunc("GET /v1/jobs/{name}/runs", s.jobRuns)
 
+	// The jobs themselves: created, listed, bounded, and their targets and
+	// content types. Registered from their own file for the same reason.
+	s.registerJobs(mux)
+
 	mux.HandleFunc("GET /v1/runs", s.listRuns)
 	mux.HandleFunc("GET /v1/runs/{id}", s.getRun)
 	mux.HandleFunc("GET /v1/runs/{id}/log", s.runLog)

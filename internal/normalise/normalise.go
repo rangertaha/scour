@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package cli
+// Package normalise reduces a typed domain or URL to the one form scour stores.
+//
+// It is a leaf package on purpose. These two functions decide what counts as
+// the same target, so the command line, the HTTP API and the job config file all
+// have to agree on them, and they lived in internal/cli where only the command
+// line could reach them. A server that reached for them there would depend on
+// the CLI, which is backwards: the CLI is one caller of scour, not a layer
+// underneath the others.
+package normalise
 
 import (
 	"errors"
@@ -9,9 +17,9 @@ import (
 	"strings"
 )
 
-// normaliseDomain reduces a domain to its bare host, so example.com,
-// www.example.com and https://example.com/ are one target.
-func NormaliseDomain(raw string) (string, error) {
+// Domain reduces a domain to its bare host, so example.com, www.example.com and
+// https://example.com/ are one target.
+func Domain(raw string) (string, error) {
 	host := strings.TrimSpace(strings.ToLower(raw))
 	if host == "" {
 		return "", errors.New("domain must not be empty")
@@ -37,8 +45,8 @@ func NormaliseDomain(raw string) (string, error) {
 	return host, nil
 }
 
-// normaliseURL checks a URL is absolute and returns it with a scheme.
-func NormaliseURL(raw string) (string, error) {
+// URL checks a URL is absolute and returns it with a scheme.
+func URL(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "", errors.New("url must not be empty")

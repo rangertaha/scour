@@ -635,7 +635,9 @@ func verdictWord(label store.Label) string {
 	return string(label)
 }
 
-// boolParam reads a flag off the query string.
+// boolParam reads a flag off the query string, for every resource rather than
+// this one: ?validate, ?pages, ?all and ?follow all go through it, because a
+// client that learns ?all=1 works has every right to expect ?validate=1 to.
 //
 // Only the words that mean yes count. A parameter that is present but says
 // false is a client deciding not to do something, and reading it as true

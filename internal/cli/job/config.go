@@ -9,6 +9,7 @@ import (
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/cli"
+	"github.com/rangertaha/scour/internal/jobfile"
 )
 
 // Config prints a commented sample job config.
@@ -29,7 +30,7 @@ func Config(a *cli.App) *ucli.Command {
 			"  scour job validate -f uk.toml\n" +
 			"  scour job add -f uk.toml",
 		Action: func(_ context.Context, _ *ucli.Command) error {
-			a.Print(sample().render())
+			a.Print(jobfile.Sample().Render())
 			return nil
 		},
 	}
@@ -63,11 +64,11 @@ func Validate(a *cli.App) *ucli.Command {
 			},
 		},
 		Action: func(_ context.Context, _ *ucli.Command) error {
-			f, err := parseFile(path)
+			f, err := jobfile.Parse(path)
 			if err != nil {
 				return err
 			}
-			problems := f.validate()
+			problems := f.Validate()
 			if len(problems) == 0 {
 				a.Printf("%s: ok, job %q for item %q, %d targets\n",
 					path, f.Name, f.Item, len(f.Domains)+len(f.URLs))
@@ -76,7 +77,7 @@ func Validate(a *cli.App) *ucli.Command {
 			for _, p := range problems {
 				a.Errorf("  %s\n", p)
 			}
-			return fmt.Errorf("%s: %d %s", path, len(problems), plural("problem", len(problems)))
+			return fmt.Errorf("%s: %d %s", path, len(problems), jobfile.Plural("problem", len(problems)))
 		},
 	}
 }
