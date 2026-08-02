@@ -190,6 +190,69 @@ func (s *Store) AddAlias(ctx context.Context, itemID uint, word string) error {
 	return nil
 }
 
+// Aliases returns the other words the item itself goes by, in order.
+//
+// An item's aliases carry no domain, unlike a property's. The item is the thing
+// being looked for and its name is the schema's, so it does not change from one
+// site to the next; what changes is how a page labels the fields, which is what
+// PropertyAliases holds.
+func (s *Store) Aliases(ctx context.Context, itemID uint) ([]string, error) {
+	var rows []Alias
+	if err := s.db.WithContext(ctx).
+		Where("item_id = ?", itemID).Order("word").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("aliases for item %d: %w", itemID, err)
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.Word)
+	}
+	return out, nil
+}
+
+// RemoveAliases deletes words from an item, returning how many went.
+//
+// The count is returned rather than swallowed because a removal that removed
+// nothing is how someone ends up believing a word is gone while a crawl still
+// matches on it.
+func (s *Store) RemoveAliases(ctx context.Context, itemID uint, words []string) (int64, error) {
+	cleaned := trimAll(words)
+	if len(cleaned) == 0 {
+		return 0, nil
+	}
+	res := s.db.WithContext(ctx).
+		Where("item_id = ? AND word IN ?", itemID, cleaned).
+		Delete(&Alias{})
+	if res.Error != nil {
+		return 0, fmt.Errorf("remove aliases from item %d: %w", itemID, res.Error)
+	}
+	return res.RowsAffected, nil
+}
+
+// SetAliases replaces an item's words with exactly the ones given.
+//
+// One transaction, for the reason SetPropertyAliases is one: the intermediate
+// state is an item with no words at all, and a crawl reading it in that moment
+// would score every page against a bare name.
+func (s *Store) SetAliases(ctx context.Context, itemID uint, words []string) error {
+	cleaned := trimAll(words)
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("item_id = ?", itemID).Delete(&Alias{}).Error; err != nil {
+			return fmt.Errorf("clear aliases on item %d: %w", itemID, err)
+		}
+		if len(cleaned) == 0 {
+			return nil
+		}
+		rows := make([]Alias, 0, len(cleaned))
+		for _, w := range cleaned {
+			rows = append(rows, Alias{ItemID: itemID, Word: w})
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error; err != nil {
+			return fmt.Errorf("set aliases on item %d: %w", itemID, err)
+		}
+		return nil
+	})
+}
+
 // AddProperty records a property and its example value. Adding a property that
 // already exists updates the example, so correcting one is a repeat of the
 // original command.
@@ -394,6 +457,35 @@ func (s *Store) DeleteProperty(ctx context.Context, itemID uint, name string) er
 		return fmt.Errorf("property %q: %w", name, ErrNotFound)
 	}
 	return nil
+}
+
+// DeletePropertyOn removes one property as it was taught on one domain,
+// leaving what every other site taught alone.
+//
+// DeleteProperty takes the name out of every domain at once, which is what the
+// command line means by removing a property. A caller that named a domain meant
+// the narrower thing, and falling back to the wider one would let a correction
+// on one site quietly strip the schema everywhere.
+func (s *Store) DeletePropertyOn(ctx context.Context, itemID uint, domain, name string) error {
+	domain = NormaliseDomain(domain)
+	name = strings.TrimSpace(name)
+
+	// The aliases hang off the property row rather than off the item, so
+	// deleting the row alone would leave words behind pointing at an id that no
+	// longer exists.
+	prop, err := s.findProperty(ctx, itemID, domain, name)
+	if err != nil {
+		return err
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("property_id = ?", prop.ID).Delete(&PropertyAlias{}).Error; err != nil {
+			return fmt.Errorf("delete aliases of %q: %w", name, err)
+		}
+		if err := tx.Delete(&Property{}, prop.ID).Error; err != nil {
+			return fmt.Errorf("delete property %q: %w", name, err)
+		}
+		return nil
+	})
 }
 
 // DeleteRule removes one induced rule by id.
@@ -630,6 +722,18 @@ func (s *Store) findProperty(ctx context.Context, itemID uint, domain, name stri
 		return nil, fmt.Errorf("find property %q: %w", name, err)
 	}
 	return &prop, nil
+}
+
+// Property reads one property row exactly as it was taught, without the domain
+// fallback PropertiesFor applies.
+//
+// It exists so a caller can ask whether a property is there before changing it.
+// AddPropertyDetail creates what it does not find, which is right for a command
+// that means "make sure this exists" and wrong for one that means "change the
+// one I named": without a check, a typo in the name is a second property rather
+// than an error.
+func (s *Store) Property(ctx context.Context, itemID uint, domain, name string) (*Property, error) {
+	return s.findProperty(ctx, itemID, domain, name)
 }
 
 // PropertyAliases returns the words taught for one property, in order.

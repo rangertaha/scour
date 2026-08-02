@@ -419,6 +419,44 @@ func TestURLTargetStaysUnderItsDirectory(t *testing.T) {
 	}
 }
 
+// A domain target can name a port, and anything served anywhere but 80 or 443
+// is named that way: every development server, every staging host, and the
+// fixture site these tests run against.
+//
+// Only the bare hostname was compared, and a target is stored as it was given,
+// so such a target matched nothing at all. The crawl fetched its seed, dropped
+// every link it found as out of scope, and said nothing about why it had
+// stopped after one page.
+func TestDomainTargetWithAPort(t *testing.T) {
+	sc, err := NewScope([]store.Target{
+		{Kind: store.TargetDomain, Value: "127.0.0.1:8099"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sc.Allows("http://127.0.0.1:8099/news/") {
+		t.Error("the host and port named by the target must be in scope")
+	}
+	// The port is part of what was named, so another one is a different site.
+	if sc.Allows("http://127.0.0.1:9000/news/") {
+		t.Error("a different port must be out of scope")
+	}
+	if sc.Allows("http://elsewhere.test:8099/") {
+		t.Error("another host on the same port must be out of scope")
+	}
+
+	// A target that names no port still means the host, whatever port a link
+	// to it happens to carry, which is what it meant before.
+	if sc, err = NewScope([]store.Target{
+		{Kind: store.TargetDomain, Value: "example.com"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !sc.Allows("http://example.com:8443/cars/") {
+		t.Error("a portless target should still cover the host on any port")
+	}
+}
+
 // An item with no targets is unrestricted rather than closed, which is what
 // the old empty filter list meant.
 func TestAnEmptyScopeAllowsEverything(t *testing.T) {

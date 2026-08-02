@@ -110,6 +110,18 @@ func (s *Scope) Allows(rawURL string) bool {
 	if s.hosts[host] || (strings.HasPrefix(host, "www.") && s.hosts[host[len("www."):]]) {
 		return true
 	}
+	// A domain target is kept as it was given, and it can have been given with
+	// a port: anything served anywhere but 80 or 443 is named that way, which
+	// on this end of things is every development and staging site there is.
+	// Only the bare hostname was ever compared, so such a target matched
+	// nothing, and a crawl scoped by it fetched its seed and stopped without
+	// saying why. Both forms are tried rather than the port being stripped off
+	// the target, because a target that names a port means it.
+	if withPort := strings.ToLower(u.Host); withPort != host {
+		if s.hosts[withPort] || s.trees[withPort] {
+			return true
+		}
+	}
 
 	path := u.Path
 	if path == "" {

@@ -48,7 +48,15 @@ leaves something to ask afterwards.
 | `POST` | `/v1/items` | Create an item, or add to one |
 | `GET` `DELETE` | `/v1/items/{name}` | Fetch or remove one |
 | `GET` | `/v1/items/{name}/frontier` | The ranked URLs |
-| `GET` | `/v1/items/{name}/rules` | The learned extraction rules |
+| `POST` | `/v1/items/{name}/properties` | Add a property |
+| `PATCH` `DELETE` | `/v1/items/{name}/properties/{prop}` | Clear a detail, or remove the property |
+| `GET` `POST` `PUT` | `/v1/items/{name}/aliases` | The other words the item goes by |
+| `DELETE` | `/v1/items/{name}/aliases/{word}` | Drop one of them |
+| `GET` `POST` `PUT` | `/v1/items/{name}/properties/{prop}/labels` | What a page might call that field |
+| `DELETE` | `/v1/items/{name}/properties/{prop}/labels/{word}` | Drop one of those |
+| `GET` | `/v1/templates` | The shipped schemas |
+| `GET` `DELETE` | `/v1/items/{name}/model` | What was learned, and discarding it |
+| `GET` | `/v1/items/{name}/model/rules` | The learned extraction rules, per format |
 | `GET` | `/v1/items/{name}/records` | Search extracted records |
 | `POST` | `/v1/items/{name}/records/{id}/label` | Mark a record valid or invalid |
 | `POST` | `/v1/items/{name}/model/runs` | Start training, returns the run |

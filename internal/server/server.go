@@ -75,7 +75,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/items/{name}", s.deleteItem)
 
 	mux.HandleFunc("GET /v1/items/{name}/frontier", s.frontier)
-	mux.HandleFunc("GET /v1/items/{name}/rules", s.rules)
+
+	// Properties, aliases, labels, templates and the model, which are the
+	// item's parts rather than the item. Registered from their own file so
+	// this list stays a table of contents.
+	s.registerItemParts(mux)
 	mux.HandleFunc("GET /v1/items/{name}/records", s.records)
 	mux.HandleFunc("POST /v1/items/{name}/records/{id}/label", s.label)
 
@@ -253,21 +257,6 @@ func (s *Server) frontier(w http.ResponseWriter, r *http.Request) {
 		rows = rows[:limit]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"urls": rows})
-}
-
-func (s *Server) rules(w http.ResponseWriter, r *http.Request) {
-	item, err := s.store.Item(r.Context(), r.PathValue("name"))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-
-	rows, err := s.store.Rules(r.Context(), item.ID)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"rules": rows})
 }
 
 func (s *Server) records(w http.ResponseWriter, r *http.Request) {

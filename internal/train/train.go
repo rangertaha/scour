@@ -224,6 +224,16 @@ func (t *Trainer) induce(ctx context.Context, item *store.Item, opts Options) (*
 			WOM:   womOpts,
 		})
 		if err != nil {
+			// A format the corpus holds but nothing could be read out of is one
+			// format contributing nothing, not a training run that cannot
+			// happen. Returning here let a single unreadable page destroy the
+			// rest: a crawl that picked up one notes.txt alongside forty
+			// article pages trained on none of them, because text is declared
+			// extractable and wom has no reader for it, so the text pass came
+			// back empty and took the html pass down with it.
+			if errors.Is(err, parse.ErrNoPages) {
+				continue
+			}
 			return nil, err
 		}
 		if loaded.Pages == 0 {
@@ -272,6 +282,14 @@ func (t *Trainer) induce(ctx context.Context, item *store.Item, opts Options) (*
 		for url, n := range counts {
 			matches[url] += n
 		}
+	}
+
+	// Every format having contributed nothing is the case the loop above no
+	// longer treats as fatal, and it still is: writing an empty rule set here
+	// would replace whatever the item already knew with nothing, and report it
+	// as a training run that worked.
+	if pages == 0 {
+		return nil, parse.ErrNoPages
 	}
 
 	// Both are written once, after every format, because each replaces the

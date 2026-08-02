@@ -10,7 +10,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/rangertaha/scour/internal/defaults"
 	"github.com/rangertaha/scour/internal/store"
 	"github.com/rangertaha/scour/internal/version"
 )
@@ -236,31 +235,18 @@ type templateInfo struct {
 	Fields []string `json:"fields"`
 }
 
+// mcpTemplates answers the question GET /v1/templates answers, off the same
+// reader, so an agent and a client cannot be told different things about which
+// schemas ship or what is in them.
 func (s *Server) mcpTemplates(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, templatesOut, error) {
-	names, err := defaults.Names()
+	out, err := templateList()
 	if err != nil {
 		return nil, templatesOut{}, err
 	}
 
-	var out templatesOut
-	var lines []string
-	for _, name := range names {
-		schema, err := defaults.Schema(name)
-		if err != nil {
-			return nil, templatesOut{}, err
-		}
-
-		props := schema
-		if len(schema) == 1 && len(schema[0].Props) > 0 {
-			props = schema[0].Props
-		}
-
-		fields := make([]string, 0, len(props))
-		for _, p := range props {
-			fields = append(fields, p.Name)
-		}
-		out.Templates = append(out.Templates, templateInfo{Name: name, Fields: fields})
-		lines = append(lines, fmt.Sprintf("%s: %s", name, strings.Join(fields, ", ")))
+	lines := make([]string, 0, len(out.Templates))
+	for _, t := range out.Templates {
+		lines = append(lines, fmt.Sprintf("%s: %s", t.Name, strings.Join(t.Fields, ", ")))
 	}
 	return text("%s", strings.Join(lines, "\n")), out, nil
 }

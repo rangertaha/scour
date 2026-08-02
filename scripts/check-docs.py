@@ -225,9 +225,17 @@ def check_shorthands() -> None:
 
 def check_routes() -> None:
     """The HTTP route table against the routes the server registers."""
-    server = open("internal/server/server.go", encoding="utf-8").read()
-    real = set(re.findall(r'mux\.HandleFunc\("\w+ ([^"+]+)"', server))
-    real |= set(re.findall(r'mux\.Handle\("([^"]+)"', server))
+    # Every file in the package, not just server.go. Routes moved into
+    # per-resource files as the surface grew, and a checker that reads one file
+    # reports nine missing routes that are all present, which is how a check
+    # gets turned off rather than fixed.
+    real: set[str] = set()
+    for path in sorted(glob.glob("internal/server/*.go")):
+        if path.endswith("_test.go"):
+            continue
+        source = open(path, encoding="utf-8").read()
+        real |= set(re.findall(r'mux\.HandleFunc\("\w+ ([^"+]+)"', source))
+        real |= set(re.findall(r'mux\.Handle\("([^"]+)"', source))
     real = {p.rstrip("/") or "/" for p in real}
     doc = open(f"{DOCS}/server/index.md", encoding="utf-8").read()
     table = doc[doc.index("| Method | Path | Does |") :]

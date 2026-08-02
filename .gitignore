@@ -20,8 +20,11 @@ coverage.*
 *.coverprofile
 profile.cov
 
-# Dependency directories (remove the comment below to include it)
-vendor/
+# Dependency directories. Anchored to the root, because that is the one Go
+# creates: an unanchored rule also swallowed e2e/site/vendor, where the fixture
+# keeps its copy of React, and the tests passed anyway because the files were on
+# disk. Only a fresh clone would have found out.
+/vendor/
 
 # Go workspace file
 go.work
@@ -46,3 +49,6 @@ coverage.html
 # Python bytecode, from the docs checker
 __pycache__/
 *.pyc
+
+# Agent worktrees, which are checkouts of this repository
+.claude/
