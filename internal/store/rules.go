@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -195,7 +196,14 @@ type RecordQuery struct {
 	// that paid to fetch its page.
 	JobID uint
 
+	// MinConfidence and MaxConfidence bound the score, and either may stand
+	// alone. A floor is what an export wants and a ceiling is what review
+	// wants, because the records worth a person's attention are the ones the
+	// model was least sure of, and a filter with only a floor cannot ask for
+	// them.
 	MinConfidence float64
+	MaxConfidence float64
+
 	Formats       []string
 	ExcludeFormat []string
 	Label         Label
@@ -225,6 +233,9 @@ func (s *Store) SearchRecords(ctx context.Context, itemID uint, q RecordQuery) (
 	base := s.db.WithContext(ctx).Model(&Record{}).Where("item_id = ?", itemID)
 	if q.MinConfidence > 0 {
 		base = base.Where("confidence >= ?", q.MinConfidence)
+	}
+	if q.MaxConfidence > 0 {
+		base = base.Where("confidence <= ?", q.MaxConfidence)
 	}
 	if len(q.Formats) > 0 {
 		base = base.Where("format IN ?", q.Formats)
@@ -485,6 +496,35 @@ func (s *Store) DeleteModel(ctx context.Context, itemID uint) error {
 		}
 		return nil
 	})
+}
+
+// LatestRecordID is the highest record id an item has, or zero when it has
+// none.
+//
+// It is where a follower starts. A stream is the records that land after the
+// request, and working that mark out from a listing does not do it: a listing
+// is ordered by confidence and capped, so its highest id is the best row's, not
+// the newest. Starting from that would replay records the caller has already
+// been shown and skip the ones between it and the real end of the table.
+//
+// Unfiltered on purpose. Ids ascend as records are written, so nothing below
+// this mark can appear after it whatever the follower is filtering for, and
+// asking for the mark through the filter would only be a slower way to get a
+// number that has to be the same.
+func (s *Store) LatestRecordID(ctx context.Context, itemID uint) (uint, error) {
+	var newest Record
+	err := s.db.WithContext(ctx).
+		Select("id").
+		Where("item_id = ?", itemID).
+		Order("id DESC").
+		First(&newest).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("latest record: %w", err)
+	}
+	return newest.ID, nil
 }
 
 // RecordByID reads one record in full, with its values and the url it came

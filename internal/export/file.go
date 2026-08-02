@@ -7,24 +7,99 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/rangertaha/scour/internal/registry"
 	"github.com/rangertaha/scour/internal/store"
 )
 
+// documents are the encodings that turn records into a document, held in one
+// table because two things need them: the exporter registry below, and WriteTo,
+// which hands the same bytes to something that is not a file.
+//
+// The HTTP API serves `?format=csv` out of this, and the promise it makes is
+// that the bytes are the ones `scour record write` produces. That promise only
+// holds while there is one implementation of each encoding, so a second copy
+// living next to the server would be a copy free to drift, and the drift would
+// show up as an export that parses in one pipeline and not in the other.
+var documents = map[string]format{
+	"csv":   csvWriter{},
+	"json":  jsonWriter{},
+	"jsonl": jsonlWriter{},
+}
+
 func init() {
-	Register("csv", func(cfg Config) (Exporter, error) { return newFile(cfg, csvWriter{}) })
-	Register("json", func(cfg Config) (Exporter, error) { return newFile(cfg, jsonWriter{}) })
-	Register("jsonl", func(cfg Config) (Exporter, error) { return newFile(cfg, jsonlWriter{}) })
+	// Named one at a time rather than looped over the table above, because the
+	// documentation check reads these literals to prove that every format the
+	// docs offer is one something really registers. A loop over the map hides
+	// the names from it, and the check goes quiet rather than wrong, which is
+	// the worst way for a check to fail.
+	Register("csv", document("csv"))
+	Register("json", document("json"))
+	Register("jsonl", document("jsonl"))
+}
+
+// document builds the exporter for one of the encodings above.
+//
+// It looks the encoding up rather than closing over it so that the registered
+// name and the table cannot come apart: a name registered here that the table
+// does not have fails when somebody exports, saying which name, instead of
+// writing files through a nil writer.
+func document(name string) registry.Factory[Config, Exporter] {
+	return func(cfg Config) (Exporter, error) {
+		f, ok := documents[name]
+		if !ok {
+			return nil, fmt.Errorf("no %s writer: records are written as %s",
+				name, strings.Join(Documents(), ", "))
+		}
+		return newFile(cfg, f)
+	}
+}
+
+// Documents names the encodings WriteTo accepts, sorted.
+//
+// Not Names, which is every registered exporter and includes the webhook. A
+// webhook is a destination rather than an encoding, so it has nothing to say
+// when the question is what a set of records should look like on the way out.
+func Documents() []string {
+	out := make([]string, 0, len(documents))
+	for name := range documents {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// WriteTo encodes records somewhere that is not a file.
+//
+// An Exporter writes files, because that is what an export is on the command
+// line. An HTTP response is one stream with no directory to group into, so it
+// needs the encoding without the filing, and this is that encoding: the same
+// writer, so a caller asking the API for csv gets what `record write` wrote.
+//
+// Grouping is the one thing that does not survive. A file export writes one
+// file per domain and each file's columns are the union of that domain's
+// records; here every row is in one document, so the columns are the union of
+// all of them. The two agree exactly whenever the records came from one site,
+// and where they do not it is because a single response cannot be several files.
+func WriteTo(name string, w io.Writer, rows []store.RecordRow) error {
+	f, ok := documents[name]
+	if !ok {
+		return fmt.Errorf("no %s document: records are written as %s",
+			name, strings.Join(Documents(), ", "))
+	}
+	return f.write(w, rows)
 }
 
 // format writes one domain's records in a particular encoding.
 type format interface {
 	ext() string
-	write(w *os.File, rows []store.RecordRow) error
+	write(w io.Writer, rows []store.RecordRow) error
 }
 
 // file exports to `<dir>/<item>/<domain>/<timestamp>.<ext>`, which is the
@@ -117,7 +192,7 @@ func (csvWriter) ext() string { return "csv" }
 // The fixed columns come first and the properties after, so a consumer can
 // rely on the shape without knowing the schema. `label` is among them because
 // an export is also how a human corrects records outside scour.
-func (csvWriter) write(w *os.File, rows []store.RecordRow) error {
+func (csvWriter) write(w io.Writer, rows []store.RecordRow) error {
 	props := columns(rows)
 
 	out := csv.NewWriter(w)
@@ -165,7 +240,7 @@ type jsonRecord struct {
 	Values     map[string]string `json:"values"`
 }
 
-func (jsonWriter) write(w *os.File, rows []store.RecordRow) error {
+func (jsonWriter) write(w io.Writer, rows []store.RecordRow) error {
 	out := make([]jsonRecord, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, exported(row))
@@ -190,7 +265,7 @@ type jsonlWriter struct{}
 
 func (jsonlWriter) ext() string { return "jsonl" }
 
-func (jsonlWriter) write(w *os.File, rows []store.RecordRow) error {
+func (jsonlWriter) write(w io.Writer, rows []store.RecordRow) error {
 	// No indenting and no array: a line that wraps is a line that cannot be
 	// split on newlines, which is the whole point of the format.
 	enc := json.NewEncoder(w)

@@ -17,7 +17,6 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -80,8 +79,10 @@ func (s *Server) Handler() http.Handler {
 	// item's parts rather than the item. Registered from their own file so
 	// this list stays a table of contents.
 	s.registerItemParts(mux)
-	mux.HandleFunc("GET /v1/items/{name}/records", s.records)
-	mux.HandleFunc("POST /v1/items/{name}/records/{id}/label", s.label)
+	// The records those crawls produced: read, searched, exported, streamed,
+	// marked and dropped. Registered from their own file for the same reason
+	// the item's parts are.
+	s.registerRecords(mux)
 
 	// Long work is a run, and a run is the thing you are handed back. Both
 	// verbs used to hang off the item as a sub-path, which said what was being
@@ -257,78 +258,6 @@ func (s *Server) frontier(w http.ResponseWriter, r *http.Request) {
 		rows = rows[:limit]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"urls": rows})
-}
-
-func (s *Server) records(w http.ResponseWriter, r *http.Request) {
-	item, err := s.store.Item(r.Context(), r.PathValue("name"))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-
-	query := store.RecordQuery{
-		Limit:         intParam(r, "limit"),
-		Formats:       r.URL.Query()["type"],
-		ExcludeFormat: r.URL.Query()["exclude_type"],
-	}
-	if v := r.URL.Query().Get("confidence"); v != "" {
-		c, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			s.badRequest(w, fmt.Sprintf("confidence %q is not a number", v))
-			return
-		}
-		query.MinConfidence = c
-	}
-	if v := r.URL.Query().Get("label"); v != "" {
-		query.Label = store.Label(v)
-	}
-
-	rows, total, err := s.store.SearchRecords(r.Context(), item.ID, query)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"records": rows, "total": total})
-}
-
-func (s *Server) label(w http.ResponseWriter, r *http.Request) {
-	item, err := s.store.Item(r.Context(), r.PathValue("name"))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-
-	id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
-	if err != nil {
-		s.badRequest(w, "record id must be a number")
-		return
-	}
-
-	var body struct {
-		Label string `json:"label"`
-	}
-	if !decode(w, r, &body) {
-		return
-	}
-
-	label := store.Label(strings.ToLower(strings.TrimSpace(body.Label)))
-	switch label {
-	case store.Valid, store.Invalid, store.Unlabelled:
-	default:
-		s.badRequest(w, fmt.Sprintf("label must be valid, invalid or unlabelled, got %q", body.Label))
-		return
-	}
-
-	n, err := s.store.LabelRecords(r.Context(), item.ID, []uint{uint(id)}, label)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	if n == 0 {
-		writeError(w, http.StatusNotFound, "no such record for this item")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "label": label})
 }
 
 // fail turns a store error into the right status.

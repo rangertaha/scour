@@ -57,8 +57,8 @@ leaves something to ask afterwards.
 | `GET` | `/v1/templates` | The shipped schemas |
 | `GET` `DELETE` | `/v1/items/{name}/model` | What was learned, and discarding it |
 | `GET` | `/v1/items/{name}/model/rules` | The learned extraction rules, per format |
-| `GET` | `/v1/items/{name}/records` | Search extracted records |
-| `POST` | `/v1/items/{name}/records/{id}/label` | Mark a record valid or invalid |
+| `GET` `PATCH` `DELETE` | `/v1/items/{name}/records` | Search, export, stream, mark or drop extracted records |
+| `GET` | `/v1/items/{name}/records/{id}` | One record, with the page it came from |
 | `POST` | `/v1/items/{name}/model/runs` | Start training, returns the run |
 | `POST` | `/v1/jobs/{name}/runs` | Start a crawl of one job, returns the run |
 | `GET` | `/v1/jobs/{name}/runs` | That job's history |
