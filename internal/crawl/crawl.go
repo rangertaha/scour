@@ -803,6 +803,22 @@ func (c *Crawler) register(ctx context.Context, collector *colly.Collector, pend
 			return // an abort we asked for, already recorded
 		}
 
+		// A redirect landing on a page already fetched is not a failure. colly
+		// checks the destination against the visited set and reports the miss
+		// against the source URL, with no status code, because no request ever
+		// went out. Counted as a failure it makes a site that redirects read as
+		// a site that is broken, and leaves a zero where the status belongs,
+		// which nothing downstream can interpret. Canonical redirects are how
+		// the web moves a page, so this is the ordinary case rather than an
+		// awkward one. It is a skip, because skipping is what happened.
+		var visited *colly.AlreadyVisitedError
+		if errors.As(err, &visited) {
+			slog.Debug("redirected to a page already fetched",
+				"url", rawURL, "destination", visited.Destination)
+			c.skip(ctx, st, itemID, jobID, runID, rawURL, r.Request.Depth)
+			return
+		}
+
 		st.mu.Lock()
 		st.failed++
 		st.mu.Unlock()

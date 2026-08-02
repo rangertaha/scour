@@ -267,22 +267,22 @@ func TestFixtureSiteCrawl(t *testing.T) {
 		}
 	})
 
-	t.Run("counts a redirect as a failure", func(t *testing.T) {
-		// KNOWN GAP. /dynamic/redirect answers 302 to /news/ordinary.html,
-		// which is an ordinary way for a site to move a page. The right answer
-		// is to follow it and record the destination. What is recorded is a
-		// failure with no status code at all, so a site that redirects reads
-		// as a site that is broken. /listings/index.html goes the same way,
-		// there through the file server's own redirect to /listings/.
-		for _, path := range []string{"/dynamic/redirect", "/listings/index.html"} {
-			p, ok := pages[path]
-			if !ok {
-				continue // not linked from anywhere the crawl went
-			}
-			if p.Status != "failed" {
-				t.Errorf("%s came back %q rather than failed: redirects are being "+
-					"followed now, so this gap is closed", path, p.Status)
-			}
+	t.Run("does not count a redirect onto a known page as a failure", func(t *testing.T) {
+		// /dynamic/redirect answers 302 to /news/ordinary.html, which the crawl
+		// has usually already fetched by the time it gets here. colly checks the
+		// destination against its visited set and reports the miss against the
+		// source URL with no status code, which used to be recorded as a
+		// failure: a site doing the ordinary thing read as a site that was
+		// broken, and the zero where a status belongs told nothing downstream
+		// anything. It is recorded as skipped now, because skipping is what
+		// happened.
+		p, ok := pages["/dynamic/redirect"]
+		if !ok {
+			t.Skip("the redirect was not reached by this crawl")
+		}
+		if p.Status == "failed" {
+			t.Errorf("/dynamic/redirect is %q with status %d: a redirect onto a page "+
+				"already fetched is not a failure", p.Status, p.StatusCode)
 		}
 	})
 
