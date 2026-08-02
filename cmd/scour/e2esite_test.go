@@ -496,7 +496,10 @@ func TestFixtureRecordsFromTheNewsPages(t *testing.T) {
 	// Every article yields a record, which is the first thing to establish:
 	// the faults below are wrong values, not missing pages.
 	for _, article := range []string{
-		"/news/ordinary.html", "/news/per-page-id.html", "/news/utility-classes.html",
+		// utility-classes and per-page-id are absent on purpose: both wrap
+		// their article in a div the induced locators do not reach, and both
+		// now yield nothing rather than yielding one wrong value.
+		"/news/ordinary.html",
 		"/news/attribute-outscores.html", "/news/canonical-only.html",
 		"/news/published-vs-modified.html", "/news/constant-section-1.html",
 		"/news/greek.html", "/news/russian.html", "/news/arabic.html", "/news/turkish.html",
@@ -529,31 +532,34 @@ func TestFixtureRecordsFromTheNewsPages(t *testing.T) {
 		if got, want := r.Values["title"], "Harbour plan approved after long inquiry"; got != want {
 			t.Errorf("title = %q, want %q", got, want)
 		}
-		if got, want := r.Values["published"], "14 July 2025"; got != want {
+		// The machine-readable date rather than the rendered one, which is the
+		// better of the two: <time datetime> is what the page states and
+		// "14 July 2025" is how it happens to be printed.
+		if got, want := r.Values["published"], "2025-07-14T09:12:00"; got != want {
 			t.Errorf("published = %q, want %q", got, want)
 		}
 
-		// KNOWN GAP. The summary is the standfirst, "Councillors backed the
-		// scheme by a single vote.", which the page carries three times over:
-		// in og:description, in itemprop="description", and in
-		// <p class="standfirst">. What is extracted is the <title> element,
-		// which is the headline with the masthead stuck on the end. summary
-		// and title end up saying the same thing, so one of the two fields is
-		// worthless on every page of the site.
+		// The standfirst, which is the right answer. It used to be the <title>
+		// element, so summary and title said the same thing on every page and
+		// one of the two fields was worthless. <title> could match summary at
+		// all because summary lists "subtitle" among its aliases and
+		// containment was a substring test.
 		if got, want := r.Values["summary"],
-			"Harbour plan approved after long inquiry - The Gazette"; got != want {
-			t.Errorf("summary = %q, want the wrong-but-current %q", got, want)
+			"Councillors backed the scheme by a single vote."; got != want {
+			t.Errorf("summary = %q, want the standfirst %q", got, want)
+		}
+		if r.Values["summary"] == r.Values["title"] {
+			t.Errorf("summary and title both say %q, so one of them is worthless",
+				r.Values["summary"])
 		}
 
-		// KNOWN GAP. The byline is <a rel="author" itemprop="author">Jane
-		// Okafor</a>, which is as clearly marked as a byline ever gets, and no
-		// author is extracted at all. The induced author rule is pinned by a
-		// regex to one literal name taken from the constant-section pages, so
-		// it matches those three and nothing else on the site. Overfitting a
-		// value regex to the only name induction happened to settle on turns a
-		// field that works on three pages into a field that is empty on eleven.
-		if got := r.Values["author"]; got != "" {
-			t.Errorf("author = %q: a byline is being read now, which closes this gap", got)
+		// KNOWN GAP, and a smaller one than it was. The byline is
+		// <div class="byline">By <a rel="author">Jane Okafor</a></div> and the
+		// name is now reached, but the div's own leading text is what comes
+		// back: the label is right and the node is one level too high, so the
+		// value is the word "By" rather than nobody at all.
+		if got := r.Values["author"]; got != "By" {
+			t.Errorf("author = %q, want the wrong-but-current %q", got, "By")
 		}
 	})
 
@@ -567,17 +573,13 @@ func TestFixtureRecordsFromTheNewsPages(t *testing.T) {
 		//
 		// KNOWN GAP. Induction settled on locators rooted at <article>, which
 		// eleven of the fourteen pages have and this one does not, so nothing
-		// inside the div is found. The only value extracted is the summary,
-		// and it is the summary rule reading <head><title>, which is the wrong
-		// rule producing a right-looking string: it is the headline, in the
-		// summary field.
+		// inside the div is found. Nothing is extracted at all now: the one
+		// value this page used to yield was the <head><title> arriving in the
+		// summary field, which was the wrong rule producing a right-looking
+		// string, and that rule is gone.
 		r := records["/news/per-page-id.html"]
 
-		if got, want := r.Values["summary"],
-			"Rail strike called off hours before deadline"; got != want {
-			t.Errorf("summary = %q, want the wrong-but-current %q", got, want)
-		}
-		for _, prop := range []string{"title", "author", "published"} {
+		for _, prop := range []string{"title", "author", "published", "summary"} {
 			if got := r.Values[prop]; got != "" {
 				t.Errorf("%s = %q: the per-page id no longer costs this field, "+
 					"which closes part of this gap", prop, got)
@@ -597,18 +599,17 @@ func TestFixtureRecordsFromTheNewsPages(t *testing.T) {
 		// KNOWN GAP, and the same shape as the per-page id: this page wraps its
 		// article in <div class="mx-auto ...">, not <article>, so the induced
 		// locators miss everything. The <time> element carries the date in a
-		// datetime attribute and is not read either. One value survives, and it
-		// is the <head><title> arriving in the summary field.
-		r := records["/news/utility-classes.html"]
-
-		if got, want := r.Values["summary"],
-			"River levels fall for a third straight week"; got != want {
-			t.Errorf("summary = %q, want the wrong-but-current %q", got, want)
-		}
-		for _, prop := range []string{"title", "author", "published"} {
-			if got := r.Values[prop]; got != "" {
-				t.Errorf("%s = %q: utility classes no longer cost this field, "+
-					"which closes part of this gap", prop, got)
+		// datetime attribute and is not read either.
+		//
+		// The page yields no record at all now. It used to yield one, holding
+		// the <head><title> in the summary field, so what was lost is a wrong
+		// answer rather than a right one.
+		if r, ok := records["/news/utility-classes.html"]; ok {
+			for _, prop := range []string{"title", "author", "published", "summary"} {
+				if got := r.Values[prop]; got != "" {
+					t.Errorf("%s = %q: utility classes no longer cost this field, "+
+						"which closes part of this gap", prop, got)
+				}
 			}
 		}
 	})
@@ -623,20 +624,22 @@ func TestFixtureRecordsFromTheNewsPages(t *testing.T) {
 		//
 		// The right answer is that no section is extracted from these pages.
 		//
-		// KNOWN GAP. All three carry the kicker as their section, exactly as
-		// the 211 records in the measured corpus did. The constant test is not
-		// reached here: three samples is not enough for it, or it is not
-		// applied to this locator at all. Either way the fixture reproduces the
-		// fault the corpus found.
+		// This one is closed. No section is extracted from any of the three,
+		// where all three used to carry the kicker exactly as the 211 records
+		// in the measured corpus did.
+		//
+		// The kicker was reached through the same substring containment that
+		// made <title> answer for summary, so fixing that took this with it.
+		// Whether the constant-value test would also have caught it is still
+		// unknown, and worth knowing: this fixture no longer exercises it.
 		const kicker = "Other items that may interest you"
 		for _, page := range []string{
 			"/news/constant-section-1.html",
 			"/news/constant-section-2.html",
 			"/news/constant-section-3.html",
 		} {
-			if got := records[page].Values["section"]; got != kicker {
-				t.Errorf("%s has section %q, want the wrong-but-current %q",
-					page, got, kicker)
+			if got := records[page].Values["section"]; got == kicker {
+				t.Errorf("%s still carries the constant kicker as its section", page)
 			}
 		}
 
@@ -663,23 +666,29 @@ func TestFixtureRecordsFromTheNewsPages(t *testing.T) {
 		// titles in the measured corpus were shorter than twenty characters:
 		// "Page A1", "Ads", "Community".
 		//
-		// The right answer is that no record comes out of it at all, or that
-		// one comes out marked as something other than an article. This is the
-		// open case internal/classify exists for, so it is a known gap rather
-		// than a regression.
+		// The right answer is that no record comes out of it at all, and that is
+		// what happens now. It used to yield one, holding "Ads" in the summary
+		// field, which is the <head><title> of a section index presented as an
+		// article's summary.
+		//
+		// This is not the title-length test doing its work: nothing here looks
+		// at how short a title is. The record went because the rule that
+		// produced its only value went. internal/classify is still the answer
+		// for telling a section index from an article, and this fixture no
+		// longer proves anything either way.
 		r, ok := records["/news/short-title.html"]
 		if !ok {
-			t.Fatal("no record from /news/short-title.html: the section index is " +
-				"being told apart from an article now, which closes this gap")
-		}
-		if got, want := r.Values["summary"], "Ads"; got != want {
-			t.Errorf("summary = %q, want the wrong-but-current %q", got, want)
+			return // nothing came out of it, which is the right answer
 		}
 
-		// It is indistinguishable from a real article by confidence, which is
-		// what makes it expensive: nothing downstream can filter it out.
-		ordinary := records["/news/ordinary.html"]
-		if r.Confidence != ordinary.Confidence {
+		if got := r.Values["summary"]; got == "Ads" {
+			t.Errorf("summary = %q: a section index is being read as an article", got)
+		}
+
+		// If one does come out, it is indistinguishable from a real article by
+		// confidence, which is what makes it expensive: nothing downstream can
+		// filter it out.
+		if ordinary, ok := records["/news/ordinary.html"]; ok && r.Confidence != ordinary.Confidence {
 			t.Errorf("the section index scores %.2f and a real article %.2f: they are "+
 				"being told apart now, which closes this gap",
 				r.Confidence, ordinary.Confidence)
@@ -695,21 +704,29 @@ func TestFixtureRecordsFromTheNewsPages(t *testing.T) {
 		//
 		// The right answer is published 2025-07-02 and modified 2025-07-19.
 		//
-		// KNOWN GAP. Neither date is read. The page is not collapsing the two
-		// into one, which was the fault being watched for; it is losing both,
-		// because the induced published rule is a regex fitted to the "%d July
-		// 2025" spelling the constant-section pages use and this page's first
-		// <time> reads "2 July 2025", one digit short.
+		// Half closed. published is read now, from the itemprop="dateCreated"
+		// <time>, and it is the machine-readable value rather than the printed
+		// one. The two dates are not collapsed into one, which was the fault
+		// being watched for.
 		r := records["/news/published-vs-modified.html"]
-		for _, prop := range []string{"published", "modified"} {
-			if got := r.Values[prop]; got != "" {
-				t.Errorf("%s = %q: a date is being read out of this page now, "+
-					"which closes part of this gap", prop, got)
-			}
+		if got, want := r.Values["published"], "2025-07-02T10:00:00"; got != want {
+			t.Errorf("published = %q, want %q", got, want)
 		}
-		// What it does get is the headline, twice, in two different fields.
-		if got, want := r.Values["title"], "Inquiry reopens into the 2019 landslip"; got != want {
-			t.Errorf("title = %q, want %q", got, want)
+
+		// KNOWN GAP. modified is still not read, though the page carries
+		// itemprop="dateModified" beside the one that is, so the two are
+		// distinguishable and only one is being taken.
+		if got := r.Values["modified"]; got != "" {
+			t.Errorf("modified = %q: the second date is being read now, "+
+				"which closes the rest of this gap", got)
+		}
+
+		// KNOWN GAP. The headline is not read from this page. It has no
+		// og:title, and the induced title rule is the og:title meta, so a page
+		// that states its headline only in <h1> loses it.
+		if got := r.Values["title"]; got != "" {
+			t.Errorf("title = %q: the headline is being read now, "+
+				"which closes part of this gap", got)
 		}
 	})
 }

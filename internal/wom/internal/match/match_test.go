@@ -186,10 +186,21 @@ func TestLabelPatternVetoesTheWrongName(t *testing.T) {
 		t.Errorf("subtitle scored %.3f against ^(og:|twitter:)?title$, want 0", got)
 	}
 
-	// Without the pattern, substring matching cannot tell them apart.
+	// The control: the pattern has to be doing work that label matching does
+	// not already do, or this test proves nothing.
+	//
+	// It used to be `subtitle` here, on the grounds that substring matching
+	// could not tell it from `title`. That is no longer true and was the fault
+	// this suite now guards against, so the control is a name that still
+	// matches by containment, entry-title being built from the field's own
+	// word, and that the pattern nonetheless refuses.
 	plain := schema.Prop{Name: "title"}
-	if h.Score(ctx, plain, wrong) == 0 {
-		t.Error("without a label pattern subtitle should still score, or the test proves nothing")
+	compound := node(t, "entry-title", "Council approves transit line")
+	if h.Score(ctx, plain, compound) == 0 {
+		t.Error("entry-title should match title by containment, or the control proves nothing")
+	}
+	if got := h.Score(ctx, p, compound); got != 0 {
+		t.Errorf("entry-title scored %.3f against ^(og:|twitter:)?title$, want 0", got)
 	}
 }
 
@@ -222,5 +233,51 @@ func TestRelNamesWhatALinkPointsAt(t *testing.T) {
 
 	if got, want := h.Score(ctx, link, cdn), h.Score(ctx, link, href); got >= want {
 		t.Errorf("preconnect scored %.3f against canonical's %.3f", got, want)
+	}
+}
+
+// A substring is not a word, and treating it as one made every page's <title>
+// answer for summary.
+func TestContainmentIsByWordNotBySubstring(t *testing.T) {
+	keep := []struct{ a, b, why string }{
+		{"entry title", "title", "a class built from the field's name at a separator"},
+		{"dateModified", "modified", "a camelCase itemprop"},
+		{"og:description", "description", "a vocabulary term with its namespace"},
+		{"article:published_time", "published", "an underscore and a colon at once"},
+		{"date published", "published", "two words, one of them the field"},
+	}
+	for _, c := range keep {
+		if !containsSegments(c.a, c.b) {
+			t.Errorf("%q no longer matches %q, which is %s", c.a, c.b, c.why)
+		}
+	}
+
+	refuse := []struct{ a, b, why string }{
+		{"subtitle", "title", "one word ending in another, which made <title> answer for summary"},
+		{"author", "r", "a single letter inside a word"},
+		{"published", "she", "a run of letters that is not a word"},
+		{"headline", "head", "a prefix that is not a segment"},
+	}
+	for _, c := range refuse {
+		if containsSegments(c.a, c.b) {
+			t.Errorf("%q still matches %q, which is %s", c.a, c.b, c.why)
+		}
+	}
+}
+
+// The <title> element means "title", and summary lists "subtitle". Before the
+// boundary rule that scored 0.7, which was enough to win on a page where the
+// real standfirst appears once and <title> appears always.
+func TestATitleElementDoesNotAnswerForSummary(t *testing.T) {
+	title := []weightedLabel{{text: "title", weight: 0.95}}
+
+	summary := []string{"summary", "standfirst", "excerpt", "description", "lede", "subtitle"}
+	if got := labelScore(summary, title); got > 0 {
+		t.Errorf("a <title> scored %v against summary's labels, want 0", got)
+	}
+
+	// And it still answers for the field it actually is.
+	if got := labelScore([]string{"title", "heading"}, title); got == 0 {
+		t.Error("a <title> no longer matches title")
 	}
 }

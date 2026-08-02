@@ -10,6 +10,7 @@ import (
 	"context"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -262,6 +263,66 @@ func lengthRatio(short, long int) float64 {
 	return r / 0.33
 }
 
+// containsSegments reports whether one label is built out of the other's words.
+//
+// Containment used to be a plain substring test, and a substring is not a word.
+// The <title> element means "title", and summary lists "subtitle" among the
+// words a page might label it with, so every page's <title> matched summary at
+// 0.7: measured on the fixture corpus, summary resolved to <head><title> on all
+// fourteen articles, which made summary and title say the same thing on every
+// record. A field that always agrees with another field is not a field.
+//
+// The distinction is a boundary. entry-title and dateModified are built from
+// "title" and "modified", at a separator and at a case change; subtitle is one
+// word that happens to end in another. Splitting both sides the way an
+// identifier is written and asking for a run of whole words keeps the first two
+// and refuses the third.
+func containsSegments(a, b string) bool {
+	x, y := segments(a), segments(b)
+	if len(x) == 0 || len(y) == 0 {
+		return false
+	}
+	if len(x) < len(y) {
+		x, y = y, x
+	}
+	for i := 0; i+len(y) <= len(x); i++ {
+		if slices.Equal(x[i:i+len(y)], y) {
+			return true
+		}
+	}
+	return false
+}
+
+// segments splits a label into the words it is written from: at anything that
+// is not a letter or a digit, and at a lower-to-upper case change, so
+// article:published_time, entry-title and dateModified all come apart the way
+// their author meant them to.
+func segments(s string) []string {
+	var out []string
+	var b strings.Builder
+	flush := func() {
+		if b.Len() > 0 {
+			out = append(out, b.String())
+			b.Reset()
+		}
+	}
+	var prev rune
+	for _, r := range s {
+		switch {
+		case unicode.IsUpper(r) && unicode.IsLower(prev):
+			flush()
+			b.WriteRune(unicode.ToLower(r))
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(unicode.ToLower(r))
+		default:
+			flush()
+		}
+		prev = r
+	}
+	flush()
+	return out
+}
+
 // minContainLen is the shortest string allowed to match by containment.
 // Below it, substring matching degenerates into coincidence.
 const minContainLen = 3
@@ -279,8 +340,8 @@ func labelScore(labels []string, ctxLabels []weightedLabel) float64 {
 		if cand == "" {
 			continue
 		}
-		for _, l := range labels {
-			l = normalize(l)
+		for _, raw := range labels {
+			l := normalize(raw)
 			if l == "" {
 				continue
 			}
@@ -288,13 +349,16 @@ func labelScore(labels []string, ctxLabels []weightedLabel) float64 {
 			switch {
 			case cand == l:
 				s = 1.0
+			// Containment reads the text as it was written rather than as it
+			// normalises, because normalising lowercases and a case change is
+			// one of the two boundaries that make dateModified two words.
 			case len(cand) >= minContainLen && len(l) >= minContainLen &&
-				(strings.Contains(cand, l) || strings.Contains(l, cand)):
+				containsSegments(wl.text, raw):
 				// Containment is damped by how much of the longer string the
 				// shorter one accounts for. Without both the length floor and
 				// the ratio, an SVG circle's @r attribute matches "author"
-				// because "author" contains an "r" — which is exactly the
-				// kind of confident nonsense a locator must never point at.
+				// because "author" contains an "r", which is exactly the kind
+				// of confident nonsense a locator must never point at.
 				short, long := len(cand), len(l)
 				if short > long {
 					short, long = long, short
