@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Atom. The article is in link/@href, not in the element's text, which is
+     the other half of feed link discovery. -->
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>The Gazette</title>
+  <link rel="self" href="{{BASE}}/feeds/atom.xml"/>
+  <updated>2025-07-14T09:12:00Z</updated>
+  <entry>
+    <title>Bridge repairs to close the north lane</title>
+    <link rel="alternate" href="/news/attribute-outscores.html"/>
+    <id>/news/attribute-outscores.html</id>
+    <author><name>Marcus Iyer</name></author>
+    <published>2025-07-12T08:00:00Z</published>
+    <updated>2025-07-12T08:00:00Z</updated>
+    <summary>The closure runs from Monday to the end of the month.</summary>
+  </entry>
+  <entry>
+    <title>Ferry service resumes after engine repair</title>
+    <link rel="alternate" href="/news/canonical-only.html"/>
+    <id>/news/canonical-only.html</id>
+    <author><name>Ana Duarte</name></author>
+    <published>2025-07-11T06:30:00Z</published>
+    <updated>2025-07-11T06:30:00Z</updated>
+    <summary>The 06:40 sailing ran as scheduled.</summary>
+  </entry>
+</feed>

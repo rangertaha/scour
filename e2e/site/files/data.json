@@ -1,0 +1,13 @@
+{
+  "report": "Harbour Works Quarterly",
+  "published": "2025-07-14",
+  "author": "Jane Okafor",
+  "figures": [{"quarter": "Q2", "spend": 4200000, "currency": "GBP"}],
+  "links": {
+    "absolute": "{{BASE}}/news/ordinary.html",
+    "rootRelative": "/places/harbour.html",
+    "relative": "../products/ordinary.html",
+    "api": "/api/products?q=trail",
+    "pdf": "report.pdf"
+  }
+}

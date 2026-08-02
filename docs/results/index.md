@@ -145,5 +145,5 @@ explains why the constants behind them are not configuration.
 
 <div class="pager" markdown="1">
 <span markdown="1">&larr; [The HTTP API]({{ '/server/api.html' | relative_url }})</span>
-<span markdown="1"></span>
+<span markdown="1">[e2e]({{ '/e2e/' | relative_url }}) &rarr;</span>
 </div>

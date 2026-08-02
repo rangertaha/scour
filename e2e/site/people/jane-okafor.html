@@ -1,0 +1,21 @@
+<!-- An author profile. The trap is that a Person page and a NewsArticle page
+     share a shape: a name in an h1, a description, a date. Something has to
+     tell them apart, and it is not the markup. -->
+<html lang="en"><head><meta charset="utf-8"><title>Jane Okafor - The Gazette</title></head><body>
+<div itemscope itemtype="https://schema.org/Person">
+  <h1 itemprop="name">Jane Okafor</h1>
+  <p itemprop="jobTitle">Planning correspondent</p>
+  <p itemprop="description">Jane has covered local government since 2016.</p>
+  <a itemprop="email" href="mailto:j.okafor@example.test">j.okafor@example.test</a>
+  <ul>
+    <li><a href="/news/ordinary.html">Harbour plan approved after long inquiry</a></li>
+    <li><a href="/news/published-vs-modified.html">Inquiry reopens into the 2019 landslip</a></li>
+  </ul>
+</div>
+<a href="/people/">All staff</a>
+<nav class="crosslinks">
+  <a href="{{BASE}}/search?q=harbour">Search (absolute)</a>
+  <a href="/feeds/rss.xml">Feed (root-relative)</a>
+  <a href="../files/report.pdf">The report PDF (relative)</a>
+</nav>
+</body></html>

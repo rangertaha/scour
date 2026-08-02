@@ -1,0 +1,27 @@
+<!-- A place, with geo coordinates and an embedded map. The address is split
+     across five properties, which is the shape a single "address" field in a
+     schema will not match. -->
+<html lang="en"><head><meta charset="utf-8"><title>North Harbour</title></head><body>
+<div itemscope itemtype="https://schema.org/Place">
+  <h1 itemprop="name">North Harbour</h1>
+  <div itemprop="address" itemscope itemtype="https://schema.org/PostalAddress">
+    <span itemprop="streetAddress">1 Quay Road</span>
+    <span itemprop="addressLocality">Ardmore</span>
+    <span itemprop="addressRegion">Argyll</span>
+    <span itemprop="postalCode">PA34 4AB</span>
+    <span itemprop="addressCountry">GB</span>
+  </div>
+  <div itemprop="geo" itemscope itemtype="https://schema.org/GeoCoordinates">
+    <meta itemprop="latitude" content="56.4120">
+    <meta itemprop="longitude" content="-5.4720">
+  </div>
+  <iframe title="Map of North Harbour" src="/places/map.html" width="400" height="300"></iframe>
+  <p itemprop="description">A working harbour with two commercial berths.</p>
+</div>
+<a href="/places/">All places</a>
+<nav class="crosslinks">
+  <a href="{{BASE}}/search?q=harbour">Search (absolute)</a>
+  <a href="/feeds/rss.xml">Feed (root-relative)</a>
+  <a href="../files/report.pdf">The report PDF (relative)</a>
+</nav>
+</body></html>

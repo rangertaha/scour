@@ -1,0 +1,51 @@
+<!-- The hub. Every section is reachable from here, so one seed URL reaches the
+     whole site and a crawl's link discovery is what decides how much it sees. -->
+<html lang="en"><head><meta charset="utf-8"><title>The Gazette</title>
+<link rel="canonical" href="/">
+<link rel="alternate" type="application/rss+xml" title="The Gazette" href="/feeds/rss.xml">
+</head><body>
+<h1>The Gazette</h1>
+
+<h2>Sections</h2>
+<ul>
+  <li><a href="/news/">News</a>, the article shapes and the traps in them</li>
+  <li><a href="/products/">Products</a>, microdata and JSON-LD</li>
+  <li><a href="/people/">People</a>, author and staff profiles</li>
+  <li><a href="/places/">Places</a>, an address, coordinates and a map frame</li>
+  <li><a href="/listings/">Archive</a>, paginated through rel="next"</li>
+</ul>
+
+<h2>Feeds</h2>
+<ul>
+  <li><a href="/feeds/rss.xml">RSS 2.0</a>, with a channel image competing with the items</li>
+  <li><a href="/feeds/atom.xml">Atom</a>, links in href rather than in text</li>
+  <li><a href="/feeds/rdf.xml">RDF</a>, items beside the channel rather than inside it</li>
+  <li><a href="/feeds/feed.json">JSON Feed</a></li>
+</ul>
+
+<h2>Files</h2>
+<ul>
+  <li><a href="/files/report.pdf">A PDF</a> with real extractable text</li>
+  <li><a href="/files/chart.png">A PNG</a></li>
+  <li><a href="/files/notes.txt">Plain text</a></li>
+  <li><a href="/files/data.json">JSON</a></li>
+</ul>
+
+<h2>Awkward responses</h2>
+<ul>
+  <li><a href="/odd/feed-as-plain-xml">A feed served as application/xml</a></li>
+  <li><a href="/odd/article.pdf">HTML at a .pdf address</a></li>
+  <li><a href="/odd/image-as-html">A PNG announced as HTML</a></li>
+  <li><a href="/odd/no-content-type">No Content-Type at all</a></li>
+  <li><a href="/dynamic/js-rendered">A page written by script</a></li>
+  <li><a href="/dynamic/redirect">A redirect</a></li>
+  <li><a href="/dynamic/slow">A slow page</a></li>
+  <li><a href="/dynamic/changes">A page that changes on every fetch</a></li>
+  <li><a href="/dynamic/404">A 404</a> and <a href="/dynamic/500">a 500</a></li>
+</ul>
+<nav class="crosslinks">
+  <a href="{{BASE}}/search?q=harbour">Search (absolute)</a>
+  <a href="/feeds/rss.xml">Feed (root-relative)</a>
+  <a href="../files/report.pdf">The report PDF (relative)</a>
+</nav>
+</body></html>
