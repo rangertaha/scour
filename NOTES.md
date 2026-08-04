@@ -577,6 +577,53 @@ The one thing given up is querying. KV answers "this key" and "these keys", not
 "every job crawling example.com", which would mean listing and filtering. For
 tens or hundreds of jobs that is not a constraint worth designing around.
 
+### Where the frontier lives
+
+In SQLite, in one database, with hand-written SQL and no ORM.
+
+Nothing else in scour needs a database. Bodies are in the cache, the job is in
+KV, records are append-only. The frontier is the exception because of what it
+has to do at once: dedup by URL, hand out the highest-scoring entry whose host
+is not cooling, lease it with a timeout, and survive a restart with all of that
+intact.
+
+**NATS cannot do it.** JetStream is a work queue and work queues are FIFO. A
+focused crawl is ranking, and the ranking changes as the model learns, so the
+one thing the frontier must do is the one thing a broker does not.
+
+**Politeness decides the rest.** A rate limit is per host and shared between
+jobs, and two schedulers handing out the same host cannot honour a crawl delay
+between them. So the frontier is single-writer per host by construction. A
+multi-writer database buys nothing until there are more hosts than one process
+can schedule, and at that point the answer is to shard by host, which makes each
+shard single-writer again. SQLite is what a single writer wants.
+
+That politeness is shared also settles the layout: **one database, not one per
+job.** Per-job files would be tidier and would make dropping a job a delete, but
+host state cannot be partitioned per job without two jobs on one site each
+getting their own allowance, which is exactly what must not happen.
+
+**One writer, many readers**, which is what WAL is for. Pure-Go driver, so it
+cross-compiles and installs with nothing.
+
+**Hand-written SQL, no ORM.** There are perhaps a dozen queries and every one is
+shaped by an index. An ORM would hide the thing most worth looking at, and the
+lease is a transaction with an ordering in it rather than a row fetched by id.
+
+The escape hatch is deliberate: the lease is written as `SELECT ... FOR UPDATE`,
+which SQLite ignores because it serialises writers anyway and Postgres needs.
+The day multi-writer is genuinely required, it is the same SQL against a
+different dialect rather than a rewrite. The old implementation had this shape
+and it held at 150,000 rows.
+
+What is given up, and it is worth being honest: ad-hoc analytics over records
+are not this store's job, and cross-machine writes to one job's frontier are not
+possible without sharding first.
+
+What would change the answer: a crawl whose hosts genuinely exceed what one
+scheduler can pace. Then Postgres and `FOR UPDATE SKIP LOCKED`, which is built
+for exactly this, and the migration is a dialect rather than a redesign.
+
 ### Only the server writes
 
 The command line is a client. It holds no frontier, no records and no idea what
@@ -613,13 +660,6 @@ wastes bandwidth; pulling it needs a request-reply the stage has to implement.
 may be leased, a response in flight, and an item mid-graph. Quiescence across
 four stages is the genuinely new distributed-systems problem here.
 
-**Where does the frontier live?** Nothing else in scour needs a database: bodies
-are in the cache, config is the job document, records are append-only. The
-frontier needs a priority queue with dedup and leases, which NATS cannot do
-because JetStream is FIFO and a focused crawl is ranking. Politeness argues for
-one writer per host, which would make SQLite correct and sharding by host the
-scaling story. Undecided, and it blocks the scheduler.
-
 ## Status
 
 | Piece | State |
@@ -641,6 +681,7 @@ scaling story. Undecided, and it blocks the scheduler.
 | Exporters, all formats | Not started |
 | Cluster join, distributed jobs | Not started |
 | Jobs in a KV bucket, server-side writes | Decided, not started |
+| Frontier in SQLite, one database, hand-written SQL | Decided, not started |
 
 `internal/engine/notes_test.go` reads this file. It parses and validates the job
 documents in it, and compares every number in the catalogue tables with the

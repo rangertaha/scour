@@ -37,12 +37,35 @@ back out of the cache. robots.txt honoured under a server that disallows.
 Redirects landing at their target.
 
 **Phase 3. The frontier and the scheduler.** Dedup, depth, politeness, the
-ordering policies, leases.
+ordering policies, leases. SQLite, one database, hand-written SQL: see
+[NOTES.md](NOTES.md#where-the-frontier-lives) for why.
 
-*Blocked on a decision.* See below.
+Two tables carry it. `urls` is the frontier, keyed by a hash of the normalised
+URL so re-discovering one is an upsert rather than a duplicate. `hosts` is
+politeness, and it is shared across jobs because a rate limit is per host: two
+jobs on one site get one allowance between them, not one each.
 
-*Proved by:* a recorded frontier handed out in the order each policy claims,
-and a lease that expires and is handed out again.
+The lease is the query worth getting right, because everything else follows its
+indexes:
+
+    BEGIN
+    SELECT u.* FROM urls u JOIN hosts h ON h.host = u.host
+     WHERE u.job = ? AND u.status = 'queued'
+       AND (u.leased_until IS NULL OR u.leased_until < now)
+       AND h.next_at <= now
+     ORDER BY u.score DESC
+     LIMIT 1 FOR UPDATE
+    UPDATE urls SET leased_until = ?, attempts = attempts + 1 WHERE id = ?
+    COMMIT
+
+`FOR UPDATE` is a no-op on SQLite, which serialises writers anyway, and is what
+Postgres needs the day sharding is not enough. Writing it in from the start
+makes that a dialect change rather than a rewrite.
+
+*Proved by:* a recorded frontier handed out in the order each policy claims; a
+lease that expires and is handed out again; a host that has just been fetched
+being skipped until it is due; and two jobs on one host sharing its allowance
+rather than each getting one.
 
 **Phase 3.5. `scour try`, the development loop.** One page, fetched once,
 cached, and re-run against the cache from then on.
@@ -223,7 +246,7 @@ has numbers to compare against the ones on `main`.
 | Job document: parse, validate, chains, DAG, diff | Done |
 | 1. The chain | Not started |
 | 2. Downloader and the four middleware | Not started |
-| 3. Frontier and scheduler | Blocked on the store decision |
+| 3. Frontier and scheduler | Not started. Store decided |
 | 3.5. `scour try`, the development loop | Not started |
 | 4. Spider | Not started |
 | 4.5. `scour train`, locators into the document | Not started |
