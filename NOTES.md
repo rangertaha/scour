@@ -213,11 +213,11 @@ job "news" {
     inline   = ""
   }
 
-  # Each exporter receives a copy of every item.
-  exporter "json"   { dir    = "./out" }
-  exporter "csv"    { dir    = "./out" }
-  exporter "nats"   { stream = "ITEMS" }
-  exporter "sqlite" { file   = "./items.db" }
+  # Exporters are per item. The second label says which.
+  exporter "json"   "article" { dir    = "./out" }
+  exporter "csv"    "article" { dir    = "./out" }
+  exporter "nats"   "article" { stream = "ITEMS" }
+  exporter "sqlite" "article" { file   = "./items.db" }
 }
 ```
 
@@ -256,6 +256,11 @@ will actually do, rather than inheriting whatever the server meant that day.
 **Every stage chains the same way,** the scheduler included. One mechanism, one
 set of rules about order, one thing to learn. A scheduler plugin is a link in a
 chain exactly as a downloader plugin is.
+
+**Exporters are per item, not per job.** A job extracting articles and comments
+wants them in different files, and an exporter handed both would have to be told
+which was which anyway. The item is the second label, matching how `plugin` and
+`pipelines` already read.
 
 **Nesting requires `object`.** A property with children is an object whatever it
 says, and a mismatch is refused rather than inferred, because silently changing
@@ -346,8 +351,13 @@ Plus the script runtimes, which are graph nodes rather than chain links:
 
 ### Exporters
 
-`json`, `jsonlines`, `csv`, `parquet`, `nats`, `sqlite`. Each receives a copy
-of every item.
+`json`, `jsonlines`, `csv`, `parquet`, `nats`, `sqlite`.
+
+Exporters are per item, named `exporter "<format>" "<item>"`. Every exporter
+naming an item receives a copy of each of those items, so writing one item to
+both json and sqlite is two blocks. An exporter naming an item the job does not
+extract is refused, because silently writing nothing is the failure mode nobody
+notices until they go looking for the output.
 
 ## Writing a plugin
 
@@ -409,9 +419,6 @@ with a local cache is a single-node job by definition.
 for one stage.** The first is a link in a chain, the second a node in a graph
 with dependencies. They probably want different words; keeping both spellings
 this close together will confuse whoever writes the second document.
-
-**Are exporters per item or per job?** Each exporter gets a copy of every item,
-but with several `item` blocks it may be worth exporting only some.
 
 **What is a job's identity?** The name is the client's, so resubmitting the same
 name means the same job. Does resubmitting with different config mutate it,

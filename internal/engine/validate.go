@@ -260,12 +260,52 @@ func (p *Plugin) order() int {
 func (j *Job) validateExporters() []error {
 	var problems []error
 
+	items := make(map[string]bool, len(j.Items))
+	for _, item := range j.Items {
+		items[item.Name] = true
+	}
+
 	seen := map[string]bool{}
 	for _, e := range j.Exporters {
-		if seen[e.Name] {
-			problems = append(problems, fmt.Errorf("exporter %q: declared twice", e.Name))
+		where := fmt.Sprintf("exporter %q %q", e.Format, e.Item)
+
+		if seen[e.Address()] {
+			problems = append(problems, fmt.Errorf("%s: declared twice", where))
 		}
-		seen[e.Name] = true
+		seen[e.Address()] = true
+
+		// An exporter naming an item that is not extracted writes nothing, and
+		// silently writing nothing is the failure mode nobody notices until
+		// they go looking for the output.
+		if !items[e.Item] {
+			problems = append(problems, fmt.Errorf(
+				"%s: no item %q is declared. Declared: %s",
+				where, e.Item, strings.Join(itemNames(j.Items), ", ")))
+		}
 	}
 	return problems
+}
+
+// ExportersFor returns the exporters that receive copies of one item, in the
+// order they were written.
+func (j *Job) ExportersFor(item string) []*Exporter {
+	var out []*Exporter
+	for _, e := range j.Exporters {
+		if e.Item == item {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func itemNames(items []*Item) []string {
+	if len(items) == 0 {
+		return []string{"none"}
+	}
+	out := make([]string, 0, len(items))
+	for _, i := range items {
+		out = append(out, i.Name)
+	}
+	sort.Strings(out)
+	return out
 }

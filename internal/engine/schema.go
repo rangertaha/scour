@@ -190,14 +190,30 @@ func (p *Pipeline) Address() string { return p.Kind + "." + p.Name }
 // document has been resolved.
 func (p *Pipeline) Requirements() []string { return p.requires }
 
-// Exporter writes items out. Each one receives a copy of every item.
+// Exporter writes one item out.
+//
+//	exporter "json" "article" {
+//	  dir = "./out"
+//	}
+//
+// The first label is the format, the second is the item it exports. Exporters
+// are per item rather than per job: a job that extracts articles and comments
+// usually wants them in different files, and an exporter that received both
+// would have to be told which was which anyway.
+//
+// Every exporter named for an item receives a copy of every one of those
+// items, so writing the same item to json and to sqlite is two blocks.
 type Exporter struct {
-	Name string `hcl:"name,label"`
+	Format string `hcl:"format,label"`
+	Item   string `hcl:"item,label"`
 
 	// Config is the exporter's own fields, left undecoded for the same reason
 	// a plugin's are.
 	Config hcl.Body `hcl:",remain"`
 }
+
+// Address is how one exporter is named in an error.
+func (e *Exporter) Address() string { return e.Format + "." + e.Item }
 
 // Parse reads a document.
 //

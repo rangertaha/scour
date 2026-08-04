@@ -116,10 +116,10 @@ job "news" {
     requires = [python.enrich]
   }
 
-  exporter "json"   { dir    = "./out" }
-  exporter "csv"    { dir    = "./out" }
-  exporter "nats"   { stream = "ITEMS" }
-  exporter "sqlite" { file   = "./items.db" }
+  exporter "json"   "article" { dir    = "./out" }
+  exporter "csv"    "article" { dir    = "./out" }
+  exporter "nats"   "article" { stream = "ITEMS" }
+  exporter "sqlite" "article" { file   = "./items.db" }
 }
 `
 
@@ -713,5 +713,100 @@ func TestBuiltinCatalogueMatchesTheNotes(t *testing.T) {
 	if !(compression < charset && charset < cacheOrder) {
 		t.Errorf("bodies must be decompressed (%d) and transcoded (%d) before they are cached (%d)",
 			compression, charset, cacheOrder)
+	}
+}
+
+// TestExportersAreScopedToAnItem is the requirement: an exporter names the
+// item it writes, and every exporter for that item gets a copy.
+func TestExportersAreScopedToAnItem(t *testing.T) {
+	job := parse(t, document).Jobs[0]
+
+	got := job.ExportersFor("article")
+	if len(got) != 4 {
+		t.Fatalf("article has %d exporters, want 4", len(got))
+	}
+	if got[0].Format != "json" || got[3].Format != "sqlite" {
+		t.Errorf("exporters = %s..%s, want document order", got[0].Format, got[3].Format)
+	}
+	if len(job.ExportersFor("comment")) != 0 {
+		t.Error("an item that was never declared has exporters")
+	}
+}
+
+func TestExporterForAnUndeclaredItemIsRefused(t *testing.T) {
+	doc := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "p" {
+      type = str
+    }
+  }
+
+  exporter "json" "comment" {
+    dir = "./out"
+  }
+}
+`)
+	err := doc.Validate()
+	if err == nil {
+		t.Fatal("accepted an exporter for an item that is not extracted")
+	}
+	if !strings.Contains(err.Error(), "comment") || !strings.Contains(err.Error(), "article") {
+		t.Errorf("error should name the missing item and what is declared: %v", err)
+	}
+}
+
+func TestSameFormatForTwoItemsIsFine(t *testing.T) {
+	doc := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "p" {
+      type = str
+    }
+  }
+  item "comment" {
+    property "q" {
+      type = str
+    }
+  }
+
+  exporter "json" "article" {
+    dir = "./articles"
+  }
+  exporter "json" "comment" {
+    dir = "./comments"
+  }
+}
+`)
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("refused one format writing two items: %v", err)
+	}
+	if len(doc.Jobs[0].ExportersFor("article")) != 1 || len(doc.Jobs[0].ExportersFor("comment")) != 1 {
+		t.Error("exporters did not land on the right items")
+	}
+}
+
+func TestDuplicateExporterIsRefused(t *testing.T) {
+	doc := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "p" {
+      type = str
+    }
+  }
+
+  exporter "json" "article" {
+    dir = "./a"
+  }
+  exporter "json" "article" {
+    dir = "./b"
+  }
+}
+`)
+	if err := doc.Validate(); err == nil {
+		t.Fatal("accepted the same format twice for one item")
 	}
 }
