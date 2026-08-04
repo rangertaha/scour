@@ -341,6 +341,32 @@ The match count is written beside each locator as a comment, because a locator
 that worked on 97 of 312 pages and one that worked on 311 deserve different
 amounts of trust, and that number is invisible once the guess is in the file.
 
+#### How to train
+
+The loop, in the order it works:
+
+```console
+$ scour init news --template news > news.hcl
+$ scour try news.hcl https://site.example/story/1   # what do aliases alone find?
+# set max_pages = 300 and run the crawl, so there is a corpus
+$ scour train news.hcl                              # see what it proposes
+$ scour train news.hcl --url https://site.example/story/1 \
+    -i 'article.title.text="Something happened yesterday"' --write
+```
+
+Then hand-correct anything still wrong and commit. Re-training later keeps the
+corrections, which is the rule that makes this converge instead of going in
+circles.
+
+**Three hundred pages is enough.** The old implementation measured this: cost is
+linear in bytes at roughly half a second a page, and 800 pages was not
+meaningfully better than 300. Crawl a few hundred, train, and spend the time you
+saved looking at what it proposed.
+
+**Train across several sites if the job crawls several sites.** A locator
+induced from one site will be pinned to that site's markup, and the failure is
+invisible until the second site quietly extracts nothing.
+
 ### Running
 
 These arrive with the engine.

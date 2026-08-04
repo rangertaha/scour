@@ -76,6 +76,49 @@ is the one that makes the loop converge instead of going in circles.
 *Proved by:* training over a corpus, hand-correcting one locator, retraining,
 and finding the correction still there.
 
+### How training should work
+
+Written out because this is the part most likely to be got wrong, and because
+the old implementation on `main` already made two of these mistakes and has the
+measurements that show it.
+
+**Do not induce from scratch. Start with what the site declares.** JSON-LD,
+microdata, RDFa, OpenGraph, `<time datetime>`. A page carrying
+`@type: NewsArticle` is telling you which node is the headline, the byline and
+the date. That is not a guess, it is present on most sites anybody wants to
+crawl, and it is stable because the site maintains it deliberately. On a
+well-marked-up site this is the only pass needed.
+
+Then aliases against `class`, `id` and `itemprop`, which are a real hint that
+sites reuse carelessly. Then structural heuristics, which are broad, weak, and
+where blind induction goes wrong.
+
+**Score a candidate on two numbers, not one: coverage and distinctness.** This
+is the lesson that cost the most. On `main`, `title` scored 243 pages filled
+from 10 distinct values, because it had found the site's own name, which appears
+on every page. Coverage alone calls that a success. It went to 644 from 627
+distinct once distinctness was scored.
+
+A field whose value is the same across a site is describing the site, not the
+thing. That is the single most useful signal in induction and it costs one
+count.
+
+**Generalise the locator, or it pins the page it came from.** Also from `main`:
+an induced CSS selector led with `#asset-59da10e1-...`, a per-page id, so it
+matched exactly the page it was induced from while the XPath for the same field
+stayed generic and worked across 660 records. Where a group's instances share no
+leading segment, the selector has to generalise to the tail they do share. This
+guard goes in from the first commit, or the bug comes back.
+
+**An example outranks everything.** Given `article.title.text="Hello World"`,
+look for nodes producing that value and induce from there. One node is an
+answer, none is an error worth reporting, and several is a question to ask
+rather than a coin to toss.
+
+*Also proved by:* a corpus spanning several sites. A locator induced from one
+site is pinned to that site's markup, and the failure is invisible until the
+second site quietly extracts nothing.
+
 **Phase 5. Pipelines and exporters.** The DAG runner over `Waves()`, and the
 formats.
 
