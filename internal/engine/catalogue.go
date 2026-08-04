@@ -55,8 +55,6 @@ var Placements = map[Stage][]Placement{
 		{"retry", 550, "Retries the temporarily failed"},
 		{"headers", 560, "Default request headers"},
 		{"metarefresh", 580, "Follows meta-refresh redirects"},
-		{"compression", 590, "gzip, deflate, br, zstd"},
-		{"charset", 600, "Transcodes the body to UTF-8"},
 		{"proxy", 610, "Routes through a proxy"},
 		{"redirect", 630, "Follows HTTP redirects"},
 		{"stats", 850, "Counts requests, responses and failures"},
@@ -118,12 +116,19 @@ func PipelineKindNames() []string {
 	return out
 }
 
-// charset has no Scrapy equivalent, because Scrapy decodes in its response
-// object rather than in a middleware. It is not optional here, and it must run
-// after compression and before cache: bodies are cached transcoded, so the
-// corpus is UTF-8 whatever the site served. Getting this wrong does not merely
-// score badly, it poisons the evidence every later measurement is taken
-// against.
+// Decoding is not here, and that is the one place this catalogue departs from
+// Scrapy's on purpose.
+//
+// Turning bytes into text is what reading a body means, not a step in a chain.
+// Two things read a body: the downloader on its way to the cache, and the
+// spider, which reads the cache directly by key and never passes through this
+// chain at all. A decode that lived here would apply to one of them and not the
+// other. It is [internal/decode], a function both call.
+//
+// The cache therefore holds what the server sent, which is the more useful
+// archive: detection improves, and original bytes can be decoded again to get a
+// better answer, while a corpus decoded on the way in has its mistakes baked in
+// until somebody re-crawls.
 
 // DefaultOrder is where a catalogued middleware conventionally sits.
 //

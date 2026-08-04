@@ -346,12 +346,12 @@ func TestChainUsesCataloguedOrder(t *testing.T) {
 	j := mustValidate(t, `
   downloader {
     plugin "cache" {}
-    plugin "compression" {}
+    plugin "offsite" {}
   }
 `)
 	chain := j.Chain(engine.StageDownloader)
-	if len(chain) != 2 || chain[0].Name != "compression" || chain[1].Name != "cache" {
-		t.Errorf("chain = %v; want compression (590) before cache (900)", engine.Names(chain))
+	if len(chain) != 2 || chain[0].Name != "offsite" || chain[1].Name != "cache" {
+		t.Errorf("chain = %v; want offsite (500) before cache (900)", engine.Names(chain))
 	}
 }
 

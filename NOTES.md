@@ -383,8 +383,6 @@ them to what is written here.
 | 550 | `retry` | Retries the temporarily failed |
 | 560 | `headers` | Default request headers |
 | 580 | `metarefresh` | Follows meta-refresh redirects |
-| 590 | `compression` | gzip, deflate, br, zstd |
-| **600** | **`charset`** | **Transcodes the body to UTF-8** |
 | 610 | `proxy` | Routes through a proxy |
 | 630 | `redirect` | Follows HTTP redirects |
 | 850 | `stats` | Counts requests, responses and failures |
@@ -393,11 +391,22 @@ them to what is written here.
 `robots`, `user_agent`, `timeout` and `max_body` are not here. They are
 `downloader` attributes, for the reason under Decisions.
 
-`charset` has no Scrapy equivalent, because Scrapy decodes in its response
-object rather than in a middleware. It must sit after `compression` and before
-`cache`: bodies are cached transcoded, so the corpus is UTF-8 whatever the site
-served. Getting this wrong does not merely score badly, it poisons the evidence
-every later measurement is taken against.
+**Decoding is not in this table, and that is deliberate.**
+
+Turning bytes into text is what reading a body means, not a position in a chain.
+Two things read a body: the downloader on its way to the cache, and the spider,
+which reads the cache directly by key and never passes through this chain at
+all. A decode that lived here would apply to one of them and not the other, and
+the corpus would be UTF-8 only when it happened to be read the long way round.
+
+So it is `internal/decode`, a function both call, and there is one
+implementation of it.
+
+**The cache holds what the server sent.** Not decoded output. That is the more
+useful archive: detection improves, and original bytes can be decoded again for
+a better answer, while a corpus decoded on the way in has its mistakes baked in
+until somebody re-crawls. It is smaller, too, and faithful enough to
+revalidate.
 
 ### Spider
 
