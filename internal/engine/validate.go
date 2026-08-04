@@ -36,6 +36,10 @@ func (d *Document) Validate() error {
 	return errors.Join(problems...)
 }
 
+// joinErrors is errors.Join over a slice, kept here because several validators
+// build their problems the same way.
+func joinErrors(problems []error) error { return errors.Join(problems...) }
+
 // Names lists the jobs, in the order they were written.
 func (d *Document) Names() []string {
 	out := make([]string, 0, len(d.Jobs))
@@ -90,6 +94,9 @@ func (j *Job) validate() []error {
 		}
 	}
 
+	for _, err := range j.Monitoring.validate() {
+		problems = append(problems, prefix(err))
+	}
 	for _, err := range j.Mutation.validate() {
 		problems = append(problems, prefix(err))
 	}
@@ -255,7 +262,7 @@ func (j *Job) Chain(stage Stage) []*Plugin {
 		if Stage(p.Stage) != stage {
 			continue
 		}
-		if p.Enabled != nil && !*p.Enabled {
+		if !p.IsEnabled() {
 			continue
 		}
 		out = append(out, p)

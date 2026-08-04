@@ -292,6 +292,27 @@ block out means. Both spellings exist because they are written for different
 reasons: deleting a block throws away its configuration, and turning it off
 keeps it, which is what you want when the setting took an afternoon to work out.
 
+**A spider is handed the spec, not the job.** It has no business knowing where
+bodies are cached, what the budget is or which exporters are attached, and
+handing it the whole job would make every one of those look like something it
+might depend on. The spec renders back to HCL, so a spider in another language
+gets the text a person would have written, and an author can check it against
+what they meant.
+
+**The spec is fingerprinted.** Resubmitting mutates a job, so the shape can
+change while the crawl runs, and a record extracted under one shape and
+attributed to another is wrong in a way nothing downstream can detect. The
+fingerprint changes exactly when the shape does: not when properties are
+reordered and not when the document is reformatted, because a fingerprint that
+moved for cosmetics would force a re-extraction nobody needed.
+
+**Everything has a default, and they are all in one file.** A default written
+next to the field it fills is impossible to review: nobody can answer "what does
+an empty job do?" without reading every file. `internal/engine/defaults.go` is
+the whole list, `Defaults()` prints it, and `Resolved()` returns the job with
+every one filled in, which is what should be stored so that resubmitting next
+month behaves the way it did today.
+
 **A job says what to do about its own mutation.** The diff knows what a
 resubmission would cost; the `mutation` block says what should happen about it,
 so the answer travels with the job rather than living in a flag somebody has to
@@ -533,6 +554,8 @@ and it is the same question for `rate` and `concurrency`.
 | Pipeline waves, for running independent steps at once | Built, tested |
 | Resubmission diff, with an effect per change | Built, tested |
 | Mutation policy: what a resubmission does to work already done | Built, tested |
+| Extraction spec: separable, renders to HCL, fingerprinted | Built, tested |
+| Defaults for every setting, in one file, with a resolved view | Built, tested |
 | `internal/registry`, generic, shared by every extension point | Built, cache runs on it |
 | `internal/chain`, middleware that wraps, with drop and short-circuit | Built, tested |
 | Plugin implementations, all of them | Not started |

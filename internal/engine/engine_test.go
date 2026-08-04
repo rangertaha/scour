@@ -1595,3 +1595,296 @@ job "j" {
 		}
 	}
 }
+
+// Defaults, and the spec a spider is handed.
+
+func TestEmptyJobResolvesToSomethingSane(t *testing.T) {
+	j := job(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "title" {}
+  }
+}
+`).Resolved()
+
+	if j.Engine.Limits.MaxDepth != engine.DefaultMaxDepth {
+		t.Errorf("depth = %d", j.Engine.Limits.MaxDepth)
+	}
+	if j.Engine.Limits.MaxBodyBytes != engine.DefaultMaxBodyBytes {
+		t.Errorf("body bytes = %d", j.Engine.Limits.MaxBodyBytes)
+	}
+	if !j.Engine.Politeness.ObeysRobots() {
+		t.Error("robots defaulted off")
+	}
+	if j.Engine.Politeness.UserAgent == "" {
+		t.Error("no user agent")
+	}
+	if j.Monitoring.LogLevel() != engine.DefaultLogLevel {
+		t.Errorf("level = %q", j.Monitoring.LogLevel())
+	}
+	if !j.Monitoring.LoggingOn() {
+		t.Error("logging defaulted off, so a job that fails says nothing")
+	}
+	if j.Mutation.Costly != engine.CostlyRefuse {
+		t.Errorf("costly = %q, want the cautious default", j.Mutation.Costly)
+	}
+
+	// Types are filled, including the one inferred from having children.
+	if j.Items[0].Type != string(engine.DefaultItemType) {
+		t.Errorf("item type = %q", j.Items[0].Type)
+	}
+	if j.Items[0].Properties[0].Type != string(engine.DefaultPropertyType) {
+		t.Errorf("property type = %q", j.Items[0].Properties[0].Type)
+	}
+}
+
+func TestNestedPropertyDefaultsToObject(t *testing.T) {
+	j := job(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "author" {
+      property "name" {}
+    }
+  }
+}
+`).Resolved()
+
+	author := j.Items[0].Properties[0]
+	if author.Type != string(engine.TypeObject) {
+		t.Errorf("a property with children resolved to %q, want object", author.Type)
+	}
+	if author.Properties[0].Type != string(engine.TypeStr) {
+		t.Errorf("nested leaf resolved to %q", author.Properties[0].Type)
+	}
+}
+
+// TestResolvedDoesNotMutate keeps "what they sent" and "what it will do" apart.
+func TestResolvedDoesNotMutate(t *testing.T) {
+	j := job(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {}
+  }
+}
+`)
+	_ = j.Resolved()
+
+	if j.Engine != nil || j.Mutation != nil || j.Monitoring != nil {
+		t.Error("Resolved filled in the job it was called on")
+	}
+	if j.Items[0].Type != "" || j.Items[0].Properties[0].Type != "" {
+		t.Error("Resolved wrote types back into the submitted schema")
+	}
+}
+
+func TestResolvedKeepsWhatWasAsked(t *testing.T) {
+	j := job(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    type = list
+    property "p" {
+      type = date
+    }
+  }
+  engine {
+    limits {
+      max_depth = 42
+    }
+    politeness {
+      robots = false
+    }
+  }
+  monitoring {
+    level = "debug"
+  }
+}
+`).Resolved()
+
+	if j.Engine.Limits.MaxDepth != 42 {
+		t.Errorf("depth = %d, want the submitted 42", j.Engine.Limits.MaxDepth)
+	}
+	if j.Engine.Politeness.ObeysRobots() {
+		t.Error("an explicit robots = false was overwritten")
+	}
+	if j.Monitoring.LogLevel() != "debug" {
+		t.Errorf("level = %q", j.Monitoring.LogLevel())
+	}
+	if j.Items[0].Type != "list" || j.Items[0].Properties[0].Type != "date" {
+		t.Error("declared types were overwritten by defaults")
+	}
+}
+
+func TestEveryDefaultIsListed(t *testing.T) {
+	d := engine.Defaults()
+	if len(d) == 0 {
+		t.Fatal("no defaults are listed")
+	}
+	for _, name := range engine.DefaultNames() {
+		if d[name] == "" && !strings.Contains(name, "max_pages") && !strings.Contains(name, "max_time") {
+			t.Errorf("%s has an empty default", name)
+		}
+	}
+	// The settings a reader will look for first.
+	for _, want := range []string{
+		"engine.limits.max_depth", "engine.politeness.robots",
+		"monitoring.level", "mutation.costly", "item.property.type",
+	} {
+		if _, ok := d[want]; !ok {
+			t.Errorf("%s has no documented default", want)
+		}
+	}
+}
+
+func TestMonitoringLevelIsChecked(t *testing.T) {
+	doc := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {}
+  }
+  monitoring {
+    level = "shouty"
+  }
+}
+`)
+	if err := doc.Validate(); err == nil {
+		t.Fatal("accepted a log level that is not one")
+	}
+}
+
+// A spider is handed the spec, not the job.
+
+func TestSpecIsJustTheShapes(t *testing.T) {
+	j := parse(t, document).Jobs[0]
+	spec := j.Spec()
+
+	if spec.Job != "news" {
+		t.Errorf("job = %q", spec.Job)
+	}
+	if len(spec.Items) != len(j.Items) {
+		t.Errorf("got %d items, want %d", len(spec.Items), len(j.Items))
+	}
+	if _, ok := spec.Item("article"); !ok {
+		t.Error("article is not in the spec")
+	}
+	if _, ok := spec.Item("nothing"); ok {
+		t.Error("an item that does not exist was found")
+	}
+}
+
+// TestSpecRoundTrips is the property an external spider depends on: what it is
+// handed parses back to what was sent.
+func TestSpecRoundTrips(t *testing.T) {
+	original := parse(t, document).Jobs[0].Spec()
+
+	rendered := original.HCL()
+	back, err := engine.ParseSpec(rendered, "spec.hcl")
+	if err != nil {
+		t.Fatalf("the rendered spec does not parse:\n%s\n%v", rendered, err)
+	}
+	if err := back.Validate(); err != nil {
+		t.Fatalf("the rendered spec does not validate: %v", err)
+	}
+
+	if back.Fingerprint() != original.Fingerprint() {
+		t.Errorf("fingerprint changed across the round trip:\n%s", rendered)
+	}
+	if strings.Join(back.Names(), ",") != strings.Join(original.Names(), ",") {
+		t.Errorf("items changed: %v vs %v", back.Names(), original.Names())
+	}
+}
+
+// TestFingerprintTracksTheShape is what stops a record being attributed to a
+// shape it was not read under.
+func TestFingerprintTracksTheShape(t *testing.T) {
+	base := `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "title" {
+      type     = str
+      required = %t
+    }
+    property "body" {
+      type = str
+    }
+  }
+}
+`
+	a := job(t, fmt.Sprintf(base, false)).Spec()
+	b := job(t, fmt.Sprintf(base, true)).Spec()
+
+	if a.Fingerprint() == b.Fingerprint() {
+		t.Error("a changed property did not change the fingerprint")
+	}
+	if a.Fingerprint() != job(t, fmt.Sprintf(base, false)).Spec().Fingerprint() {
+		t.Error("the same shape produced two fingerprints")
+	}
+}
+
+// TestFingerprintIgnoresCosmetics: reordering is not a schema change, and a
+// fingerprint that moved would force a re-extraction nobody needed.
+func TestFingerprintIgnoresCosmetics(t *testing.T) {
+	a := job(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "title" {
+      type = str
+    }
+    property "body" {
+      type = str
+    }
+  }
+}
+`).Spec()
+	b := job(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "body" {
+      type = str
+    }
+    property "title" {
+      type = str
+    }
+  }
+}
+`).Spec()
+
+	if a.Fingerprint() != b.Fingerprint() {
+		t.Error("reordering properties changed the fingerprint")
+	}
+}
+
+func TestSpecCarriesEverythingAnExtractorNeeds(t *testing.T) {
+	spec := job(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "title" {
+      type       = str
+      required   = true
+      aliases    = ["headline"]
+      regexes    = ["^.{3,}$"]
+      transforms = [text, trim]
+      xpath      = ["//h1"]
+      css        = ["h1.title"]
+    }
+  }
+}
+`).Spec()
+
+	rendered := string(spec.HCL())
+	for _, want := range []string{
+		"headline", "^.{3,}$", "text", "trim", "//h1", "h1.title", "required = true",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("the rendered spec lost %q:\n%s", want, rendered)
+		}
+	}
+}

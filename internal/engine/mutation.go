@@ -88,15 +88,6 @@ const (
 	CacheAccept = "accept"
 )
 
-// The defaults, which are the cautious answer in every case: refuse what is
-// expensive, drop what is out of bounds, and never delete anything.
-const (
-	DefaultCostly        = CostlyRefuse
-	DefaultOutOfScope    = ScopeDrop
-	DefaultStaleRecords  = RecordsKeep
-	DefaultOrphanedCache = CacheRefuse
-)
-
 var (
 	costlyValues        = []string{CostlyRefuse, CostlyApply}
 	outOfScopeValues    = []string{ScopeDrop, ScopeKeep}

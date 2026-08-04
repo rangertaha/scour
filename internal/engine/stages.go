@@ -72,13 +72,6 @@ type Components struct {
 	Timeout string `hcl:"timeout,optional"`
 }
 
-// DefaultExternalTimeout is how long an external stage has to answer.
-//
-// Generous, because the reason to bring your own spider is usually that it
-// does something slow: a model, a browser, a service somewhere else. A stage
-// that is merely slow must not look like one that has died.
-const DefaultExternalTimeout = 5 * time.Minute
-
 // IsExternal reports whether this job expects somebody else to run a stage.
 func (c *Components) IsExternal(s Stage) bool {
 	if c == nil {

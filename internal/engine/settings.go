@@ -37,19 +37,6 @@ type Politeness struct {
 	UserAgent string `hcl:"user_agent,optional"`
 }
 
-// The defaults a job gets when it says nothing.
-//
-// Conservative on purpose. A client who configures nothing is telling us they
-// have not thought about it, and the answer to that is a crawl that is slow,
-// shallow and polite rather than one that gets someone's address blocked.
-const (
-	DefaultMaxDepth     = 5
-	DefaultMaxBodyBytes = 32 << 20 // 32 MiB
-	DefaultRate         = time.Second
-	DefaultConcurrency  = 2
-	DefaultUserAgent    = "scour (+https://github.com/rangertaha/scour)"
-)
-
 // MaxTimeDuration is the crawl budget, defaulted and parsed.
 func (l *Limits) MaxTimeDuration() (time.Duration, error) {
 	if l == nil || l.MaxTime == "" {
@@ -143,10 +130,6 @@ func (p *Politeness) Agent() string {
 func (p *Politeness) ObeysRobots() bool {
 	return p == nil || p.Robots == nil || *p.Robots
 }
-
-// MaxConcurrency is the ceiling on per-host parallelism. Unbounded concurrency
-// against one host is a denial of service with our name in the logs.
-const MaxConcurrency = 64
 
 func (p *Politeness) validate() []error {
 	if p == nil {

@@ -67,11 +67,11 @@ type Job struct {
 
 // Item is a shape the job is looking for: an article, a product, a person.
 type Item struct {
-	Name        string `hcl:"name,label"`
-	Type        string `hcl:"type,optional"`
-	Description string `hcl:"description,optional"`
+	Name        string `hcl:"name,label" json:"name"`
+	Type        string `hcl:"type,optional" json:"type,omitempty"`
+	Description string `hcl:"description,optional" json:"description,omitempty"`
 
-	Properties []*Property `hcl:"property,block"`
+	Properties []*Property `hcl:"property,block" json:"properties,omitempty"`
 }
 
 // Property is one field of an item.
@@ -81,29 +81,29 @@ type Item struct {
 // transforms that turn what was found into what was asked for. Nothing about a
 // property is compiled in.
 type Property struct {
-	Name string `hcl:"name,label"`
+	Name string `hcl:"name,label" json:"name"`
 
-	Type        string `hcl:"type,optional"`
-	Description string `hcl:"description,optional"`
-	Required    bool   `hcl:"required,optional"`
+	Type        string `hcl:"type,optional" json:"type,omitempty"`
+	Description string `hcl:"description,optional" json:"description,omitempty"`
+	Required    bool   `hcl:"required,optional" json:"required,omitempty"`
 
 	// Aliases are the other names this property goes by, which is what lets a
 	// locator be induced from a page that calls it something else.
-	Aliases []string `hcl:"aliases,optional"`
+	Aliases []string `hcl:"aliases,optional" json:"aliases,omitempty"`
 
 	// Regexes are patterns the value matches.
-	Regexes []string `hcl:"regexes,optional"`
+	Regexes []string `hcl:"regexes,optional" json:"regexes,omitempty"`
 
 	// Transforms are registered functions applied to what was found, in order.
-	Transforms []string `hcl:"transforms,optional"`
+	Transforms []string `hcl:"transforms,optional" json:"transforms,omitempty"`
 
 	// XPath and CSS are locators taught rather than induced. A property with
 	// neither is one the model is expected to find on its own.
-	XPath []string `hcl:"xpath,optional"`
-	CSS   []string `hcl:"css,optional"`
+	XPath []string `hcl:"xpath,optional" json:"xpath,omitempty"`
+	CSS   []string `hcl:"css,optional" json:"css,omitempty"`
 
 	// Properties nest, so a property can be an object with fields of its own.
-	Properties []*Property `hcl:"property,block"`
+	Properties []*Property `hcl:"property,block" json:"properties,omitempty"`
 }
 
 // Engine is how the crawl behaves, as opposed to what it is looking for.
