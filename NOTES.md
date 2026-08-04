@@ -383,21 +383,43 @@ them to what is written here.
 | 550 | `retry` | Retries the temporarily failed |
 | 560 | `headers` | Default request headers |
 | 580 | `metarefresh` | Follows meta-refresh redirects |
-| 590 | `compression` | gzip, deflate, br, zstd |
-| **600** | **`charset`** | **Transcodes the body to UTF-8** |
 | 610 | `proxy` | Routes through a proxy |
 | 630 | `redirect` | Follows HTTP redirects |
 | 850 | `stats` | Counts requests, responses and failures |
 | 900 | `cache` | Reads and writes the page cache |
+| **950** | **`charset`** | **Transcodes the body to UTF-8** |
+| **960** | **`compression`** | **gzip, deflate, br, zstd** |
 
 `robots`, `user_agent`, `timeout` and `max_body` are not here. They are
 `downloader` attributes, for the reason under Decisions.
 
-`charset` has no Scrapy equivalent, because Scrapy decodes in its response
-object rather than in a middleware. It must sit after `compression` and before
-`cache`: bodies are cached transcoded, so the corpus is UTF-8 whatever the site
-served. Getting this wrong does not merely score badly, it poisons the evidence
-every later measurement is taken against.
+**`charset` and `compression` sit inside the cache, and that is where this
+departs from the ordering it borrowed.**
+
+Scrapy puts its cache innermost at 900 with compression outside at 590, which is
+right for Scrapy: its cache is only ever read back through the middleware chain,
+so decompression applies to a hit exactly as it applies to a fetch.
+
+Here it does not. Bodies never travel on the bus, so the spider reads the cache
+directly by key and never passes through this chain at all. If the cache held
+what the network sent, the spider would parse gzip as text and `windows-1251` as
+UTF-8, while anything reading the long way round saw it correctly. Two readers,
+two answers, and only one of them tested.
+
+So normalising has to happen before the cache writes:
+
+```
+request:   cache(900) -> charset(950) -> compression(960) -> network
+response:  network -> compression -> charset -> cache -> spider
+```
+
+A hit short-circuits at 900 and returns bytes that were normalised when they
+were written, so a hit and a miss agree. The cache is the corpus, and a corpus
+that is UTF-8 only when it happens to be read one particular way is not evidence
+anybody can measure against.
+
+`charset` has no Scrapy equivalent at all, because Scrapy decodes in its
+response object rather than in a middleware.
 
 ### Spider
 
@@ -538,17 +560,66 @@ worth being able to read at once.
 | Jobs, as desired state | NATS KV, `SCOUR_JOBS` | The only store every node already has |
 | Run state | NATS KV, `SCOUR_RUNS`, no history | Changes constantly and must not churn a job's revisions |
 | Nodes | NATS KV, `SCOUR_NODES`, with a TTL | Not durable state. A row outliving its process is a lie |
-| Frontier and hosts | SQLite, one shared database | Politeness is shared, so this cannot be partitioned |
-| Records and marks | SQLite, one database per job | Unbounded, unshared, and deleted by unlinking |
+| Frontier and hosts | SQLite, one shared database, the scheduler's | Politeness is shared, so this cannot be partitioned |
+| Records and marks | SQLite, one database per job, the pipeline's | Unbounded, unshared, and deleted by unlinking |
 | Learned locators | The job document itself | A guess should be readable and correctable |
 | Exports | Whatever the exporters write | Copies. Not the record of truth |
 
+### Who owns what
+
+**A database is private to the stage that owns it.** The scheduler owns the
+frontier and nothing else reads or writes `urls` or `hosts`. The pipeline owns
+the records and nothing else touches those. Everything else goes over the bus:
+the spider publishes `discovered`, the scheduler decides scope, depth and dedup
+and does the insert; the scheduler publishes `work` and the downloader takes it.
+
+That is also why the scheduler is the one stage a job may not hand to somebody
+else. It is not a preference: you cannot hand out another process's private
+state and still honour a crawl delay against it.
+
+It has a consequence for anything that spans both. Removing a job is not a
+filesystem operation, because no one process can do it: the scheduler deletes
+its rows and the pipeline unlinks its file, and whoever asked coordinates the
+two.
+
+### Three things that are easy to merge, and are not the same
+
+**`hosts` is not `domains`.** Scope is a matching rule in the document, static,
+saying what is in bounds. `hosts` is live pacing state, one row per real
+hostname, saying when each may next be touched. You only get a `hosts` row for a
+host that passed scope, which is what makes them look alike.
+
+`hosts` is a table rather than a map in memory because politeness has to survive
+a restart. Coming back up and immediately hitting a host fetched two seconds ago
+is how a crawler gets blocked, and it is shared between jobs, which no
+per-process memory can be.
+
+**`urls` is not `records`.** `urls` is crawl state: every URL discovered,
+fetched or not. Records are the product: the article, the price, the thing the
+crawl exists to find. Most URLs yield no record at all, because hubs, indexes,
+failures and boilerplate are all URLs. A million rows in one may be eighty
+thousand in the other.
+
+The lifetime is what decides they are separate. A frontier can be cleared and a
+site recrawled from scratch; the records from last month are still the product
+and have to survive that. One file would make "start again" and "throw away
+everything I have found" the same operation.
+
+**Marks are on records, not on URLs.** A verdict is about what was extracted,
+and extraction happens to a body, not to an address.
+
+**There are no foreign keys between the two databases.** They are separate
+files, so a record carries the URL, the cache key and the spec fingerprint as
+values, copied from the message the spider published. That is not a compromise:
+it is what makes a record self-contained enough to export, and what lets a
+frontier be cleared without orphaning anything.
+
 ### What that buys
 
-**The two stages that touch a database touch different ones.** The scheduler
-holds the frontier; the pipeline holds the records. They share no file, so they
-can run on different machines without coordinating, and neither needs what the
-other has.
+**The two stages that touch a database touch different ones, and own them
+privately.** The scheduler holds the frontier; the pipeline holds the records.
+They share no file, so they can run on different machines, and a column added to
+one does not ripple into the other.
 
 **The downloader and the spider touch no database at all.** A fetching node
 needs the network and the cache. A parsing node needs the cache and the spec,

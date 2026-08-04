@@ -55,12 +55,14 @@ var Placements = map[Stage][]Placement{
 		{"retry", 550, "Retries the temporarily failed"},
 		{"headers", 560, "Default request headers"},
 		{"metarefresh", 580, "Follows meta-refresh redirects"},
-		{"compression", 590, "gzip, deflate, br, zstd"},
-		{"charset", 600, "Transcodes the body to UTF-8"},
 		{"proxy", 610, "Routes through a proxy"},
 		{"redirect", 630, "Follows HTTP redirects"},
 		{"stats", 850, "Counts requests, responses and failures"},
 		{"cache", 900, "Reads and writes the page cache"},
+		// Inside the cache, so what it writes is already normalised. See
+		// "Normalising sits inside the cache" below.
+		{"charset", 950, "Transcodes the body to UTF-8"},
+		{"compression", 960, "gzip, deflate, br, zstd"},
 	},
 	StageSpider: {
 		{"httperror", 50, "Drops non-2xx before anything parses them"},
@@ -118,11 +120,33 @@ func PipelineKindNames() []string {
 	return out
 }
 
-// charset has no Scrapy equivalent, because Scrapy decodes in its response
-// object rather than in a middleware. It is not optional here, and it must run
-// after compression and before cache: bodies are cached transcoded, so the
-// corpus is UTF-8 whatever the site served. Getting this wrong does not merely
-// score badly, it poisons the evidence every later measurement is taken
+// # Normalising sits inside the cache
+//
+// charset and compression are the two links that change a body rather than
+// deciding its fate, and both sit inside cache rather than outside it. That is
+// where scour departs from the ordering it borrowed, and the reason is a
+// difference in how the cache is read.
+//
+// Scrapy puts its cache innermost, at 900, with compression outside at 590.
+// That is right for Scrapy, because its cache is only ever read back through
+// the middleware chain, so decompression applies to a hit exactly as it applies
+// to a fetch.
+//
+// Here it does not. Bodies never travel on the bus, so the spider reads the
+// cache directly by key and never passes through this chain at all. If the
+// cache held what the network sent, the spider would parse gzip as text and
+// windows-1251 as UTF-8, while anything reading through the chain saw it
+// correctly. Two readers, two answers, and only one of them tested.
+//
+// So the response path has to normalise before the cache sees it:
+//
+//	request:   cache(900) -> charset(950) -> compression(960) -> network
+//	response:  network -> compression -> charset -> cache -> spider
+//
+// A hit short-circuits at 900 and returns bytes that were already normalised
+// when they were written, so a hit and a miss agree. That is the property worth
+// protecting: the cache is the corpus, and a corpus that is UTF-8 only when it
+// happens to be read the long way round is not evidence anybody can measure
 // against.
 
 // DefaultOrder is where a catalogued middleware conventionally sits.

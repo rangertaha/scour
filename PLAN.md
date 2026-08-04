@@ -24,8 +24,12 @@ Both are in the contract from the start or not at all.
 and back. A short-circuit at the middle link means the outer links still see a
 response and the inner ones never ran.
 
-**Phase 2. The downloader, and the four middleware that decide whether a corpus
-is trustworthy.** `charset`, `cache`, `robots`, `redirect`.
+**Phase 2. The downloader, and the middleware that decide whether a corpus is
+trustworthy.** `cache`, `charset`, `compression`, `redirect`, with `robots`
+and the rest as downloader attributes.
+
+The cache starts on the local backend. S3 and GCS are already written and are a
+config change, not a phase: nothing about the downloader knows which one it has.
 
 `charset` first, not last. Bodies are cached transcoded, so a downloader that
 writes raw bytes does not merely score badly on non-UTF-8 sites, it fills the
