@@ -189,6 +189,16 @@ type Property struct {
 	// Regexes are patterns the value matches.
 	Regexes []string `hcl:"regexes,optional" json:"regexes,omitempty"`
 
+	// Examples are values this property is known to have taken, on pages the
+	// cache already holds.
+	//
+	// They are how a person teaches a locator without writing one: given the
+	// answer, induction can look for the node that produces it and generalise
+	// across the corpus. An example is evidence rather than configuration, so
+	// one that stops matching is a signal the site changed rather than a
+	// setting that has gone stale.
+	Examples []string `hcl:"examples,optional" json:"examples,omitempty"`
+
 	// Transforms are registered functions applied to what was found, in order.
 	Transforms []string `hcl:"transforms,optional" json:"transforms,omitempty"`
 

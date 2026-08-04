@@ -347,6 +347,10 @@ func writeProperties(b *strings.Builder, props []*Property) {
 	sort.Slice(sorted, func(a, c int) bool { return sorted[a].Name < sorted[c].Name })
 
 	for _, p := range sorted {
+		// Examples are deliberately absent from the fingerprint. They are
+		// evidence about a shape rather than part of it, so adding one must
+		// not read as a schema change and force a re-extraction of records
+		// that are still correct.
 		fmt.Fprintf(b, "(%s:%s:%t:%s:%s:%s:%s:%s",
 			p.Name, p.Type, p.Required,
 			strings.Join(p.Aliases, ","),

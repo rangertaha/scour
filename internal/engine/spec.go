@@ -128,6 +128,7 @@ func writeProperty(b *strings.Builder, p *Property, depth int) {
 		fmt.Fprintf(b, "%s  required = true\n", pad)
 	}
 	writeList(b, depth+1, "aliases", p.Aliases)
+	writeList(b, depth+1, "examples", p.Examples)
 	writeList(b, depth+1, "regexes", p.Regexes)
 	writeList(b, depth+1, "transforms", p.Transforms)
 	writeList(b, depth+1, "xpath", p.XPath)

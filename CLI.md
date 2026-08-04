@@ -259,10 +259,72 @@ Writing to news.hcl would change 4 properties. Pass --write to do it.
 
 | Flag | Effect |
 | --- | --- |
+| `-i`, `--example <address>=<value>` | Teach it one answer. Repeatable |
+| `--url <url>` | Which cached page the examples are from |
 | `--write` | Edit the document in place instead of printing what would change |
 | `--item <name>` | Only this shape |
 | `--min <n>` | Ignore a locator matching fewer than this share of pages, as a percentage |
 | `--replace` | Also replace locators that are already there |
+
+##### Teaching it an answer
+
+Induction over a corpus can find what is *consistent*. It cannot know which
+consistent thing you wanted, and on a page with three plausible headings it will
+pick one and be confidently wrong. So you can hand it the answer:
+
+```console
+$ scour train news.hcl --url https://example.com/story/1     -i 'article.title.text="Hello World"'     -i 'article.published.attr=datetime'
+
+article
+  title      //h1[@class='headline']    308/312 pages   from your example
+  published  //time/@datetime           295/312        from your example
+```
+
+The address is `<item>.<property>[.<part>]`, where the part says which bit of the
+node to compare against:
+
+| Part | Compares against |
+| --- | --- |
+| `text` | The node's text. The default, so it can be left out |
+| `html` | The node's markup, for a property that keeps the formatting |
+| `attr=<name>` | An attribute, for a URL in an `href` or a date in a `datetime` |
+
+Given a value, training looks through the cached page for nodes that produce it,
+generalises a locator across the rest of the corpus, and reports how far it got.
+Three outcomes are worth naming because they are all useful:
+
+- **One node produces it.** The locator is induced from there and checked
+  against every other cached page.
+- **Nothing produces it.** An error, and a good one: either the value is not on
+  that page, or a transform is changing it before the comparison. Both are worth
+  knowing before a crawl runs on the assumption.
+- **Several nodes produce it.** The candidates are listed with their locators,
+  and a more specific example is asked for. Guessing here is how a locator ends
+  up pinned to the wrong one of two identical headings.
+
+##### Where an example lives
+
+`-i` is a shortcut for something the document keeps:
+
+```hcl
+property "title" {
+  type     = str
+  aliases  = ["headline"]
+  examples = ["Hello World"]
+}
+```
+
+**Examples belong in the job, not in a flag.** A flag teaches once and is gone,
+so the next person to run `train` gets a different answer for no visible reason.
+In the document they are evidence that travels with the shape, they are
+reviewed in a diff like everything else, and re-running training is
+reproducible. With `--write`, `-i` adds them there.
+
+They are evidence rather than configuration, which has one consequence worth
+stating: **an example is not part of the spec's fingerprint.** Adding one does
+not change what is being extracted, so it must not read as a schema change and
+force a re-extraction of records that are still correct. An example that stops
+matching is a signal that the site changed, not a setting that has gone stale.
 
 Two rules about writing, and they are the ones worth arguing with:
 

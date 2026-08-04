@@ -987,3 +987,64 @@ func TestChainOfAnUnvalidatedJob(t *testing.T) {
 		t.Errorf("chain = %v, want the unplaced plugin first", engine.Names(chain))
 	}
 }
+
+// TestExamplesAreEvidenceNotShape is the property that makes teaching cheap:
+// adding an example says something about how to find a value, not about what
+// is being extracted, so it must not force a re-extraction of records that are
+// still correct.
+func TestExamplesAreEvidenceNotShape(t *testing.T) {
+	taught := func(examples string) *engine.Job {
+		src := `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "title" {
+      type = str
+      ` + examples + `
+    }
+  }
+}
+`
+		return parse(t, src).Jobs[0]
+	}
+
+	without := taught("")
+	with := taught(`examples = ["Hello World"]`)
+
+	if without.Spec().Fingerprint() != with.Spec().Fingerprint() {
+		t.Error("adding an example changed the fingerprint, which would force a re-extraction")
+	}
+	if engine.Diff(without, with).Costly().Any() {
+		t.Error("adding an example was reported as a costly change")
+	}
+
+	// It still has to survive into what a spider is handed, or teaching it
+	// would be teaching nothing.
+	rendered := string(with.Spec().HCL())
+	if !strings.Contains(rendered, "Hello World") {
+		t.Errorf("the example did not reach the spec:\n%s", rendered)
+	}
+}
+
+func TestExamplesSurviveTheSpecRoundTrip(t *testing.T) {
+	j := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "title" {
+      type     = str
+      examples = ["Hello World", "Another headline"]
+    }
+  }
+}
+`).Jobs[0]
+
+	back, err := engine.ParseSpec(j.Spec().HCL(), "spec.hcl")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	item, _ := back.Item("article")
+	if got := item.Properties[0].Examples; len(got) != 2 || got[0] != "Hello World" {
+		t.Errorf("examples = %v", got)
+	}
+}
