@@ -282,9 +282,19 @@ a declared type is how a document stops meaning what it reads as.
 
 ## Plugin catalogue
 
-From Scrapy's built-in middleware and its ordering logic, adapted where scour
-needs something Scrapy gets elsewhere. These numbers live in
-`internal/engine/catalogue.go` and a test holds them to what is written here.
+**A list, not a commitment.** These are positions, not working parts. A name
+here says where something would go if it existed, and nothing more. Four are
+needed to crawl anything; the rest are a queue to work through when there is
+something to work through them with.
+
+What exists is what a registry says exists, and that is asked when a chain is
+built, not when a document is validated. If this table decided what a job may
+name, a catalogue of intentions would validate as a set of working parts and
+the failure would arrive at run time on somebody else's machine.
+
+The numbers are Scrapy's, because copying a known-good ordering is cheaper than
+rediscovering it. They live in `internal/engine/catalogue.go` and a test holds
+them to what is written here.
 
 ### Downloader
 
@@ -384,19 +394,32 @@ notices until they go looking for the output.
 
 ## Writing a plugin
 
-The contract every downloader link satisfies. Sketched, not built.
+A link is given the next handler and returns a replacement. Whatever it does
+before calling next is the way out; whatever it does after is the way back.
+This is the shape `net/http` middleware has, for the reasons it has it.
 
 ```go
-type Downloader interface {
-    // Request runs on the way out. It may return a response to
-    // short-circuit the rest of the chain, which is how a cache hit works,
-    // or ErrDrop to refuse the request, which is how robots does.
-    Request(ctx context.Context, req *Request) (*Response, error)
-
-    // Response runs on the way back, in reverse order.
-    Response(ctx context.Context, req *Request, resp *Response) (*Response, error)
+func timing(next chain.Handler[*Request, *Response]) chain.Handler[*Request, *Response] {
+    return chain.Func(func(ctx context.Context, req *Request) (*Response, error) {
+        started := time.Now()               // on the way out
+        resp, err := next.Handle(ctx, req)
+        log.Println(time.Since(started))    // on the way back
+        return resp, err
+    })
 }
 ```
+
+A pair of `Request` and `Response` methods was the obvious alternative and is
+worse in three ways: it needs a convention for a link that wants to
+short-circuit, it makes a link that needs state across both directions stash it
+somewhere, and it cannot express "run this on the way back even though the way
+out failed", which is what a timer and a stats counter both want.
+
+Short-circuit and drop fall out of wrapping rather than needing anything added.
+Return a result without calling next and you have a cache hit; return `ErrDrop`
+and you have robots.txt refusing a URL. A drop is a sentinel rather than an
+ordinary error because a crawl that obeys robots drops requests all day, and
+counting those as failures would make a working crawl look broken.
 
 A plugin is registered by name, built from its undecoded body:
 

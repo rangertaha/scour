@@ -4,10 +4,17 @@ package engine
 
 import "sort"
 
-// The built-in middleware, and where each sits in its chain.
+// Where middleware conventionally sits in its chain.
 //
-// Taken from Scrapy's built-in middleware and its ordering logic, adapted where
-// scour needs something Scrapy gets elsewhere.
+// This is a table of positions, not a list of working parts. A name here is a
+// claim about where something would go if it existed, and nothing more: what
+// exists is what a registry says exists, and these are catalogued from Scrapy's
+// built-in middleware because copying a known-good ordering is cheaper than
+// rediscovering it.
+//
+// Keeping the two apart matters. If this table decided what a job may name, a
+// catalogue of intentions would validate as a set of working parts, and the
+// failure would arrive at run time on somebody else's machine.
 //
 // # Chains run both ways
 //
@@ -27,17 +34,19 @@ import "sort"
 // network, so a hit short-circuits the fetch only after every other request
 // middleware has had its say, which is where Scrapy puts HttpCacheMiddleware
 // and for the same reason.
-type Builtin struct {
+type Placement struct {
 	// Name is the second label of a plugin block.
 	Name string
 	// Order is where it sits when the job does not say.
 	Order int
-	// Doc is one line about what it does.
+	// Doc is one line about what it would do. Present tense because it reads
+	// better, not because it is implemented.
 	Doc string
 }
 
-// Builtins is every plugin that ships, by stage.
-var Builtins = map[Stage][]Builtin{
+// Placements is the conventional order of every middleware scour intends to
+// have, by stage. Almost none of them are written yet.
+var Placements = map[Stage][]Placement{
 	StageDownloader: {
 		{"robots", 100, "Refuses what robots.txt forbids"},
 		{"useragent", 400, "Sets the User-Agent"},
@@ -92,7 +101,7 @@ var Builtins = map[Stage][]Builtin{
 // graph: it runs when its dependencies have run, and `requires` is how it says
 // which those are. Ordering it by number as well would be two ways of saying
 // the same thing, and they would disagree.
-var PipelineKinds = []Builtin{
+var PipelineKinds = []Placement{
 	{"clean", 0, "Rule-driven tidying"},
 	{"validate", 0, "Enforces required and types"},
 	{"dedupe", 0, "Drops items already seen"},
@@ -120,13 +129,13 @@ func PipelineKindNames() []string {
 // score badly, it poisons the evidence every later measurement is taken
 // against.
 
-// DefaultOrder is where a built-in sits when the job does not say.
+// DefaultOrder is where a catalogued middleware conventionally sits.
 //
-// The second return is false for a plugin scour does not ship, which is not an
-// error: a plugin somebody else wrote is the point. It does mean the job has to
-// say where it goes, because we cannot guess.
+// The second return is false for a name with no conventional position, which is
+// not an error: a plugin somebody else wrote is the point. It does mean the job
+// has to say where it goes, because we cannot guess.
 func DefaultOrder(stage Stage, name string) (int, bool) {
-	for _, b := range Builtins[stage] {
+	for _, b := range Placements[stage] {
 		if b.Name == name {
 			return b.Order, true
 		}
@@ -134,9 +143,9 @@ func DefaultOrder(stage Stage, name string) (int, bool) {
 	return 0, false
 }
 
-// BuiltinNames lists what ships for a stage.
-func BuiltinNames(stage Stage) []string {
-	list := Builtins[stage]
+// PlacementNames lists the catalogued names for a stage.
+func PlacementNames(stage Stage) []string {
+	list := Placements[stage]
 	out := make([]string, 0, len(list))
 	for _, b := range list {
 		out = append(out, b.Name)

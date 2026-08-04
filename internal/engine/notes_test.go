@@ -130,7 +130,7 @@ func TestNotesCatalogueMatchesTheCode(t *testing.T) {
 			documented := documentedOrders(t, src, tc.heading)
 
 			built := map[string]int{}
-			for _, b := range engine.Builtins[tc.stage] {
+			for _, b := range engine.Placements[tc.stage] {
 				built[b.Name] = b.Order
 			}
 

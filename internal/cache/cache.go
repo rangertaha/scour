@@ -27,9 +27,8 @@ import (
 	"fmt"
 	"io"
 	"iter"
-	"sort"
-	"strings"
-	"sync"
+
+	"github.com/rangertaha/scour/internal/registry"
 )
 
 // ErrNotFound is returned by [Store.Get] when a key holds nothing.
@@ -162,63 +161,26 @@ func GetBytes(ctx context.Context, s Store, key string) ([]byte, error) {
 }
 
 // Factory builds one backend from its configuration.
-type Factory func(ctx context.Context, cfg Config) (Store, error)
+type Factory = registry.Factory[Config, Store]
 
-var (
-	mu       sync.RWMutex
-	backends = map[string]Factory{}
-)
+// reg holds the implementations. See [registry] for the shape every extension
+// point in scour shares, and for how to add one.
+var reg = registry.New[Config, Store]("cache backend").Default(DefaultBackend)
 
 // Register adds a backend, from an init function in the backend's own package.
 //
-// Registration is not import-order sensitive: nothing reads the table until a
-// name is looked up. A backend is therefore chosen by importing its package,
-// which is what keeps a build that never wanted S3 from carrying its SDK.
-func Register(name string, f Factory) {
-	if name == "" {
-		panic("cache: backend registered without a name")
-	}
-	if f == nil {
-		panic("cache: backend " + name + " registered with no factory")
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if _, dup := backends[name]; dup {
-		panic("cache: backend " + name + " registered twice")
-	}
-	backends[name] = f
-}
+// A backend is chosen by importing its package, which is what keeps a build
+// that never wanted S3 from carrying its SDK.
+func Register(name string, f Factory) { reg.Register(name, f) }
 
-// New builds the backend named by the config.
+// New builds the backend named by the config. An empty backend means
+// [DefaultBackend].
 func New(ctx context.Context, cfg Config) (Store, error) {
-	name := cfg.Backend
-	if name == "" {
-		name = DefaultBackend
-	}
-
-	mu.RLock()
-	f, ok := backends[name]
-	mu.RUnlock()
-
-	if !ok {
-		have := Backends()
-		if len(have) == 0 {
-			return nil, fmt.Errorf("cache: no backend %q, and none are registered: import one, such as internal/cache/local", name)
-		}
-		return nil, fmt.Errorf("cache: no backend %q, have %s", name, strings.Join(have, ", "))
-	}
-	return f(ctx, cfg)
+	return reg.New(ctx, cfg.Backend, cfg)
 }
+
+// Has reports whether a backend is registered.
+func Has(name string) bool { return reg.Has(name) }
 
 // Backends lists what has registered, sorted.
-func Backends() []string {
-	mu.RLock()
-	defer mu.RUnlock()
-
-	out := make([]string, 0, len(backends))
-	for name := range backends {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
+func Backends() []string { return reg.Names() }

@@ -222,7 +222,7 @@ func (j *Job) validatePlugins() []error {
 		if _, builtin := DefaultOrder(stage, p.Name); !builtin && p.Order == 0 {
 			problems = append(problems, fmt.Errorf(
 				"%s: not a built-in, so it needs an explicit order. Built-ins for %s are %s",
-				where, stage, strings.Join(BuiltinNames(stage), ", ")))
+				where, stage, strings.Join(PlacementNames(stage), ", ")))
 		}
 		if p.Order < 0 {
 			problems = append(problems, fmt.Errorf("%s: order %d is negative", where, p.Order))
