@@ -211,6 +211,15 @@ job "news" {
     script   = "./notify.sh"
   }
 
+  # Optional. What to do when this job is resubmitted under a name that is
+  # already running. Leaving it out is the cautious answer to every question.
+  mutation {
+    costly         = "apply"
+    out_of_scope   = "drop"
+    stale_records  = "reextract"
+    orphaned_cache = "refuse"
+  }
+
   # Exporters are per item. The second label says which.
   exporter "json"   "article" { dir    = "./out" }
   exporter "csv"    "article" { dir    = "./out" }
@@ -275,6 +284,20 @@ identity: a client resubmitting the same crawl means the same crawl. But what
 "applies" means is not the same for every change, so a diff reports an effect
 per change and whoever accepts the submission decides what to do about the ones
 that are not free.
+
+**A job gets exactly the chain it lists.** Nothing is added that the document
+did not ask for, so a chain can be read off the job without knowing a list kept
+somewhere else. `enabled = false` therefore means precisely what leaving the
+block out means. Both spellings exist because they are written for different
+reasons: deleting a block throws away its configuration, and turning it off
+keeps it, which is what you want when the setting took an afternoon to work out.
+
+**A job says what to do about its own mutation.** The diff knows what a
+resubmission would cost; the `mutation` block says what should happen about it,
+so the answer travels with the job rather than living in a flag somebody has to
+remember or a server default that differs between machines. The defaults are
+cautious throughout: refuse what is expensive, drop what is out of bounds, never
+delete anything.
 
 **Nesting requires `object`.** A property with children is an object whatever it
 says, and a mismatch is refused rather than inferred, because silently changing
@@ -488,15 +511,13 @@ with a local cache is a single-node job by definition.
 
 ## Open questions
 
-**Does a costly change need consent, or just a warning?** A diff knows which
-changes are not free. Whether submitting one is refused without a flag, applied
-with a warning, or queued for confirmation is a decision about the client, not
-about the engine.
-
-**What happens to work already done when a change is applied?** Narrowing scope
-leaves entries in the frontier that are now out of bounds, and changing a schema
-leaves records that no longer match the shape. Dropping them and keeping them
-are both defensible, and the answer probably differs per effect.
+**`politeness.robots` and `plugin "downloader" "robots"` are two mechanisms for
+one thing.** A job gets exactly the chain it lists, so robots.txt is only obeyed
+if the job lists the plugin, while `politeness.robots` defaults to true and
+reads as though it were the switch. By the argument that moved the cache out of
+the engine block, robots belongs to its plugin and `politeness` should be
+configuration the plugins read rather than settings the engine holds. Unresolved,
+and it is the same question for `rate` and `concurrency`.
 
 ## Status
 
@@ -511,6 +532,9 @@ are both defensible, and the answer probably differs per effect.
 | Pipelines DAG: references, cycles, topological order | Built, tested |
 | Pipeline waves, for running independent steps at once | Built, tested |
 | Resubmission diff, with an effect per change | Built, tested |
+| Mutation policy: what a resubmission does to work already done | Built, tested |
+| `internal/registry`, generic, shared by every extension point | Built, cache runs on it |
+| `internal/chain`, middleware that wraps, with drop and short-circuit | Built, tested |
 | Plugin implementations, all of them | Not started |
 | Scheduler, downloader, spider, pipeline stages | Not started |
 | Exporters, all formats | Not started |

@@ -48,6 +48,11 @@ type Job struct {
 	// Monitoring is what the job reports about itself.
 	Monitoring *Monitoring `hcl:"monitoring,block"`
 
+	// Mutation is what to do when this job is resubmitted under a name that is
+	// already running. Optional: leaving it out is the cautious answer to
+	// every question in it.
+	Mutation *Mutation `hcl:"mutation,block"`
+
 	// Plugins extend a stage. Ordered by their order attribute, not by where
 	// they appear, so a document can be rearranged without changing what it
 	// does.

@@ -90,6 +90,9 @@ func (j *Job) validate() []error {
 		}
 	}
 
+	for _, err := range j.Mutation.validate() {
+		problems = append(problems, prefix(err))
+	}
 	for _, err := range j.validatePlugins() {
 		problems = append(problems, prefix(err))
 	}
@@ -234,9 +237,18 @@ func (j *Job) validatePlugins() []error {
 
 // Chain returns a stage's plugins in the order they run, lowest first.
 //
-// Built-ins that the job did not mention are not added here: this reports what
-// the job asked for, and what a stage does with an empty chain is the stage's
-// business.
+// # A job gets exactly the chain it lists
+//
+// Nothing is added that the document did not ask for. There is no implicit set
+// of middleware that is on unless you turn it off, so a chain can be read off
+// the job and no reader has to know a list kept somewhere else.
+//
+// `enabled = false` therefore means precisely what leaving the block out means:
+// the link is not in the chain. The two spellings exist because they are
+// written for different reasons. Deleting a block throws away its
+// configuration; setting enabled = false keeps the configuration and stops the
+// link, which is what you want at three in the morning and what you want when
+// the setting took an afternoon to work out.
 func (j *Job) Chain(stage Stage) []*Plugin {
 	var out []*Plugin
 	for _, p := range j.Plugins {
@@ -255,7 +267,16 @@ func (j *Job) Chain(stage Stage) []*Plugin {
 	return out
 }
 
-// order is the plugin's position, falling back to the built-in default.
+// Names lists a chain's plugins in the order they run.
+func Names(chain []*Plugin) []string {
+	out := make([]string, 0, len(chain))
+	for _, p := range chain {
+		out = append(out, p.Name)
+	}
+	return out
+}
+
+// order is the plugin's position, falling back to the catalogued default.
 func (p *Plugin) order() int {
 	if p.Order != 0 {
 		return p.Order

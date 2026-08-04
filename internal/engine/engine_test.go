@@ -3,6 +3,7 @@
 package engine_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1262,5 +1263,335 @@ job "j" {
 	changes := engine.Diff(a, b)
 	if len(changes) != 1 || changes[0].To != "" {
 		t.Fatalf("removal was not reported: %v", changes)
+	}
+}
+
+// The mutation block: what a job says should happen when it is resubmitted
+// under a name that is already running.
+
+func job(t *testing.T, src string) *engine.Job {
+	t.Helper()
+	doc := parse(t, src)
+	if len(doc.Jobs) != 1 {
+		t.Fatalf("got %d jobs, want 1", len(doc.Jobs))
+	}
+	return doc.Jobs[0]
+}
+
+const scoped = `
+job "j" {
+  start   = ["https://example.com/"]
+  domains = [%s]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  %s
+}
+`
+
+func TestMutationIsOptionalAndCautious(t *testing.T) {
+	j := job(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+}
+`)
+	if j.Mutation != nil {
+		t.Fatal("a job with no mutation block got one")
+	}
+
+	// A nil block answers every question, so no call site needs to check.
+	if j.Mutation.CostlyPolicy() != engine.CostlyRefuse {
+		t.Errorf("costly = %q, want the cautious default", j.Mutation.CostlyPolicy())
+	}
+	if j.Mutation.StaleRecordsPolicy() != engine.RecordsKeep {
+		t.Error("the default disposition deletes records, which it must not")
+	}
+	if j.Mutation.OrphanedCachePolicy() != engine.CacheRefuse {
+		t.Error("the default accepts losing a corpus")
+	}
+}
+
+// TestCostlyChangeIsRefusedByDefault is the whole point of the default: a job
+// does not quietly do something expensive nobody asked for.
+func TestCostlyChangeIsRefusedByDefault(t *testing.T) {
+	running := job(t, fmt.Sprintf(scoped, `"a.example", "b.example"`, ""))
+	submitted := job(t, fmt.Sprintf(scoped, `"a.example"`, ""))
+
+	review := submitted.Review(running)
+	if review.OK() {
+		t.Fatal("a narrowed scope was applied without being asked about")
+	}
+	if len(review.Refused) != 1 || review.Refused[0].Effect != engine.EffectRescope {
+		t.Errorf("refused = %v", review.Refused)
+	}
+	if len(review.Actions) != 0 {
+		t.Error("work was disposed of despite the submission being refused")
+	}
+}
+
+func TestCostlyApplyProducesActions(t *testing.T) {
+	running := job(t, fmt.Sprintf(scoped, `"a.example", "b.example"`, ""))
+	submitted := job(t, fmt.Sprintf(scoped, `"a.example"`, `
+  mutation {
+    costly       = "apply"
+    out_of_scope = "drop"
+  }
+`))
+
+	review := submitted.Review(running)
+	if !review.OK() {
+		t.Fatalf("refused despite costly = apply: %v", review.Refused)
+	}
+	if len(review.Actions) != 1 {
+		t.Fatalf("got %d actions, want 1: %v", len(review.Actions), review.Actions)
+	}
+	if review.Actions[0].Effect != engine.EffectRescope || review.Actions[0].Do != engine.ScopeDrop {
+		t.Errorf("action = %v", review.Actions[0])
+	}
+}
+
+// TestCacheRefusesEvenUnderApply: losing a corpus is worse than the other
+// costly changes, so a job may allow the rest and still refuse that.
+func TestCacheRefusesEvenUnderApply(t *testing.T) {
+	base := `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  plugin "downloader" "cache" {
+    bucket = %q
+  }
+  mutation {
+    costly = "apply"
+  }
+}
+`
+	running := job(t, fmt.Sprintf(base, "pages"))
+	submitted := job(t, fmt.Sprintf(base, "somewhere-else"))
+
+	review := submitted.Review(running)
+	if review.OK() {
+		t.Fatal("the cache moved and the job did not notice")
+	}
+	if review.Refused[0].Effect != engine.EffectCacheMoved {
+		t.Errorf("refused = %v", review.Refused)
+	}
+}
+
+func TestCacheAcceptAllowsTheMove(t *testing.T) {
+	base := `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  plugin "downloader" "cache" {
+    bucket = %q
+  }
+  mutation {
+    costly         = "apply"
+    orphaned_cache = "accept"
+  }
+}
+`
+	running := job(t, fmt.Sprintf(base, "pages"))
+	submitted := job(t, fmt.Sprintf(base, "somewhere-else"))
+
+	review := submitted.Review(running)
+	if !review.OK() {
+		t.Fatalf("refused despite orphaned_cache = accept: %v", review.Refused)
+	}
+	if len(review.Actions) != 1 || review.Actions[0].Do != engine.CacheAccept {
+		t.Errorf("actions = %v", review.Actions)
+	}
+}
+
+// TestReextractIsWhatTheCacheIsFor: a changed schema can be applied to bodies
+// already paid for, without asking any site for anything again.
+func TestReextractIsWhatTheCacheIsFor(t *testing.T) {
+	base := `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "title" {
+      type     = str
+      required = %t
+    }
+  }
+  mutation {
+    costly        = "apply"
+    stale_records = "reextract"
+  }
+}
+`
+	running := job(t, fmt.Sprintf(base, false))
+	submitted := job(t, fmt.Sprintf(base, true))
+
+	review := submitted.Review(running)
+	if !review.OK() {
+		t.Fatalf("refused: %v", review.Refused)
+	}
+	if len(review.Actions) != 1 || review.Actions[0].Do != engine.RecordsReextract {
+		t.Fatalf("actions = %v", review.Actions)
+	}
+	if review.Actions[0].Effect != engine.EffectReextract {
+		t.Errorf("effect = %s", review.Actions[0].Effect)
+	}
+}
+
+// TestFreeChangesNeedNoPolicy keeps the common case quiet.
+func TestFreeChangesNeedNoPolicy(t *testing.T) {
+	base := `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  engine {
+    limits {
+      max_pages = %d
+    }
+  }
+}
+`
+	running := job(t, fmt.Sprintf(base, 100))
+	submitted := job(t, fmt.Sprintf(base, 500))
+
+	review := submitted.Review(running)
+	if !review.OK() {
+		t.Fatalf("a free change was refused: %v", review.Refused)
+	}
+	if len(review.Actions) != 0 {
+		t.Errorf("a free change produced actions: %v", review.Actions)
+	}
+	if !review.Changes.Any() {
+		t.Error("the change was not reported at all")
+	}
+}
+
+func TestIdenticalResubmissionIsAlwaysFine(t *testing.T) {
+	running := job(t, fmt.Sprintf(scoped, `"a.example"`, ""))
+	submitted := job(t, fmt.Sprintf(scoped, `"a.example"`, ""))
+
+	review := submitted.Review(running)
+	if !review.OK() || review.Changes.Any() {
+		t.Errorf("an identical resubmission was not a no-op: %+v", review)
+	}
+}
+
+func TestMutationValuesAreChecked(t *testing.T) {
+	for field, value := range map[string]string{
+		"costly":         "maybe",
+		"out_of_scope":   "burn",
+		"stale_records":  "shred",
+		"orphaned_cache": "shrug",
+	} {
+		t.Run(field, func(t *testing.T) {
+			doc := parse(t, fmt.Sprintf(`
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  mutation {
+    %s = %q
+  }
+}
+`, field, value))
+			err := doc.Validate()
+			if err == nil {
+				t.Fatalf("accepted %s = %q", field, value)
+			}
+			if !strings.Contains(err.Error(), "mutation."+field) {
+				t.Errorf("error does not name the field: %v", err)
+			}
+		})
+	}
+}
+
+// TestDisabledIsTheSameAsAbsent pins the rule: a job gets exactly the chain it
+// lists, and enabled = false is one of two spellings for not listing a link.
+func TestDisabledIsTheSameAsAbsent(t *testing.T) {
+	absent := job(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  plugin "downloader" "retry" {}
+}
+`)
+	disabled := job(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  plugin "downloader" "retry" {}
+  plugin "downloader" "cache" {
+    enabled = false
+    bucket  = "pages"
+  }
+}
+`)
+
+	a := engine.Names(absent.Chain(engine.StageDownloader))
+	d := engine.Names(disabled.Chain(engine.StageDownloader))
+
+	if strings.Join(a, ",") != strings.Join(d, ",") {
+		t.Errorf("disabled chain %v differs from absent chain %v", d, a)
+	}
+
+	// The configuration survives being turned off, which is the only reason
+	// the two spellings both exist.
+	var found bool
+	for _, p := range disabled.Plugins {
+		if p.Name == "cache" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a disabled plugin lost its configuration")
+	}
+}
+
+// TestNothingIsAddedThatWasNotAskedFor is the other half of the rule.
+func TestNothingIsAddedThatWasNotAskedFor(t *testing.T) {
+	j := job(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+}
+`)
+	for _, stage := range []engine.Stage{
+		engine.StageScheduler, engine.StageDownloader, engine.StageSpider,
+	} {
+		if got := j.Chain(stage); len(got) != 0 {
+			t.Errorf("%s chain is %v for a job that listed nothing", stage, engine.Names(got))
+		}
 	}
 }
