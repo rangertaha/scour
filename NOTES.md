@@ -501,9 +501,9 @@ Servers join to form a cluster, and jobs run across it.
 
 - Each node embeds a NATS server. `--join` adds routes, so the embedded servers
   cluster natively and a laptop still needs nothing installed.
-- Jobs live in JetStream so any node can see them. Work distributes by queue
-  group, so downloaders on different nodes pull from one subject with no
-  coordinator.
+- Jobs live in a NATS key-value bucket. See below.
+- Work distributes by queue group, so downloaders on different nodes pull from
+  one subject with no coordinator.
 - Bodies never travel on the bus. The cache holds them; messages carry the key.
 - **Bring your own stage.** Because stages talk over the bus rather than calling
   each other, a spider somebody else wrote in another language is a subscriber,
@@ -525,6 +525,72 @@ job "news" {
   }
 }
 ```
+
+### Where a job is kept
+
+In a NATS key-value bucket, not the database.
+
+The argument that decides it: **KV is the only store every node already has.**
+If jobs lived in the database, every node would need database access to know
+what it is running, and the property that only the scheduler and the pipeline
+touch it would be gone. A downloader node that needs no database at all is a
+real deployment win and it evaporates the moment the job lives in one.
+
+Three things follow that are worth having rather than merely tolerable.
+
+**A revision is a compare-and-swap.** Resubmitting a name mutates the job, so
+two clients submitting the same name at once need to not overwrite each other.
+`Update(key, value, revision)` is exactly that, and doing it in SQL would mean a
+transaction on a database most nodes should not have.
+
+**A watch is how a change propagates.** Submit, and every node running that job
+is told. No polling, no interval to tune, nothing to get wrong.
+
+**History is a diff for free.** A bucket keeping ten revisions answers "what
+changed, when" without anybody designing an audit log, and it pairs with the
+diff the engine already computes.
+
+Four conditions, because each is a way to get this wrong:
+
+**Store the resolved job, not the submitted one.** The design already requires
+it: defaults are applied when a job is accepted, so what is stored has to be
+what will run, or a change to a default silently alters a job that is already
+going. Keeping the submitted form alongside is worth it for showing a person
+what they wrote.
+
+**Run state does not go in the job's entry.** Paused, pages fetched, frontier
+depth: those change constantly, and writing them here would churn revisions
+until the history is worthless. The entry is desired state. What is actually
+happening belongs somewhere with different semantics.
+
+**Job names are sanitised into keys.** A job called `a.b` or `a*` would split a
+key or widen a watch, which is the same problem subjects have and wants the same
+answer.
+
+**Large `inline` scripts do not fit.** A value is capped by the broker's maximum
+payload, a megabyte by default, and a pipeline step with a few hundred lines of
+inline Python is how somebody reaches it. Either such a step uses `script` and a
+path, or scripts get the treatment bodies already have: content in the cache,
+key in the entry.
+
+The one thing given up is querying. KV answers "this key" and "these keys", not
+"every job crawling example.com", which would mean listing and filtering. For
+tens or hundreds of jobs that is not a constraint worth designing around.
+
+### Only the server writes
+
+The command line is a client. It holds no frontier, no records and no idea what
+is running, so anything about running state is a question it asks.
+
+That means the server validates, diffs, applies the `mutation` policy and
+writes; the CLI never writes the bucket directly. One place enforces the rules,
+or an old client bypasses a newer one. It also means exactly one writer per job,
+which is what makes the compare-and-swap above sufficient rather than hopeful.
+
+A diff cannot be computed by the client at all, since it is the submitted
+document against the running job and the client has only the first. So `plan`
+sends the document and renders the answer. [CLI.md](CLI.md) has the split of
+which commands need a server and which never will.
 
 The `scheduler` block has no `external` attribute, so it cannot be handed over.
 
@@ -574,6 +640,7 @@ scaling story. Undecided, and it blocks the scheduler.
 | The stages themselves | Not started |
 | Exporters, all formats | Not started |
 | Cluster join, distributed jobs | Not started |
+| Jobs in a KV bucket, server-side writes | Decided, not started |
 
 `internal/engine/notes_test.go` reads this file. It parses and validates the job
 documents in it, and compares every number in the catalogue tables with the
