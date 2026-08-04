@@ -62,6 +62,7 @@ var Placements = map[Stage][]Placement{
 	},
 	StageSpider: {
 		{"httperror", 50, "Drops non-2xx before anything parses them"},
+		{"topic", 300, "Scores a page against a topic, and drops what is off it"},
 		{"offsite", 500, "Drops discovered links outside scope"},
 		{"referer", 700, "Sets Referer from the page a link was found on"},
 		{"urllength", 800, "Drops absurdly long URLs"},
@@ -82,6 +83,7 @@ var Placements = map[Stage][]Placement{
 		{"offsite", 200, "Drops URLs outside domains, included and excluded"},
 		{"cron", 300, "Defers a URL until it is due again"},
 		{"budget", 400, "Refuses a URL the job can no longer pay for"},
+		{"topic", 450, "Scores a URL against a topic, before the policy orders it"},
 		{"priority", 500, "Best first, by score. The default"},
 		{"breadth", 500, "Level by level, for an archival crawl"},
 		{"depth", 500, "Follows a spur down before returning"},

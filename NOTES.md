@@ -359,6 +359,97 @@ month behaves the way it did today.
 says, and a mismatch is refused rather than inferred, because silently changing
 a declared type is how a document stops meaning what it reads as.
 
+## Topics are optional
+
+Most jobs crawl a site because they want that site. Some want a subject
+wherever it turns up, and those need to know whether a page is about it.
+
+**It is a plugin, so a job that does not want it has none of it.** No classifier
+loaded, no model storage opened, nothing asked of a service that need not be
+running. That is the same property that keeps a build which never wanted S3
+from carrying the AWS SDK, and it is why this is not an attribute on the job: an
+attribute would make every job carry a concept almost none of them use.
+
+```hcl
+job "climate" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+
+  scheduler {
+    plugin "topic" {
+      use        = "climate@7"
+      drop_below = 0.05        # not worth following
+    }
+  }
+
+  spider {
+    plugin "topic" {
+      use       = "climate@7"
+      min_score = 0.4          # not worth extracting
+    }
+  }
+}
+```
+
+### Two placements, because they are two questions
+
+Before a fetch there is only the URL, the anchor text and the page the link was
+found on. That is a handful of words, which is enough to *rank* and not enough
+to *decide*. After a fetch there is the whole page, which is enough for both and
+costs far more.
+
+So the scheduler's copy orders the frontier and the spider's copy gates
+extraction, and you often want one without the other. Ranking without gating is
+the common case: focus the crawl, keep everything it finds. Gating without
+ranking is a known-good site crawled exhaustively where only some pages matter.
+
+**Rank, do not filter, by default.** A hard topical filter breaks a focused
+crawl in a specific way: hubs, indexes and navigation are off-topic themselves
+while being the only route to on-topic content, so filtering on them strangles
+the crawl at depth one. The topic feeds the score, the ordering policy already
+consumes it, and the two thresholds exist for the cases where dropping is
+genuinely right.
+
+That is also why there are two thresholds and not one. "Not an article about
+this" and "not worth traversing" are far apart, and one number for both is the
+mistake.
+
+### A classifier is shared, and jobs reference it
+
+Locators are per site because markup is per site. A subject is not: it means the
+same thing on a UK site and a US one, and a classifier trained across every page
+ever fetched beats one trained on a single job's.
+
+So a classifier is a named thing with its own lifecycle, trained over the corpus
+and referenced by jobs rather than copied into them. It is the one learned
+artefact that fails the readable test: a weight table or a topic-word matrix is
+not something anybody corrects by hand, so it lives as an artefact rather than
+in a document.
+
+**A job pins a version.** `climate@7`, not `climate`. Otherwise retraining
+changes what every job crawls with nothing in any document to show why, which is
+the same trap that made [Job.Resolved] the stored form and gave the spec a
+fingerprint. Retraining produces a new version; moving to it is a change
+somebody applies, under the `mutation` rules that already exist.
+
+### The classifier may as well be a remote middleware
+
+It is expensive, shared, wanted by some jobs and not others, and reasonably
+written in a language that is not Go. That is the shape the remote middleware
+contract was designed for. A small setup runs it in process; anybody serious
+runs it once and points several nodes at it.
+
+Open: **what a topic is defined by.** Terms are easy to write and crude.
+Example pages are far better and mean the crawl has to have fetched them.
+Discovery over the corpus finds subjects nobody thought to name, and then wants
+naming. These are not exclusive, and which is the required one decides what
+`scour topic train` takes.
+
 ## Plugin catalogue
 
 **A list, not a commitment.** These are positions, not working parts. A name
@@ -413,6 +504,7 @@ revalidate.
 | Order | Name | What it does |
 | --- | --- | --- |
 | 50 | `httperror` | Drops non-2xx before anything parses them |
+| 300 | `topic` | Scores a page against a topic, and drops what is off it |
 | 500 | `offsite` | Drops discovered links outside scope |
 | 700 | `referer` | Sets Referer from the page a link was found on |
 | 800 | `urllength` | Drops absurdly long URLs |
@@ -434,6 +526,7 @@ order is nearest the queue.
 | 200 | `offsite` | Drops URLs outside `domains` / `included` / `excluded` |
 | 300 | `cron` | Defers a URL until it is due again |
 | 400 | `budget` | Refuses a URL the job can no longer pay for |
+| 450 | `topic` | Scores a URL against a topic, before the policy orders it |
 | 500 | `priority` | Best first, by score |
 | 500 | `breadth` | Level by level, for an archival crawl |
 | 500 | `depth` | Follows a spur down before returning |

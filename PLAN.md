@@ -142,6 +142,18 @@ rather than a coin to toss.
 site is pinned to that site's markup, and the failure is invisible until the
 second site quietly extracts nothing.
 
+**Phase 4.75. Topic classification, for the jobs that want it.** The `topic`
+plugin in both chains, a named classifier trained over the corpus, and the
+storage and versioning that go with it.
+
+After the spider because classifying a page needs its text, and text needs
+extraction that strips the navigation: a classifier trained on raw HTML learns
+the menu. Optional throughout, so a node running no topiced jobs loads nothing.
+
+*Proved by:* a crawl that reaches on-topic pages sooner than an unfocused one
+over the same budget, measured rather than asserted; and a job with no topic
+plugin never opening the classifier at all.
+
 **Phase 5. Pipelines and exporters.** The DAG runner over `Waves()`, and the
 formats.
 
@@ -250,6 +262,7 @@ has numbers to compare against the ones on `main`.
 | 3.5. `scour try`, the development loop | Not started |
 | 4. Spider | Not started |
 | 4.5. `scour train`, locators into the document | Not started |
+| 4.75. Topic classification, optional | Designed, not started |
 | 5. Pipelines and exporters | Not started |
 | 6. The bus | Not started |
 | 7. The cluster | Not started |
