@@ -5,8 +5,8 @@ argued out before it is built.
 
 ## The mental model
 
-Five stages, borrowed from Scrapy, talking over NATS instead of calling each
-other.
+Four stages, borrowed from Scrapy, talking over NATS instead of calling each
+other, and the exporters at the end.
 
 ```
                     ┌──────────────┐
@@ -189,9 +189,7 @@ job "news" {
     order = 900
   }
 
-  plugin "scheduler" "priority" {
-    order = 1
-  }
+  plugin "scheduler" "priority" {}
 
   # Item processing, as a dependency graph.
   pipelines "clean" "article" {
@@ -210,7 +208,7 @@ job "news" {
 
   pipelines "bash" "notify" {
     requires = [python.enrich]
-    inline   = ""
+    script   = "./notify.sh"
   }
 
   # Exporters are per item. The second label says which.
@@ -261,6 +259,22 @@ chain exactly as a downloader plugin is.
 wants them in different files, and an exporter handed both would have to be told
 which was which anyway. The item is the second label, matching how `plugin` and
 `pipelines` already read.
+
+**A pipeline step is a node in a graph, not a link in a chain.** One stage, one
+spelling: `pipelines <kind> <name>` with `requires`. Giving it an `order` as
+well would be two ways of saying the same thing, and they would disagree.
+
+**Pipelines run concurrently.** The graph exists so independent work happens at
+the same time. `Waves()` groups the steps into sets whose dependencies are
+already satisfied and which do not depend on each other; a runner starts a wave,
+waits, and starts the next. `Width()` is the widest wave, which is what a runner
+sizes its pool against. `Order()` flattens the same graph for showing a plan.
+
+**Resubmitting a job name mutates it and applies the changes.** The name is the
+identity: a client resubmitting the same crawl means the same crawl. But what
+"applies" means is not the same for every change, so a diff reports an effect
+per change and whoever accepts the submission decides what to do about the ones
+that are not free.
 
 **Nesting requires `object`.** A property with children is an object whatever it
 says, and a mismatch is refused rather than inferred, because silently changing
@@ -323,13 +337,19 @@ high order is nearest the queue.
 | Order | Name | What it does |
 | --- | --- | --- |
 | 100 | `dupefilter` | Decides what counts as already seen |
-| 200 | `scope` | Drops URLs outside `domains` / `included` / `excluded` |
+| 200 | `offsite` | Drops URLs outside `domains` / `included` / `excluded` |
 | 300 | `cron` | Defers a URL until it is due again |
 | 400 | `budget` | Refuses a URL the job can no longer pay for |
 | 500 | `priority` | Best first, by score. The default |
 | 500 | `breadth` | Level by level, for an archival crawl |
 | 500 | `depth` | Follows a spur down before returning |
 | 500 | `random` | Samples without the sample being shaped by the scorer |
+
+`offsite` appears in three chains and that is deliberate, not duplication. The
+spider's keeps an out-of-scope link out of the frontier, the scheduler's catches
+entries that were in scope when they were queued and are not any more, and the
+downloader's is the last check before the network. One concept, one word, three
+places it has to hold.
 
 `dupefilter` at 100 drops a URL already seen before anything else pays to think
 about it. The ordering policies sit at 500, against the queue, because deciding
@@ -339,15 +359,18 @@ is legal and the later one wins, but it is almost certainly a mistake.
 
 ### Pipeline
 
-| Order | Name | What it does |
-| --- | --- | --- |
-| 100 | `clean` | Rule-driven tidying |
-| 200 | `validate` | Enforces `required` and types |
-| 300 | `dedupe` | Drops items already seen |
-| 400 | `rank` | Scores and orders |
+Not a plugin stage. A pipeline step is a node in a graph, so it is written as
+`pipelines <kind> <name>` and ordered by `requires` rather than by a number.
+Writing `plugin "pipeline" ...` is refused, with a message saying what to write
+instead.
 
-Plus the script runtimes, which are graph nodes rather than chain links:
-`python`, `rhai`, `nodejs`, `bash`.
+| Kind | What it does |
+| --- | --- |
+| `clean` | Rule-driven tidying |
+| `validate` | Enforces `required` and types |
+| `dedupe` | Drops items already seen |
+| `rank` | Scores and orders |
+| `python`, `rhai`, `nodejs`, `bash` | Runs a script, inline or from a file |
 
 ### Exporters
 
@@ -390,8 +413,10 @@ func init() {
 }
 ```
 
-Unknown plugin names are refused at submission. A built-in has a default
-`order`; anything else has to say where it goes, because we cannot guess.
+A plugin scour does not ship is accepted, because a plugin somebody else wrote
+is the point. What it cannot do is stay silent about where it goes: a built-in
+has a default `order`, and anything else has to say, so a submission naming an
+unknown plugin with no order is refused.
 
 ## Across machines
 
@@ -409,20 +434,46 @@ Servers join to form a cluster, and jobs run across it.
   own.
 - Bodies never travel on the bus. The cache holds them; messages carry the key.
 
+A job that brings its own spider:
+
+```hcl
+job "news" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+
+  engine {
+    components {
+      external = ["spider"]
+      timeout  = "10m"
+    }
+  }
+}
+```
+
+The scheduler cannot appear in that list. It is extended with plugins, never
+replaced, because two schedulers handing out the same host cannot honour a
+crawl delay between them.
+
 Open: **job placement.** A job naming a local cache directory can only run
 where that directory is, so either placement is constrained by config or a job
 with a local cache is a single-node job by definition.
 
 ## Open questions
 
-**`plugin "pipeline" <name>` and `pipelines <kind> <name>` are two mechanisms
-for one stage.** The first is a link in a chain, the second a node in a graph
-with dependencies. They probably want different words; keeping both spellings
-this close together will confuse whoever writes the second document.
+**Does a costly change need consent, or just a warning?** A diff knows which
+changes are not free. Whether submitting one is refused without a flag, applied
+with a warning, or queued for confirmation is a decision about the client, not
+about the engine.
 
-**What is a job's identity?** The name is the client's, so resubmitting the same
-name means the same job. Does resubmitting with different config mutate it,
-version it, or get refused?
+**What happens to work already done when a change is applied?** Narrowing scope
+leaves entries in the frontier that are now out of bounds, and changing a schema
+leaves records that no longer match the shape. Dropping them and keeping them
+are both defensible, and the answer probably differs per effect.
 
 ## Status
 
@@ -435,13 +486,17 @@ version it, or get refused?
 | Validation, every problem reported at once | Built, tested |
 | Plugin blocks, undecoded bodies, chain ordering | Built, tested. No plugin *implementations* yet |
 | Pipelines DAG: references, cycles, topological order | Built, tested |
+| Pipeline waves, for running independent steps at once | Built, tested |
+| Resubmission diff, with an effect per change | Built, tested |
 | Plugin implementations, all of them | Not started |
 | Scheduler, downloader, spider, pipeline stages | Not started |
+| Exporters, all formats | Not started |
 | Cluster join, distributed jobs | Not started |
 
-The job document in this file is a test fixture in
-`internal/engine/engine_test.go`. If the notes and the parser disagree, the
-test fails, which is the only way a document like this stays true.
+`internal/engine/notes_test.go` reads this file. It parses and validates the
+job document above, and compares every number in the catalogue tables with the
+catalogue the code uses. If the notes and the code disagree, the tests fail,
+which is the only way a document like this stays true.
 
 ## Corrections applied to the original sketch
 

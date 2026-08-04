@@ -142,6 +142,9 @@ type Plugin struct {
 	// what you want at three in the morning.
 	Enabled *bool `hcl:"enabled,optional"`
 
+	// raw is the block's source text, kept so two submissions can be compared.
+	raw string
+
 	// Config is everything else in the block, left undecoded.
 	//
 	// A plugin's own fields belong to the plugin, and this package must not
@@ -181,6 +184,9 @@ type Pipeline struct {
 
 	// requires holds the parsed dependencies, filled by [Job.resolve].
 	requires []string
+
+	// raw is the block's source text, kept so two submissions can be compared.
+	raw string
 }
 
 // Address is how other steps refer to this one.
@@ -210,6 +216,9 @@ type Exporter struct {
 	// Config is the exporter's own fields, left undecoded for the same reason
 	// a plugin's are.
 	Config hcl.Body `hcl:",remain"`
+
+	// raw is the block's source text, kept so two submissions can be compared.
+	raw string
 }
 
 // Address is how one exporter is named in an error.
@@ -231,6 +240,14 @@ func Parse(src []byte, filename string) (*Document, error) {
 	var doc Document
 	if diags := gohcl.DecodeBody(parsed.Body, evalContext(), &doc); diags.HasErrors() {
 		return nil, diagError(diags)
+	}
+
+	// Keep the source text of every block that carries an undecoded body, so
+	// two submissions of one job can be compared. A plugin's configuration is
+	// opaque here on purpose, which means the only honest way to tell whether
+	// it changed is to compare what was written.
+	for _, job := range doc.Jobs {
+		job.snapshot(src)
 	}
 
 	// Dependencies are read here rather than during validation, because a

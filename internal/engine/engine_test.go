@@ -810,3 +810,457 @@ job "j" {
 		t.Fatal("accepted the same format twice for one item")
 	}
 }
+
+// TestWavesRunIndependentStepsTogether is the point of the graph: work that
+// does not depend on other work happens at the same time.
+func TestWavesRunIndependentStepsTogether(t *testing.T) {
+	doc := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "p" {
+      type = str
+    }
+  }
+
+  pipelines "clean" "article" {}
+
+  pipelines "rank" "article" {
+    requires = [clean.article]
+  }
+  pipelines "translate" "article" {
+    requires = [clean.article]
+  }
+  pipelines "summarise" "article" {
+    requires = [clean.article]
+  }
+
+  pipelines "export" "article" {
+    requires = [rank.article, translate.article, summarise.article]
+  }
+}
+`)
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	job := doc.Jobs[0]
+
+	waves, err := job.Waves()
+	if err != nil {
+		t.Fatalf("waves: %v", err)
+	}
+	if len(waves) != 3 {
+		t.Fatalf("got %d waves, want 3", len(waves))
+	}
+
+	if len(waves[0]) != 1 || waves[0][0].Address() != "clean.article" {
+		t.Errorf("wave 0 = %v, want clean.article alone", addressesOf(waves[0]))
+	}
+	if len(waves[1]) != 3 {
+		t.Errorf("wave 1 = %v, want the three independent steps together", addressesOf(waves[1]))
+	}
+	if len(waves[2]) != 1 || waves[2][0].Address() != "export.article" {
+		t.Errorf("wave 2 = %v, want export.article", addressesOf(waves[2]))
+	}
+
+	width, err := job.Width()
+	if err != nil {
+		t.Fatalf("width: %v", err)
+	}
+	if width != 3 {
+		t.Errorf("width = %d, want 3", width)
+	}
+}
+
+func TestWavesAreDeterministic(t *testing.T) {
+	job := parse(t, document).Jobs[0]
+
+	first, err := job.Waves()
+	if err != nil {
+		t.Fatalf("waves: %v", err)
+	}
+	for range 20 {
+		again, err := job.Waves()
+		if err != nil {
+			t.Fatalf("waves: %v", err)
+		}
+		if len(again) != len(first) {
+			t.Fatalf("wave count changed between runs")
+		}
+		for i := range first {
+			if strings.Join(addressesOf(first[i]), ",") != strings.Join(addressesOf(again[i]), ",") {
+				t.Fatalf("wave %d changed between runs: %v then %v",
+					i, addressesOf(first[i]), addressesOf(again[i]))
+			}
+		}
+	}
+}
+
+func TestWavesRefuseACycle(t *testing.T) {
+	doc := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+
+  pipelines "one" "x" {
+    requires = [two.y]
+  }
+  pipelines "two" "y" {
+    requires = [one.x]
+  }
+}
+`)
+	if _, err := doc.Jobs[0].Waves(); err == nil {
+		t.Fatal("waves resolved a cycle")
+	}
+}
+
+// TestWavesAgreeWithOrder keeps the two views of one graph consistent.
+func TestWavesAgreeWithOrder(t *testing.T) {
+	job := parse(t, document).Jobs[0]
+
+	ordered, err := job.Order()
+	if err != nil {
+		t.Fatalf("order: %v", err)
+	}
+	waves, err := job.Waves()
+	if err != nil {
+		t.Fatalf("waves: %v", err)
+	}
+
+	flat := 0
+	for _, wave := range waves {
+		flat += len(wave)
+	}
+	if flat != len(ordered) {
+		t.Errorf("waves hold %d steps, order holds %d", flat, len(ordered))
+	}
+}
+
+func TestPipelinePluginIsRedirected(t *testing.T) {
+	doc := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+
+  plugin "pipeline" "clean" {
+    order = 1
+  }
+}
+`)
+	err := doc.Validate()
+	if err == nil {
+		t.Fatal("accepted a pipeline plugin")
+	}
+	// The message has to say what to write instead: whoever wrote this had the
+	// right idea and the wrong spelling.
+	if !strings.Contains(err.Error(), "pipelines") || !strings.Contains(err.Error(), "requires") {
+		t.Errorf("error does not point at the right spelling: %v", err)
+	}
+}
+
+func addressesOf(steps []*engine.Pipeline) []string {
+	out := make([]string, 0, len(steps))
+	for _, s := range steps {
+		out = append(out, s.Address())
+	}
+	return out
+}
+
+// Resubmitting the same job name mutates it. These cover what "applies the
+// changes" means, which is not the same for every change.
+
+func TestResubmittingAnIdenticalDocumentChangesNothing(t *testing.T) {
+	running := parse(t, document).Jobs[0]
+	submitted := parse(t, document).Jobs[0]
+
+	if changes := engine.Diff(running, submitted); changes.Any() {
+		t.Errorf("an identical resubmission reported %d changes: %v", len(changes), changes)
+	}
+}
+
+func TestReorderingIsNotAChange(t *testing.T) {
+	a := parse(t, `
+job "j" {
+  start    = ["https://a.example/", "https://b.example/"]
+  domains  = ["a.example", "b.example"]
+  item "article" {
+    property "title" {
+      type = str
+    }
+    property "body" {
+      type = str
+    }
+  }
+}
+`).Jobs[0]
+	b := parse(t, `
+job "j" {
+  start    = ["https://b.example/", "https://a.example/"]
+  domains  = ["b.example", "a.example"]
+  item "article" {
+    property "body" {
+      type = str
+    }
+    property "title" {
+      type = str
+    }
+  }
+}
+`).Jobs[0]
+
+	if changes := engine.Diff(a, b); changes.Any() {
+		t.Errorf("reordering was read as a change: %v", changes)
+	}
+}
+
+func TestRaisingABudgetIsFree(t *testing.T) {
+	a := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  engine {
+    limits {
+      max_pages = 100
+    }
+  }
+}
+`).Jobs[0]
+	b := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  engine {
+    limits {
+      max_pages = 500
+    }
+  }
+}
+`).Jobs[0]
+
+	changes := engine.Diff(a, b)
+	if len(changes) != 1 {
+		t.Fatalf("got %d changes, want 1: %v", len(changes), changes)
+	}
+	if changes[0].Path != "engine.limits.max_pages" {
+		t.Errorf("path = %q", changes[0].Path)
+	}
+	if !changes[0].Effect.Free() {
+		t.Errorf("raising a page budget should be free, got %s", changes[0].Effect)
+	}
+	if changes.Costly().Any() {
+		t.Errorf("a free change was reported as costly: %v", changes.Costly())
+	}
+}
+
+// TestMovingTheCacheIsNotFree is the change that would otherwise look like a
+// crawl that suddenly forgot everything it had done.
+func TestMovingTheCacheIsNotFree(t *testing.T) {
+	a := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  plugin "downloader" "cache" {
+    backend = "s3"
+    bucket  = "pages"
+  }
+}
+`).Jobs[0]
+	b := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  plugin "downloader" "cache" {
+    backend = "s3"
+    bucket  = "somewhere-else"
+  }
+}
+`).Jobs[0]
+
+	costly := engine.Diff(a, b).Costly()
+	if len(costly) != 1 {
+		t.Fatalf("got %d costly changes, want 1: %v", len(costly), costly)
+	}
+	if costly[0].Effect != engine.EffectCacheMoved {
+		t.Errorf("effect = %s, want cache moved", costly[0].Effect)
+	}
+}
+
+func TestChangingTheSchemaIsNotFree(t *testing.T) {
+	a := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+}
+`).Jobs[0]
+	b := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "title" {
+      type     = str
+      required = true
+    }
+  }
+}
+`).Jobs[0]
+
+	costly := engine.Diff(a, b).Costly()
+	if len(costly) != 1 || costly[0].Effect != engine.EffectReextract {
+		t.Fatalf("changing a property should need reextraction, got %v", costly)
+	}
+}
+
+func TestNarrowingScopeIsNotFree(t *testing.T) {
+	a := parse(t, `
+job "j" {
+  start   = ["https://example.com/"]
+  domains = ["example.com", "other.example"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+}
+`).Jobs[0]
+	b := parse(t, `
+job "j" {
+  start   = ["https://example.com/"]
+  domains = ["example.com"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+}
+`).Jobs[0]
+
+	costly := engine.Diff(a, b).Costly()
+	if len(costly) != 1 || costly[0].Effect != engine.EffectRescope {
+		t.Fatalf("removing a domain should rescope, got %v", costly)
+	}
+}
+
+func TestAddingAStartURLReseeds(t *testing.T) {
+	a := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+}
+`).Jobs[0]
+	b := parse(t, `
+job "j" {
+  start = ["https://example.com/", "https://example.com/more"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+}
+`).Jobs[0]
+
+	costly := engine.Diff(a, b).Costly()
+	if len(costly) != 1 || costly[0].Effect != engine.EffectReseed {
+		t.Fatalf("adding a start URL should reseed, got %v", costly)
+	}
+}
+
+// TestPluginConfigChangeIsSeen proves the opaque body is still comparable:
+// this package does not know what "times" means and must still notice it moved.
+func TestPluginConfigChangeIsSeen(t *testing.T) {
+	a := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  plugin "downloader" "retry" {
+    times = 3
+  }
+}
+`).Jobs[0]
+	b := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  plugin "downloader" "retry" {
+    times = 10
+  }
+}
+`).Jobs[0]
+
+	changes := engine.Diff(a, b)
+	if len(changes) != 1 || changes[0].Path != "plugin.downloader.retry" {
+		t.Fatalf("a change inside an opaque plugin body was missed: %v", changes)
+	}
+	if !changes[0].Effect.Free() {
+		t.Errorf("a retry count should be free to change, got %s", changes[0].Effect)
+	}
+}
+
+func TestRemovingAPluginIsSeen(t *testing.T) {
+	a := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+  plugin "spider" "depth" {}
+}
+`).Jobs[0]
+	b := parse(t, `
+job "j" {
+  start = ["https://example.com/"]
+  item "a" {
+    property "p" {
+      type = str
+    }
+  }
+}
+`).Jobs[0]
+
+	changes := engine.Diff(a, b)
+	if len(changes) != 1 || changes[0].To != "" {
+		t.Fatalf("removal was not reported: %v", changes)
+	}
+}

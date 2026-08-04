@@ -110,6 +110,101 @@ func (j *Job) Order() ([]*Pipeline, error) {
 	return out, nil
 }
 
+// Waves groups the pipelines into sets that can run at the same time.
+//
+// A DAG is worth having because independent work runs concurrently: everything
+// in one wave has had its dependencies satisfied by the waves before it, and
+// nothing in a wave depends on anything else in it. A runner starts a wave,
+// waits for it, and starts the next.
+//
+// [Job.Order] flattens the same graph into one sequence, which is what you want
+// for showing a plan or for a runner with no concurrency. This is what you want
+// for running it.
+//
+//	clean.article            wave 0
+//	    |
+//	rank.article             wave 1
+//	    |
+//	python.enrich            wave 2
+//	    |
+//	bash.notify              wave 3
+//
+// Within a wave the order is by address, so the same document always produces
+// the same plan.
+func (j *Job) Waves() ([][]*Pipeline, error) {
+	byAddress := make(map[string]*Pipeline, len(j.Pipelines))
+	for _, p := range j.Pipelines {
+		byAddress[p.Address()] = p
+	}
+
+	remaining := make(map[string]int, len(j.Pipelines))
+	dependents := make(map[string][]string, len(j.Pipelines))
+
+	for _, p := range j.Pipelines {
+		count := 0
+		for _, req := range p.requires {
+			if byAddress[req] == nil {
+				return nil, fmt.Errorf("pipelines %q: requires %q, which is not declared", p.Address(), req)
+			}
+			count++
+			dependents[req] = append(dependents[req], p.Address())
+		}
+		remaining[p.Address()] = count
+	}
+
+	var waves [][]*Pipeline
+	done := 0
+
+	for done < len(j.Pipelines) {
+		var wave []string
+		for address, count := range remaining {
+			if count == 0 {
+				wave = append(wave, address)
+			}
+		}
+		if len(wave) == 0 {
+			return nil, fmt.Errorf("pipelines: dependency cycle among %s", strings.Join(unresolved(remaining), ", "))
+		}
+		sort.Strings(wave)
+
+		steps := make([]*Pipeline, 0, len(wave))
+		for _, address := range wave {
+			steps = append(steps, byAddress[address])
+			// Removed rather than zeroed, so it cannot be picked up again by
+			// the next wave's scan.
+			delete(remaining, address)
+		}
+		waves = append(waves, steps)
+		done += len(wave)
+
+		for _, address := range wave {
+			for _, dependent := range dependents[address] {
+				if _, waiting := remaining[dependent]; waiting {
+					remaining[dependent]--
+				}
+			}
+		}
+	}
+
+	return waves, nil
+}
+
+// Width is the most steps that could run at once, which is what a runner sizes
+// its worker pool against.
+func (j *Job) Width() (int, error) {
+	waves, err := j.Waves()
+	if err != nil {
+		return 0, err
+	}
+	widest := 0
+	for _, wave := range waves {
+		if len(wave) > widest {
+			widest = len(wave)
+		}
+	}
+	return widest, nil
+}
+
 // findCycle returns one cycle, as a readable path, or nil.
 //
 // One rather than all: a document usually has a single mistake in it, and a

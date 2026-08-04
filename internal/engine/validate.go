@@ -197,6 +197,15 @@ func (j *Job) validatePlugins() []error {
 		where := fmt.Sprintf("plugin %q %q", p.Stage, p.Name)
 
 		if !stage.ValidPlugin() {
+			// The pipeline is a stage, but its extensions are not plugins.
+			// Saying so is worth more than listing what is, because somebody
+			// writing this has the right idea and the wrong spelling.
+			if stage == StagePipeline {
+				problems = append(problems, fmt.Errorf(
+					`%s: a pipeline step is a node in a graph, not a link in a chain. Write pipelines %q "<item>" and give it requires instead of order`,
+					where, p.Name))
+				continue
+			}
 			problems = append(problems, fmt.Errorf("%s: %q is not a stage, have %s",
 				where, p.Stage, strings.Join(stageNames(PluginStages), ", ")))
 			continue

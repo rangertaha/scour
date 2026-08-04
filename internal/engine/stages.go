@@ -32,7 +32,12 @@ const (
 // stage and replacing it are different things: a priority queue or a cron
 // trigger adds to the frontier's behaviour without meaning somebody else is
 // running it.
-var PluginStages = []Stage{StageScheduler, StageDownloader, StageSpider, StagePipeline}
+//
+// The pipeline is not here. Its extensions are written as `pipelines` blocks,
+// because a pipeline step is a node in a graph with dependencies rather than a
+// link in a chain with an order, and giving one stage two spellings would only
+// leave everybody guessing which one they wanted.
+var PluginStages = []Stage{StageScheduler, StageDownloader, StageSpider}
 
 // ExternalStages is every stage a job may hand to somebody else.
 //

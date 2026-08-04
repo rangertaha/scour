@@ -2,6 +2,8 @@
 
 package engine
 
+import "sort"
+
 // The built-in middleware, and where each sits in its chain.
 //
 // Taken from Scrapy's built-in middleware and its ordering logic, adapted where
@@ -74,7 +76,7 @@ var Builtins = map[Stage][]Builtin{
 	// in and the first on the way out.
 	StageScheduler: {
 		{"dupefilter", 100, "Decides what counts as already seen"},
-		{"scope", 200, "Drops URLs outside domains, included and excluded"},
+		{"offsite", 200, "Drops URLs outside domains, included and excluded"},
 		{"cron", 300, "Defers a URL until it is due again"},
 		{"budget", 400, "Refuses a URL the job can no longer pay for"},
 		{"priority", 500, "Best first, by score. The default"},
@@ -82,12 +84,33 @@ var Builtins = map[Stage][]Builtin{
 		{"depth", 500, "Follows a spur down before returning"},
 		{"random", 500, "Samples without the sample being shaped by the scorer"},
 	},
-	StagePipeline: {
-		{"clean", 100, "Rule-driven tidying"},
-		{"validate", 200, "Enforces required and types"},
-		{"dedupe", 300, "Drops items already seen"},
-		{"rank", 400, "Scores and orders"},
-	},
+}
+
+// PipelineKinds is what a `pipelines` block's first label may be.
+//
+// These are not plugins and have no order. A pipeline step is a node in a
+// graph: it runs when its dependencies have run, and `requires` is how it says
+// which those are. Ordering it by number as well would be two ways of saying
+// the same thing, and they would disagree.
+var PipelineKinds = []Builtin{
+	{"clean", 0, "Rule-driven tidying"},
+	{"validate", 0, "Enforces required and types"},
+	{"dedupe", 0, "Drops items already seen"},
+	{"rank", 0, "Scores and orders"},
+	{"python", 0, "Runs a Python script, inline or from a file"},
+	{"rhai", 0, "Runs a Rhai script, inline or from a file"},
+	{"nodejs", 0, "Runs a Node script, inline or from a file"},
+	{"bash", 0, "Runs a shell script, inline or from a file"},
+}
+
+// PipelineKindNames lists what ships, for an error message.
+func PipelineKindNames() []string {
+	out := make([]string, 0, len(PipelineKinds))
+	for _, k := range PipelineKinds {
+		out = append(out, k.Name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // charset has no Scrapy equivalent, because Scrapy decodes in its response
