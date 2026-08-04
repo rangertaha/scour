@@ -9,96 +9,123 @@ import (
 	"time"
 )
 
-// Stage is one step of the pipeline, and one place somebody can substitute
-// their own code.
-//
-// # Bringing your own
-//
-// Because the stages talk over NATS rather than by calling each other, a stage
-// is replaceable without touching scour: subscribe to what it consumes,
-// publish what it produces, and scour cannot tell the difference. A spider in
-// Python that understands one site better than induction ever will is a
-// subscriber, not a fork.
-//
-// A job says which stages it is bringing by listing them in
-// [Components.External]. scour then publishes that stage's input and waits for
-// its output on the job's subjects, instead of running its own.
-//
-// The subjects are per job, so an external stage subscribes to the work it was
-// submitted for rather than to everything the cluster is doing.
+// Stage is one step of the pipeline, one chain of middleware, and one place
+// somebody can substitute their own code.
 type Stage string
 
-// The stages of the pipeline, in the order a page passes through them.
+// The stages.
 const (
-	// StageDownloader turns a request into a response, and caches the body.
+	// StageScheduler owns the frontier: dedup, depth, politeness, ordering.
+	StageScheduler Stage = "scheduler"
+	// StageDownloader turns a request into a response.
 	StageDownloader Stage = "downloader"
-	// StageSpider turns a response into records and new requests.
+	// StageSpider turns a response into items and new requests.
 	StageSpider Stage = "spider"
-	// StagePipeline turns a record into whatever is done with it.
+	// StagePipeline turns an item into whatever is done with it.
 	StagePipeline Stage = "pipeline"
 )
 
-// Stages is every stage that can be replaced.
+// PluginStages is every stage a plugin can extend, in the order a page passes
+// through them.
 //
-// The scheduler is not among them. It owns the frontier, dedup and politeness,
-// and two schedulers handing out the same host cannot honour a crawl delay
-// between them, so it is not a thing a job may bring its own of.
-var Stages = []Stage{StageDownloader, StageSpider, StagePipeline}
+// The scheduler is here even though it cannot be replaced, because extending a
+// stage and replacing it are different things: a priority queue or a cron
+// trigger adds to the frontier's behaviour without meaning somebody else is
+// running it.
+var PluginStages = []Stage{StageScheduler, StageDownloader, StageSpider, StagePipeline}
 
-// Valid reports whether a stage is one scour knows.
-func (s Stage) Valid() bool { return slices.Contains(Stages, s) }
+// ExternalStages is every stage a job may hand to somebody else.
+//
+// The scheduler is not among them. Two schedulers handing out the same host
+// cannot honour a crawl delay between them, so politeness forces one decision
+// point per host.
+var ExternalStages = []Stage{StageDownloader, StageSpider, StagePipeline}
 
-// Components says who runs what.
+// ValidPlugin reports whether a plugin may name this stage.
+func (s Stage) ValidPlugin() bool { return slices.Contains(PluginStages, s) }
+
+// ValidExternal reports whether a job may bring its own of this stage.
+func (s Stage) ValidExternal() bool { return slices.Contains(ExternalStages, s) }
+
+// Components says which stages a job runs itself, and which it expects
+// somebody else to run over the bus.
+//
+// Because the stages talk over NATS rather than calling each other, a stage is
+// replaceable without touching scour: subscribe to what it consumes, publish
+// what it produces, and scour cannot tell the difference. A spider in another
+// language that understands one site better than induction ever will is a
+// subscriber, not a fork.
 type Components struct {
-	// External lists the stages this job does not run itself.
-	//
-	// Empty, which is the default, means scour runs all of them, and a
-	// single-process job never touches the network between stages.
-	External []Stage `json:"external,omitempty"`
+	// External lists the stages this job does not run itself. Empty, the
+	// default, means scour runs all of them and a single-process job never
+	// touches the network between stages.
+	External []string `hcl:"external,optional"`
 
-	// Timeout is how long a stage's input may go unanswered before the job is
-	// considered stuck. It applies only to external stages: an internal one
-	// cannot fail to reply without the process itself having died.
-	//
-	// Zero means [DefaultExternalTimeout].
-	Timeout Duration `json:"timeout,omitempty"`
+	// Timeout is how long an external stage has to answer before the job is
+	// considered stuck. It does not apply to internal stages, which cannot
+	// fail to reply without the process itself having died.
+	Timeout string `hcl:"timeout,optional"`
 }
 
 // DefaultExternalTimeout is how long an external stage has to answer.
 //
 // Generous, because the reason to bring your own spider is usually that it
 // does something slow: a model, a browser, a service somewhere else. A stage
-// that is merely slow must not look like a stage that has died.
+// that is merely slow must not look like one that has died.
 const DefaultExternalTimeout = 5 * time.Minute
 
 // IsExternal reports whether this job expects somebody else to run a stage.
-func (c Components) IsExternal(s Stage) bool { return slices.Contains(c.External, s) }
+func (c *Components) IsExternal(s Stage) bool {
+	if c == nil {
+		return false
+	}
+	return slices.Contains(c.External, string(s))
+}
 
-func (c Components) validate() []error {
+// ExternalTimeout is how long to wait, defaulted.
+func (c *Components) ExternalTimeout() (time.Duration, error) {
+	if c == nil || c.Timeout == "" {
+		return DefaultExternalTimeout, nil
+	}
+	d, err := time.ParseDuration(c.Timeout)
+	if err != nil {
+		return 0, fmt.Errorf("components.timeout: %w", err)
+	}
+	return d, nil
+}
+
+func (c *Components) validate() []error {
+	if c == nil {
+		return nil
+	}
 	var problems []error
 
-	seen := map[Stage]bool{}
-	for _, s := range c.External {
-		if !s.Valid() {
-			problems = append(problems, fmt.Errorf("components.external: %q is not a stage, have %s", s, strings.Join(stageNames(), ", ")))
-			continue
+	seen := map[string]bool{}
+	for _, name := range c.External {
+		stage := Stage(name)
+		switch {
+		case !stage.ValidExternal() && stage.ValidPlugin():
+			problems = append(problems, fmt.Errorf(
+				"components.external: %q cannot be replaced, only extended with a plugin", name))
+		case !stage.ValidExternal():
+			problems = append(problems, fmt.Errorf(
+				"components.external: %q is not a stage, have %s", name, strings.Join(stageNames(ExternalStages), ", ")))
+		case seen[name]:
+			problems = append(problems, fmt.Errorf("components.external: %q listed twice", name))
 		}
-		if seen[s] {
-			problems = append(problems, fmt.Errorf("components.external: %q listed twice", s))
-		}
-		seen[s] = true
+		seen[name] = true
 	}
 
-	if c.Timeout < 0 {
-		problems = append(problems, fmt.Errorf("components.timeout: %s is negative", c.Timeout))
+	if _, err := c.ExternalTimeout(); err != nil {
+		problems = append(problems, err)
 	}
 
 	return problems
 }
 
-func stageNames() []string {
-	out := make([]string, 0, len(Stages))
-	for _, s := range Stages {
+func stageNames(stages []Stage) []string {
+	out := make([]string, 0, len(stages))
+	for _, s := range stages {
 		out = append(out, string(s))
 	}
 	return out
