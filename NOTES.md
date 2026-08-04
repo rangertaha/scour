@@ -501,7 +501,7 @@ Servers join to form a cluster, and jobs run across it.
 
 - Each node embeds a NATS server. `--join` adds routes, so the embedded servers
   cluster natively and a laptop still needs nothing installed.
-- Jobs live in a NATS key-value bucket. See below.
+- Jobs live in a NATS key-value bucket. Storage, below, has the whole map.
 - Work distributes by queue group, so downloaders on different nodes pull from
   one subject with no coordinator.
 - Bodies never travel on the bus. The cache holds them; messages carry the key.
@@ -525,6 +525,122 @@ job "news" {
   }
 }
 ```
+
+## Storage
+
+Five kinds of thing get kept, and they want different stores. Gathered here
+because the decisions were argued out one at a time and the map is the thing
+worth being able to read at once.
+
+| What | Where | Why |
+| --- | --- | --- |
+| Page bodies | The cache: a directory, S3 or GCS | Large, immutable, and shared between machines |
+| Jobs, as desired state | NATS KV, `SCOUR_JOBS` | The only store every node already has |
+| Run state | NATS KV, `SCOUR_RUNS`, no history | Changes constantly and must not churn a job's revisions |
+| Nodes | NATS KV, `SCOUR_NODES`, with a TTL | Not durable state. A row outliving its process is a lie |
+| Frontier and hosts | SQLite, one shared database | Politeness is shared, so this cannot be partitioned |
+| Records and marks | SQLite, one database per job | Unbounded, unshared, and deleted by unlinking |
+| Learned locators | The job document itself | A guess should be readable and correctable |
+| Exports | Whatever the exporters write | Copies. Not the record of truth |
+
+### What that buys
+
+**The two stages that touch a database touch different ones.** The scheduler
+holds the frontier; the pipeline holds the records. They share no file, so they
+can run on different machines without coordinating, and neither needs what the
+other has.
+
+**The downloader and the spider touch no database at all.** A fetching node
+needs the network and the cache. A parsing node needs the cache and the spec,
+and the spec comes from KV like everything else. That is the property the whole
+split exists to protect, and it survives this map.
+
+**A laptop needs nothing installed.** An embedded broker, a directory of bodies,
+and two SQLite files.
+
+### Where the frontier lives
+
+In SQLite, in one database, with hand-written SQL and no ORM.
+
+Bodies are in the cache and the job is in KV. The frontier needs a database
+because of what it has to do at once: dedup by URL, hand out the highest-scoring entry whose host
+is not cooling, lease it with a timeout, and survive a restart with all of that
+intact.
+
+**NATS cannot do it.** JetStream is a work queue and work queues are FIFO. A
+focused crawl is ranking, and the ranking changes as the model learns, so the
+one thing the frontier must do is the one thing a broker does not.
+
+**Politeness decides the rest.** A rate limit is per host and shared between
+jobs, and two schedulers handing out the same host cannot honour a crawl delay
+between them. So the frontier is single-writer per host by construction. A
+multi-writer database buys nothing until there are more hosts than one process
+can schedule, and at that point the answer is to shard by host, which makes each
+shard single-writer again. SQLite is what a single writer wants.
+
+That politeness is shared also settles the layout: **one database, not one per
+job.** Per-job files would be tidier and would make dropping a job a delete, but
+host state cannot be partitioned per job without two jobs on one site each
+getting their own allowance, which is exactly what must not happen.
+
+**One writer, many readers**, which is what WAL is for. Pure-Go driver, so it
+cross-compiles and installs with nothing.
+
+**Hand-written SQL, no ORM.** There are perhaps a dozen queries and every one is
+shaped by an index. An ORM would hide the thing most worth looking at, and the
+lease is a transaction with an ordering in it rather than a row fetched by id.
+
+The escape hatch is deliberate: the lease is written as `SELECT ... FOR UPDATE`,
+which SQLite ignores because it serialises writers anyway and Postgres needs.
+The day multi-writer is genuinely required, it is the same SQL against a
+different dialect rather than a rewrite. The old implementation had this shape
+and it held at 150,000 rows.
+
+What is given up, and it is worth being honest: ad-hoc analytics over records
+are not this store's job, and cross-machine writes to one job's frontier are not
+possible without sharding first.
+
+What would change the answer: a crawl whose hosts genuinely exceed what one
+scheduler can pace. Then Postgres and `FOR UPDATE SKIP LOCKED`, which is built
+for exactly this, and the migration is a dialect rather than a redesign.
+
+### Where records are kept
+
+In SQLite, one database per job.
+
+The asymmetry with the frontier is deliberate and has a reason on both sides.
+The frontier is one shared database because politeness is shared. Records are
+one database per job because they are the opposite: nothing about a job's
+records is shared with another job's, they grow without bound, and `scour rm`
+should be a deletion rather than a query.
+
+Keeping them out of the frontier's file also keeps the frontier's file small,
+which matters because it is the hot one: the frontier is written on every
+discovery and every lease, and a growing table of records alongside would drag
+a vacuum through the busiest thing in the system.
+
+**There is a record store at all**, rather than the exporters being the only
+output, because three things need to find a record again after it was written.
+`mutation.stale_records = "discard"` has to know which records to delete.
+`reextract` has to know what it is replacing. And a mark somebody puts on a
+record has to attach to something. None of that works if the only copy left the
+building as a CSV.
+
+Exporters are copies. That is the whole of their job.
+
+### Where run state is kept
+
+In a KV bucket of its own, with no history.
+
+Paused, pages fetched, what the current run is doing: this changes constantly
+and is read by anybody asking `scour status`. Putting it in the job's entry
+would churn revisions until the history that entry keeps is worthless, and
+putting it in the database would mean a node needs one to answer a question
+about itself.
+
+No history because there is nothing to look back at: the interesting record of
+what a run did is its log and its records, not a thousand revisions of a page
+counter.
 
 ### Where a job is kept
 
@@ -576,53 +692,6 @@ key in the entry.
 The one thing given up is querying. KV answers "this key" and "these keys", not
 "every job crawling example.com", which would mean listing and filtering. For
 tens or hundreds of jobs that is not a constraint worth designing around.
-
-### Where the frontier lives
-
-In SQLite, in one database, with hand-written SQL and no ORM.
-
-Nothing else in scour needs a database. Bodies are in the cache, the job is in
-KV, records are append-only. The frontier is the exception because of what it
-has to do at once: dedup by URL, hand out the highest-scoring entry whose host
-is not cooling, lease it with a timeout, and survive a restart with all of that
-intact.
-
-**NATS cannot do it.** JetStream is a work queue and work queues are FIFO. A
-focused crawl is ranking, and the ranking changes as the model learns, so the
-one thing the frontier must do is the one thing a broker does not.
-
-**Politeness decides the rest.** A rate limit is per host and shared between
-jobs, and two schedulers handing out the same host cannot honour a crawl delay
-between them. So the frontier is single-writer per host by construction. A
-multi-writer database buys nothing until there are more hosts than one process
-can schedule, and at that point the answer is to shard by host, which makes each
-shard single-writer again. SQLite is what a single writer wants.
-
-That politeness is shared also settles the layout: **one database, not one per
-job.** Per-job files would be tidier and would make dropping a job a delete, but
-host state cannot be partitioned per job without two jobs on one site each
-getting their own allowance, which is exactly what must not happen.
-
-**One writer, many readers**, which is what WAL is for. Pure-Go driver, so it
-cross-compiles and installs with nothing.
-
-**Hand-written SQL, no ORM.** There are perhaps a dozen queries and every one is
-shaped by an index. An ORM would hide the thing most worth looking at, and the
-lease is a transaction with an ordering in it rather than a row fetched by id.
-
-The escape hatch is deliberate: the lease is written as `SELECT ... FOR UPDATE`,
-which SQLite ignores because it serialises writers anyway and Postgres needs.
-The day multi-writer is genuinely required, it is the same SQL against a
-different dialect rather than a rewrite. The old implementation had this shape
-and it held at 150,000 rows.
-
-What is given up, and it is worth being honest: ad-hoc analytics over records
-are not this store's job, and cross-machine writes to one job's frontier are not
-possible without sharding first.
-
-What would change the answer: a crawl whose hosts genuinely exceed what one
-scheduler can pace. Then Postgres and `FOR UPDATE SKIP LOCKED`, which is built
-for exactly this, and the migration is a dialect rather than a redesign.
 
 ### Only the server writes
 
@@ -681,7 +750,9 @@ four stages is the genuinely new distributed-systems problem here.
 | Exporters, all formats | Not started |
 | Cluster join, distributed jobs | Not started |
 | Jobs in a KV bucket, server-side writes | Decided, not started |
-| Frontier in SQLite, one database, hand-written SQL | Decided, not started |
+| Frontier in SQLite, one shared database | Decided, not started |
+| Records in SQLite, one database per job | Decided, not started |
+| Run state and nodes in KV buckets of their own | Decided, not started |
 
 `internal/engine/notes_test.go` reads this file. It parses and validates the job
 documents in it, and compares every number in the catalogue tables with the

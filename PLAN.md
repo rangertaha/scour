@@ -168,7 +168,7 @@ as a subscriber, in a language that is not Go.
 The workload is a priority queue with dedup and leases: pop-highest-score,
 upsert-by-hash, lease with a timeout, survive restart. Nothing else in scour
 needs a database. Bodies are in the cache, models will be files, config is the
-job document, and records are append-only.
+job document, and records are in a database of their own per job.
 
 What is already ruled out: NATS alone. JetStream is a work queue and work queues
 are FIFO, so it cannot rank, and a focused crawl is ranking.
