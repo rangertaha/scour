@@ -373,21 +373,14 @@ func (m *Monitoring) MetricsOn() bool {
 // LoggingOn reports whether this job logs.
 //
 // Logging defaults to on, so a job that says nothing about monitoring still
-// says something about itself when it goes wrong. That means the field cannot
-// be read directly: false and unset are the same bool, and unset has to mean
-// on. A job turning logging off says so in a block that sets something, which
-// is what [Monitoring.explicit] detects.
+// says something about itself when it goes wrong. A bool could not express
+// that, because false and unset would be the same value, so the field is a
+// pointer and only an explicit `logging = false` turns it off.
 func (m *Monitoring) LoggingOn() bool {
-	if m == nil {
+	if m == nil || m.Logging == nil {
 		return DefaultLogging
 	}
-	return m.Logging || !m.explicit()
-}
-
-// explicit reports whether the block set anything at all, which is how an
-// absent value is told from a false one.
-func (m *Monitoring) explicit() bool {
-	return m != nil && (m.Metrics || m.Level != "" || m.Logging)
+	return *m.Logging
 }
 
 // LogLevel is the level this job logs at.
@@ -504,9 +497,10 @@ func (j *Job) Resolved() *Job {
 	}
 	out.Pipeline = pipe
 
+	logging := j.Monitoring.LoggingOn()
 	out.Monitoring = &Monitoring{
 		Metrics: j.Monitoring.MetricsOn(),
-		Logging: j.Monitoring.LoggingOn(),
+		Logging: &logging,
 		Level:   j.Monitoring.LogLevel(),
 	}
 

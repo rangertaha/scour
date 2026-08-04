@@ -48,11 +48,3 @@ func (s Stage) ValidPlugin() bool { return slices.Contains(PluginStages, s) }
 
 // ValidExternal reports whether a job may bring its own of this stage.
 func (s Stage) ValidExternal() bool { return slices.Contains(ExternalStages, s) }
-
-func stageNames(stages []Stage) []string {
-	out := make([]string, 0, len(stages))
-	for _, s := range stages {
-		out = append(out, string(s))
-	}
-	return out
-}

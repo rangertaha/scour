@@ -202,8 +202,10 @@ type Property struct {
 
 // Monitoring is what a job reports while it runs.
 type Monitoring struct {
-	Metrics bool   `hcl:"metrics,optional" json:"metrics,omitempty"`
-	Logging bool   `hcl:"logging,optional" json:"logging,omitempty"`
+	Metrics bool `hcl:"metrics,optional" json:"metrics,omitempty"`
+	// Logging is a pointer for the same reason robots is: it defaults to on,
+	// so false and unset cannot be the same value.
+	Logging *bool  `hcl:"logging,optional" json:"logging,omitempty"`
 	Level   string `hcl:"level,optional" json:"level,omitempty"`
 }
 

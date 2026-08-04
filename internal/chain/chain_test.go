@@ -286,3 +286,22 @@ func TestLinkThatWrapsToNilIsNamed(t *testing.T) {
 		}},
 	)
 }
+
+// TestLinkWithoutAWrapperIsSkipped: a Link is a struct, so one can be built
+// with no Wrap. Skipping it keeps a partly-built chain usable rather than
+// panicking on the first request.
+func TestLinkWithoutAWrapperIsSkipped(t *testing.T) {
+	tr := &trace{}
+
+	h := chain.Build(core(tr), []chain.Link[string, string]{
+		{Name: "empty", Order: 100},
+		{Name: "real", Order: 200, Wrap: recorder(tr, "real")},
+	})
+
+	if _, err := h.Handle(context.Background(), "page"); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if tr.String() != "real> core real<" {
+		t.Errorf("walked %s", tr)
+	}
+}
