@@ -119,9 +119,9 @@ func Diff(running, submitted *Job) Changes {
 	out = append(out, diffList("excluded", running.Excluded, submitted.Excluded, EffectRescope)...)
 
 	out = append(out, diffItems(running.Items, submitted.Items)...)
-	out = append(out, diffEngine(running.Engine, submitted.Engine)...)
-	out = append(out, diffPlugins(running.Plugins, submitted.Plugins)...)
-	out = append(out, diffBlocks("pipelines", pipelineFingerprints(running.Pipelines), pipelineFingerprints(submitted.Pipelines), EffectImmediate)...)
+	out = append(out, diffStages(running, submitted)...)
+	out = append(out, diffPlugins(running.Plugins(), submitted.Plugins())...)
+	out = append(out, diffBlocks("step", stepFingerprints(running.Steps()), stepFingerprints(submitted.Steps()), EffectImmediate)...)
 	out = append(out, diffBlocks("exporter", exporterFingerprints(running.Exporters), exporterFingerprints(submitted.Exporters), EffectImmediate)...)
 
 	sort.SliceStable(out, func(a, b int) bool { return out[a].Path < out[b].Path })
@@ -187,10 +187,10 @@ func diffItems(running, submitted []*Item) Changes {
 	return out
 }
 
-func diffEngine(running, submitted *Engine) Changes {
+func diffStages(running, submitted *Job) Changes {
 	var out Changes
 
-	for path, pair := range engineFields(running, submitted) {
+	for path, pair := range stageFields(running, submitted) {
 		if pair[0] != pair[1] {
 			out = append(out, Change{Path: path, From: pair[0], To: pair[1], Effect: EffectImmediate})
 		}
@@ -198,32 +198,25 @@ func diffEngine(running, submitted *Engine) Changes {
 	return out
 }
 
-// engineFields flattens both engines to comparable strings.
+// stageFields flattens both jobs' stage settings to comparable strings.
 //
 // Everything here is free to change: a budget, a delay and a user agent are
 // read per request, so the next request simply reads the new one.
-func engineFields(running, submitted *Engine) map[string][2]string {
-	var a, b *Limits
-	var p, q *Politeness
-	var c, d *Components
-
-	if running != nil {
-		a, p, c = running.Limits, running.Politeness, running.Components
-	}
-	if submitted != nil {
-		b, q, d = submitted.Limits, submitted.Politeness, submitted.Components
-	}
-
+func stageFields(a, b *Job) map[string][2]string {
 	return map[string][2]string{
-		"engine.limits.max_pages":       {itoa(a.Pages()), itoa(b.Pages())},
-		"engine.limits.max_depth":       {itoa(a.Depth()), itoa(b.Depth())},
-		"engine.limits.max_body_bytes":  {i64toa(a.BodyBytes()), i64toa(b.BodyBytes())},
-		"engine.limits.max_time":        {durationOf(a), durationOf(b)},
-		"engine.politeness.rate":        {rateOf(p), rateOf(q)},
-		"engine.politeness.concurrency": {itoa(p.Parallelism()), itoa(q.Parallelism())},
-		"engine.politeness.robots":      {btoa(p.ObeysRobots()), btoa(q.ObeysRobots())},
-		"engine.politeness.user_agent":  {p.Agent(), q.Agent()},
-		"engine.components.external":    {strings.Join(externalOf(c), ","), strings.Join(externalOf(d), ",")},
+		"scheduler.policy":      {a.Scheduler.OrderPolicy(), b.Scheduler.OrderPolicy()},
+		"scheduler.rate":        {rateOf(a.Scheduler), rateOf(b.Scheduler)},
+		"scheduler.concurrency": {itoa(a.Scheduler.Parallelism()), itoa(b.Scheduler.Parallelism())},
+		"scheduler.max_depth":   {itoa(a.Scheduler.Depth()), itoa(b.Scheduler.Depth())},
+		"scheduler.max_pages":   {itoa(a.Scheduler.Pages()), itoa(b.Scheduler.Pages())},
+		"scheduler.max_time":    {budgetOf(a.Scheduler), budgetOf(b.Scheduler)},
+		"downloader.robots":     {btoa(a.Downloader.ObeysRobots()), btoa(b.Downloader.ObeysRobots())},
+		"downloader.user_agent": {a.Downloader.Agent(), b.Downloader.Agent()},
+		"downloader.timeout":    {timeoutOf(a.Downloader), timeoutOf(b.Downloader)},
+		"downloader.max_body":   {i64toa(a.Downloader.BodyBytes()), i64toa(b.Downloader.BodyBytes())},
+		"downloader.external":   {btoa(a.Downloader.IsExternal()), btoa(b.Downloader.IsExternal())},
+		"spider.external":       {btoa(a.Spider.IsExternal()), btoa(b.Spider.IsExternal())},
+		"pipeline.external":     {btoa(a.Pipeline.IsExternal()), btoa(b.Pipeline.IsExternal())},
 	}
 }
 
@@ -232,11 +225,11 @@ func diffPlugins(running, submitted []*Plugin) Changes {
 
 	was := map[string]*Plugin{}
 	for _, p := range running {
-		was[p.Stage+"."+p.Name] = p
+		was[string(p.Stage())+"."+p.Name] = p
 	}
 	now := map[string]*Plugin{}
 	for _, p := range submitted {
-		now[p.Stage+"."+p.Name] = p
+		now[string(p.Stage())+"."+p.Name] = p
 	}
 
 	for _, key := range sortedPluginKeys(now) {
@@ -260,7 +253,7 @@ func diffPlugins(running, submitted []*Plugin) Changes {
 // effectOfPlugin is immediate for everything except the cache, which is the one
 // plugin whose configuration says where work already done is kept.
 func effectOfPlugin(p *Plugin) Effect {
-	if Stage(p.Stage) == StageDownloader && p.Name == "cache" {
+	if p.Stage() == StageDownloader && p.Name == "cache" {
 		return EffectCacheMoved
 	}
 	return EffectImmediate
@@ -293,10 +286,10 @@ func diffBlocks(kind string, was, now map[string]string, effect Effect) Changes 
 // alternative would be for this package to know every plugin's schema, which is
 // the coupling the opaque body exists to avoid.
 func (j *Job) snapshot(src []byte) {
-	for _, p := range j.Plugins {
+	for _, p := range j.Plugins() {
 		p.raw = bodyText(src, p.Config)
 	}
-	for _, p := range j.Pipelines {
+	for _, p := range j.Steps() {
 		p.raw = bodyText(src, p.Config)
 	}
 	for _, e := range j.Exporters {
@@ -321,9 +314,9 @@ func (p *Plugin) fingerprint() string {
 	return fmt.Sprintf("%d|%v|%s", p.Order, p.Enabled != nil && !*p.Enabled, p.raw)
 }
 
-func pipelineFingerprints(pipelines []*Pipeline) map[string]string {
-	out := make(map[string]string, len(pipelines))
-	for _, p := range pipelines {
+func stepFingerprints(steps []*Step) map[string]string {
+	out := make(map[string]string, len(steps))
+	for _, p := range steps {
 		reqs := append([]string(nil), p.requires...)
 		sort.Strings(reqs)
 		out[p.Address()] = fmt.Sprintf("%s|%s|%s|%s", strings.Join(reqs, ","), p.Inline, p.Script, p.raw)
@@ -405,27 +398,26 @@ func itoa(v int) string     { return fmt.Sprintf("%d", v) }
 func i64toa(v int64) string { return fmt.Sprintf("%d", v) }
 func btoa(v bool) string    { return fmt.Sprintf("%t", v) }
 
-func durationOf(l *Limits) string {
-	d, err := l.MaxTimeDuration()
+func budgetOf(s *Scheduler) string {
+	d, err := s.MaxTimeDuration()
 	if err != nil {
 		return "invalid"
 	}
 	return d.String()
 }
 
-func rateOf(p *Politeness) string {
-	d, err := p.RateDuration()
+func rateOf(s *Scheduler) string {
+	d, err := s.RateDuration()
 	if err != nil {
 		return "invalid"
 	}
 	return d.String()
 }
 
-func externalOf(c *Components) []string {
-	if c == nil {
-		return nil
+func timeoutOf(d *Downloader) string {
+	v, err := d.RequestTimeout()
+	if err != nil {
+		return "invalid"
 	}
-	out := append([]string(nil), c.External...)
-	sort.Strings(out)
-	return out
+	return v.String()
 }

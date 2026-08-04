@@ -220,12 +220,17 @@ func bareWords(line string) (field string, values []string, ok bool) {
 func TestNotesStageListsMatchTheCode(t *testing.T) {
 	src := notes(t)
 
-	// The pipeline is not a plugin stage, and the notes say so in two places.
+	// The pipeline is not a plugin stage. It cannot even be written now: the
+	// block holds step blocks and nothing else, so this is a parse error
+	// rather than a rule. The notes have to keep saying which spelling wins.
 	if engine.StagePipeline.ValidPlugin() {
-		t.Error("the code allows plugin \"pipeline\", which NOTES.md says is refused")
+		t.Error("the code allows pipeline plugins, which the notes say it does not")
 	}
-	if !strings.Contains(src, `Writing `+"`"+`plugin "pipeline" ...`+"`"+` is refused`) {
-		t.Error("NOTES.md no longer says that plugin \"pipeline\" is refused")
+	if !strings.Contains(src, "Not a plugin stage") {
+		t.Error("NOTES.md no longer says the pipeline is not a plugin stage")
+	}
+	if !strings.Contains(src, "step <kind> <name>") {
+		t.Error("NOTES.md no longer documents the step spelling")
 	}
 
 	// The scheduler cannot be replaced, only extended.

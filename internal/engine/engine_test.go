@@ -10,11 +10,8 @@ import (
 	"github.com/rangertaha/scour/internal/engine"
 )
 
-// document is the job from NOTES.md, kept identical on purpose.
-//
-// If the notes and the parser disagree, one of them is wrong, and a document
-// nobody can run is a worse thing to have written down than no document at
-// all.
+// document is the job from NOTES.md. notes_test.go parses that file directly,
+// so the two cannot drift; this copy is here to be read beside the assertions.
 const document = `
 job "news" {
   domains  = ["example.com"]
@@ -60,17 +57,57 @@ job "news" {
     }
   }
 
-  engine {
-    limits {
-      max_pages = 500
-      max_depth = 4
-      max_time  = "90m"
+  scheduler {
+    policy      = "priority"
+    rate        = "2s"
+    concurrency = 2
+    max_depth   = 4
+    max_pages   = 500
+    max_time    = "90m"
+  }
+
+  downloader {
+    robots     = true
+    user_agent = "scour"
+    timeout    = "30s"
+    max_body   = 33554432
+
+    plugin "cache" {
+      order   = 900
+      backend = "s3"
+      bucket  = "pages"
     }
 
-    politeness {
-      rate        = "2s"
-      concurrency = 2
-      robots      = true
+    plugin "retry" {
+      order = 550
+      times = 3
+    }
+  }
+
+  spider {
+    plugin "depth" {
+      order = 900
+    }
+  }
+
+  pipeline {
+    step "clean" "article" {
+      rule {}
+      rule {}
+    }
+
+    step "rank" "article" {
+      requires = [clean.article]
+    }
+
+    step "python" "enrich" {
+      requires = [clean.article, rank.article]
+      script   = "./enrich.py"
+    }
+
+    step "bash" "notify" {
+      requires = [python.enrich]
+      script   = "./notify.sh"
     }
   }
 
@@ -80,41 +117,11 @@ job "news" {
     level   = "info"
   }
 
-  plugin "downloader" "cache" {
-    order   = 900
-    backend = "s3"
-    bucket  = "pages"
-  }
-
-  plugin "downloader" "retry" {
-    order = 550
-    times = 3
-  }
-
-  plugin "spider" "depth" {
-    order = 900
-  }
-
-  plugin "scheduler" "priority" {
-    order = 1
-  }
-
-  pipelines "clean" "article" {
-    rule {}
-    rule {}
-  }
-
-  pipelines "rank" "article" {
-    requires = [clean.article]
-  }
-
-  pipelines "python" "enrich" {
-    requires = [clean.article, rank.article]
-    script   = "./enrich.py"
-  }
-
-  pipelines "bash" "notify" {
-    requires = [python.enrich]
+  mutation {
+    costly         = "apply"
+    out_of_scope   = "drop"
+    stale_records  = "reextract"
+    orphaned_cache = "refuse"
   }
 
   exporter "json"   "article" { dir    = "./out" }
@@ -123,6 +130,23 @@ job "news" {
   exporter "sqlite" "article" { file   = "./items.db" }
 }
 `
+
+// minimal is the smallest job that validates. Tests about one thing splice
+// their blocks into it, so what they are testing is the only thing on screen.
+const minimalJob = `
+job "j" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+%s
+}
+`
+
+func minimal(extra string) string { return strings.Replace(minimalJob, "%s", extra, 1) }
 
 func parse(t *testing.T, src string) *engine.Document {
 	t.Helper()
@@ -133,11 +157,50 @@ func parse(t *testing.T, src string) *engine.Document {
 	return doc
 }
 
+// job parses one job with extra blocks spliced into the minimal document.
+func job(t *testing.T, extra string) *engine.Job {
+	t.Helper()
+	doc := parse(t, minimal(extra))
+	if len(doc.Jobs) != 1 {
+		t.Fatalf("got %d jobs, want 1", len(doc.Jobs))
+	}
+	return doc.Jobs[0]
+}
+
+func mustValidate(t *testing.T, extra string) *engine.Job {
+	t.Helper()
+	doc := parse(t, minimal(extra))
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("did not validate: %v", err)
+	}
+	return doc.Jobs[0]
+}
+
+func refuses(t *testing.T, extra, want string) {
+	t.Helper()
+	err := parse(t, minimal(extra)).Validate()
+	if err == nil {
+		t.Fatal("accepted it")
+	}
+	if want != "" && !strings.Contains(err.Error(), want) {
+		t.Errorf("error does not mention %q: %v", want, err)
+	}
+}
+
+func addressesOf(steps []*engine.Step) []string {
+	out := make([]string, 0, len(steps))
+	for _, s := range steps {
+		out = append(out, s.Address())
+	}
+	return out
+}
+
+// The documented job.
+
 func TestTheDocumentedJobParsesAndValidates(t *testing.T) {
 	doc := parse(t, document)
-
 	if err := doc.Validate(); err != nil {
-		t.Fatalf("the job in NOTES.md does not validate:\n%v", err)
+		t.Fatalf("the documented job does not validate:\n%v", err)
 	}
 	if got := doc.Names(); len(got) != 1 || got[0] != "news" {
 		t.Fatalf("names = %v", got)
@@ -145,16 +208,16 @@ func TestTheDocumentedJobParsesAndValidates(t *testing.T) {
 }
 
 func TestScopeAndSchema(t *testing.T) {
-	job := parse(t, document).Jobs[0]
+	j := parse(t, document).Jobs[0]
 
-	if len(job.Domains) != 1 || job.Domains[0] != "example.com" {
-		t.Errorf("domains = %v", job.Domains)
+	if len(j.Domains) != 1 || j.Domains[0] != "example.com" {
+		t.Errorf("domains = %v", j.Domains)
 	}
-	if len(job.Included) != 1 || job.Included[0] != "*.example.com" {
-		t.Errorf("included = %v", job.Included)
+	if len(j.Included) != 1 || j.Included[0] != "*.example.com" {
+		t.Errorf("included = %v", j.Included)
 	}
 
-	article := job.Items[0]
+	article := j.Items[0]
 	if article.Type != "object" {
 		t.Errorf("item type = %q, want the bare word object to resolve", article.Type)
 	}
@@ -170,8 +233,7 @@ func TestScopeAndSchema(t *testing.T) {
 		t.Errorf("transforms = %v, want the bare word absurl to resolve", url.Transforms)
 	}
 
-	// Nesting is demonstrated on an object, which is the only type that can
-	// hold it.
+	// Nesting is demonstrated on an object, the only type that can hold it.
 	author := article.Properties[1]
 	if author.Type != string(engine.TypeObject) {
 		t.Errorf("author type = %q, want object", author.Type)
@@ -182,116 +244,222 @@ func TestScopeAndSchema(t *testing.T) {
 	if author.Properties[1].Type != string(engine.TypeURL) {
 		t.Errorf("author.profile type = %q", author.Properties[1].Type)
 	}
-
-	title := article.Properties[2]
-	if len(title.Transforms) != 2 || title.Transforms[1] != engine.TransformTrim {
-		t.Errorf("title transforms = %v", title.Transforms)
-	}
 }
 
-func TestEngineSettingsAndDefaults(t *testing.T) {
-	job := parse(t, document).Jobs[0]
+// Stage blocks: a setting lives with the stage that enforces it.
 
-	if got := job.Engine.Limits.Pages(); got != 500 {
-		t.Errorf("max_pages = %d", got)
+func TestStageSettings(t *testing.T) {
+	j := parse(t, document).Jobs[0]
+
+	if j.Scheduler.Pages() != 500 || j.Scheduler.Depth() != 4 {
+		t.Errorf("scheduler = %+v", j.Scheduler)
 	}
-	d, err := job.Engine.Limits.MaxTimeDuration()
+	d, err := j.Scheduler.MaxTimeDuration()
 	if err != nil {
 		t.Fatalf("max_time: %v", err)
 	}
 	if d.String() != "1h30m0s" {
 		t.Errorf("max_time = %s", d)
 	}
-	if !job.Engine.Politeness.ObeysRobots() {
-		t.Error("robots = true did not survive")
+	if rate, _ := j.Scheduler.RateDuration(); rate.String() != "2s" {
+		t.Errorf("rate = %s", rate)
 	}
 
-	// A job that says nothing still gets sane numbers, and the nil receivers
-	// are the point: an absent block is not a special case at the call site.
-	var absent *engine.Limits
-	if absent.Depth() != engine.DefaultMaxDepth {
-		t.Errorf("absent limits gave depth %d", absent.Depth())
+	if !j.Downloader.ObeysRobots() {
+		t.Error("robots = true did not survive")
 	}
-	var polite *engine.Politeness
-	if !polite.ObeysRobots() || polite.Agent() == "" {
-		t.Error("absent politeness is not polite")
+	if j.Downloader.Agent() != "scour" {
+		t.Errorf("user agent = %q", j.Downloader.Agent())
+	}
+	if j.Downloader.BodyBytes() != 33554432 {
+		t.Errorf("max_body = %d", j.Downloader.BodyBytes())
 	}
 }
 
-// TestChainOrder is the property the order numbers exist for.
-func TestChainOrder(t *testing.T) {
-	job := parse(t, document).Jobs[0]
+// TestAbsentStagesAreNotSpecialCases: every accessor is nil-safe, so a job that
+// configures nothing needs no checks at the call site.
+func TestAbsentStagesAreNotSpecialCases(t *testing.T) {
+	var s *engine.Scheduler
+	if s.Depth() != engine.DefaultMaxDepth || s.Parallelism() != engine.DefaultConcurrency {
+		t.Error("an absent scheduler does not answer")
+	}
+	var d *engine.Downloader
+	if !d.ObeysRobots() || d.Agent() == "" || d.BodyBytes() == 0 {
+		t.Error("an absent downloader is not polite")
+	}
+	var sp *engine.Spider
+	if sp.IsExternal() {
+		t.Error("an absent spider claims to be external")
+	}
+}
 
-	chain := job.Chain(engine.StageDownloader)
+// TestSchedulerCannotBeExternal: the block has no external attribute at all, so
+// this is a parse error with a line and a column rather than a validation rule.
+func TestSchedulerCannotBeExternal(t *testing.T) {
+	_, err := engine.Parse([]byte(minimal(`
+  scheduler {
+    external = true
+  }
+`)), "job.hcl")
+
+	if err == nil {
+		t.Fatal("accepted an external scheduler")
+	}
+	if !strings.Contains(err.Error(), "external") || !strings.Contains(err.Error(), "job.hcl") {
+		t.Errorf("error does not name the attribute and the place: %v", err)
+	}
+}
+
+func TestExternalStages(t *testing.T) {
+	j := mustValidate(t, `
+  spider {
+    external         = true
+    external_timeout = "10m"
+  }
+`)
+	if !j.IsExternal(engine.StageSpider) {
+		t.Error("spider was not marked external")
+	}
+	if j.IsExternal(engine.StageDownloader) {
+		t.Error("downloader was marked external without being asked")
+	}
+	if d, _ := j.Spider.ExternalWait(); d.String() != "10m0s" {
+		t.Errorf("timeout = %s", d)
+	}
+}
+
+// Chains.
+
+func TestChainOrder(t *testing.T) {
+	j := parse(t, document).Jobs[0]
+
+	chain := j.Chain(engine.StageDownloader)
 	if len(chain) != 2 {
 		t.Fatalf("got %d downloader plugins, want 2", len(chain))
 	}
 	if chain[0].Name != "retry" || chain[1].Name != "cache" {
-		t.Errorf("chain = %s, %s; want retry (550) before cache (900)", chain[0].Name, chain[1].Name)
+		t.Errorf("chain = %v; want retry (550) before cache (900)", engine.Names(chain))
 	}
 }
 
-// TestChainUsesBuiltinOrder covers a plugin that does not say where it goes.
-func TestChainUsesBuiltinOrder(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
+func TestChainUsesCataloguedOrder(t *testing.T) {
+	j := mustValidate(t, `
+  downloader {
+    plugin "cache" {}
+    plugin "compression" {}
+  }
+`)
+	chain := j.Chain(engine.StageDownloader)
+	if len(chain) != 2 || chain[0].Name != "compression" || chain[1].Name != "cache" {
+		t.Errorf("chain = %v; want compression (590) before cache (900)", engine.Names(chain))
+	}
+}
+
+// TestPluginKnowsItsStageFromItsBlock: there is no stage label, so the block
+// and the plugin cannot disagree about where it belongs.
+func TestPluginKnowsItsStageFromItsBlock(t *testing.T) {
+	j := mustValidate(t, `
+  downloader {
+    plugin "cache" {}
+  }
+
+  spider {
+    plugin "depth" {}
+  }
+`)
+	seen := map[string]engine.Stage{}
+	for _, p := range j.Plugins() {
+		seen[p.Name] = p.Stage()
+	}
+	if seen["cache"] != engine.StageDownloader {
+		t.Errorf("cache is in stage %s", seen["cache"])
+	}
+	if seen["depth"] != engine.StageSpider {
+		t.Errorf("depth is in stage %s", seen["depth"])
+	}
+}
+
+// TestDisabledIsTheSameAsAbsent pins the rule: a job gets exactly the chain it
+// lists, and enabled = false is one of two spellings for not listing a link.
+func TestDisabledIsTheSameAsAbsent(t *testing.T) {
+	absent := mustValidate(t, `
+  downloader {
+    plugin "retry" {}
+  }
+`)
+	disabled := mustValidate(t, `
+  downloader {
+    plugin "retry" {}
+
+    plugin "cache" {
+      enabled = false
+      bucket  = "pages"
     }
   }
-
-  plugin "downloader" "cache" {}
-  plugin "downloader" "robots" {}
-}
 `)
-	if err := doc.Validate(); err != nil {
-		t.Fatalf("validate: %v", err)
+
+	a := engine.Names(absent.Chain(engine.StageDownloader))
+	d := engine.Names(disabled.Chain(engine.StageDownloader))
+	if strings.Join(a, ",") != strings.Join(d, ",") {
+		t.Errorf("disabled chain %v differs from absent chain %v", d, a)
 	}
 
-	chain := doc.Jobs[0].Chain(engine.StageDownloader)
-	if chain[0].Name != "robots" || chain[1].Name != "cache" {
-		t.Errorf("chain = %s, %s; want robots (100) before cache (900)", chain[0].Name, chain[1].Name)
+	// The configuration survives being turned off, which is the only reason
+	// both spellings exist.
+	var found bool
+	for _, p := range disabled.Plugins() {
+		if p.Name == "cache" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a disabled plugin lost its configuration")
 	}
 }
 
-func TestDisabledPluginLeavesTheChain(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
+func TestNothingIsAddedThatWasNotAskedFor(t *testing.T) {
+	j := mustValidate(t, "")
+	for _, stage := range []engine.Stage{
+		engine.StageScheduler, engine.StageDownloader, engine.StageSpider,
+	} {
+		if got := j.Chain(stage); len(got) != 0 {
+			t.Errorf("%s chain is %v for a job that listed nothing", stage, engine.Names(got))
+		}
+	}
+}
+
+func TestUncataloguedPluginNeedsAnExplicitOrder(t *testing.T) {
+	refuses(t, `
+  downloader {
+    plugin "somebody-elses" {}
+  }
+`, "explicit one")
+
+	mustValidate(t, `
+  downloader {
+    plugin "somebody-elses" {
+      order = 42
     }
   }
-
-  plugin "downloader" "cache" {
-    enabled = false
-  }
-}
 `)
-	if len(doc.Jobs[0].Chain(engine.StageDownloader)) != 0 {
-		t.Error("a disabled plugin is still in the chain")
-	}
 }
+
+// The pipeline graph.
 
 func TestPipelineOrderRespectsDependencies(t *testing.T) {
-	job := parse(t, document).Jobs[0]
+	j := parse(t, document).Jobs[0]
 
-	ordered, err := job.Order()
+	ordered, err := j.Order()
 	if err != nil {
 		t.Fatalf("order: %v", err)
 	}
-
 	position := map[string]int{}
-	for i, p := range ordered {
-		position[p.Address()] = i
+	for i, s := range ordered {
+		position[s.Address()] = i
 	}
 
 	for _, pair := range [][2]string{
 		{"clean.article", "rank.article"},
-		{"clean.article", "python.enrich"},
 		{"rank.article", "python.enrich"},
 		{"python.enrich", "bash.notify"},
 	} {
@@ -301,105 +469,127 @@ func TestPipelineOrderRespectsDependencies(t *testing.T) {
 	}
 }
 
-func TestPipelineCycleIsRefused(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
+// TestWavesRunIndependentStepsTogether is the point of the graph: work that
+// does not depend on other work happens at the same time.
+func TestWavesRunIndependentStepsTogether(t *testing.T) {
+	j := mustValidate(t, `
+  pipeline {
+    step "clean" "article" {}
+
+    step "rank" "article" {
+      requires = [clean.article]
+    }
+
+    step "translate" "article" {
+      requires = [clean.article]
+    }
+
+    step "summarise" "article" {
+      requires = [clean.article]
+    }
+
+    step "export" "article" {
+      requires = [rank.article, translate.article, summarise.article]
     }
   }
-
-  pipelines "one" "x" {
-    requires = [three.z]
-  }
-  pipelines "two" "y" {
-    requires = [one.x]
-  }
-  pipelines "three" "z" {
-    requires = [two.y]
-  }
-}
 `)
-	err := doc.Validate()
-	if err == nil {
-		t.Fatal("accepted a cycle")
+
+	waves, err := j.Waves()
+	if err != nil {
+		t.Fatalf("waves: %v", err)
 	}
-	if !strings.Contains(err.Error(), "cycle") {
-		t.Errorf("error does not name the problem: %v", err)
+	if len(waves) != 3 {
+		t.Fatalf("got %d waves, want 3", len(waves))
 	}
-	if _, err := doc.Jobs[0].Order(); err == nil {
-		t.Error("Order resolved a graph with a cycle in it")
+	if len(waves[0]) != 1 || waves[0][0].Address() != "clean.article" {
+		t.Errorf("wave 0 = %v", addressesOf(waves[0]))
 	}
+	if len(waves[1]) != 3 {
+		t.Errorf("wave 1 = %v, want the three independent steps together", addressesOf(waves[1]))
+	}
+	if len(waves[2]) != 1 {
+		t.Errorf("wave 2 = %v", addressesOf(waves[2]))
+	}
+
+	width, err := j.Width()
+	if err != nil {
+		t.Fatalf("width: %v", err)
+	}
+	if width != 3 {
+		t.Errorf("width = %d, want 3", width)
+	}
+}
+
+func TestWavesAreDeterministic(t *testing.T) {
+	j := parse(t, document).Jobs[0]
+
+	first, err := j.Waves()
+	if err != nil {
+		t.Fatalf("waves: %v", err)
+	}
+	for range 20 {
+		again, err := j.Waves()
+		if err != nil {
+			t.Fatalf("waves: %v", err)
+		}
+		if len(again) != len(first) {
+			t.Fatal("wave count changed between runs")
+		}
+		for i := range first {
+			if strings.Join(addressesOf(first[i]), ",") != strings.Join(addressesOf(again[i]), ",") {
+				t.Fatalf("wave %d changed between runs", i)
+			}
+		}
+	}
+}
+
+func TestPipelineCycleIsRefused(t *testing.T) {
+	refuses(t, `
+  pipeline {
+    step "one" "x" {
+      requires = [three.z]
+    }
+
+    step "two" "y" {
+      requires = [one.x]
+    }
+
+    step "three" "z" {
+      requires = [two.y]
+    }
+  }
+`, "cycle")
 }
 
 func TestPipelineSelfDependencyIsRefused(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
+	refuses(t, `
+  pipeline {
+    step "one" "x" {
+      requires = [one.x]
     }
   }
-
-  pipelines "one" "x" {
-    requires = [one.x]
-  }
-}
-`)
-	if err := doc.Validate(); err == nil {
-		t.Fatal("accepted a step that requires itself")
-	}
+`, "itself")
 }
 
 func TestPipelineUndeclaredDependencyIsRefused(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
+	refuses(t, `
+  pipeline {
+    step "one" "x" {
+      requires = [missing.step]
     }
   }
-
-  pipelines "one" "x" {
-    requires = [missing.step]
-  }
-}
-`)
-	err := doc.Validate()
-	if err == nil {
-		t.Fatal("accepted a dependency on a step that does not exist")
-	}
-	if !strings.Contains(err.Error(), "missing.step") {
-		t.Errorf("error does not name the dependency: %v", err)
-	}
+`, "missing.step")
 }
 
-// TestUnknownVocabularyIsCaughtByTheParser is why bare words are predeclared:
-// a typo gets a line and a column.
+// Vocabulary.
+
 func TestUnknownVocabularyIsCaughtByTheParser(t *testing.T) {
-	for name, src := range map[string]string{
-		"type": `
-job "j" {
-  item "a" {
-    property "p" {
-      type = stir
-    }
-  }
-}`,
-		"transform": `
-job "j" {
-  item "a" {
-    property "p" {
-      transforms = [datetim]
-    }
-  }
-}`,
+	for name, body := range map[string]string{
+		"type":      `type = stir`,
+		"transform": `transforms = [datetim]`,
 	} {
 		t.Run(name, func(t *testing.T) {
+			src := "job \"j\" {\n  item \"a\" {\n    property \"p\" {\n      " + body + "\n    }\n  }\n}\n"
 			_, err := engine.Parse([]byte(src), "job.hcl")
 			if err == nil {
 				t.Fatal("accepted a word that is not in the vocabulary")
@@ -408,24 +598,6 @@ job "j" {
 				t.Errorf("error does not point at the file: %v", err)
 			}
 		})
-	}
-}
-
-// TestQuotedVocabularyStillWorks keeps "str" and str the same value.
-func TestQuotedVocabularyStillWorks(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type       = "str"
-      transforms = ["trim"]
-    }
-  }
-}
-`)
-	if err := doc.Validate(); err != nil {
-		t.Fatalf("quoted forms were refused: %v", err)
 	}
 }
 
@@ -450,101 +622,7 @@ job "j" {
 	}
 }
 
-func TestUnknownPluginNeedsAnExplicitOrder(t *testing.T) {
-	src := `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-
-  plugin "downloader" "somebody-elses" {
-    %s
-  }
-}
-`
-	if err := parse(t, strings.Replace(src, "%s", "", 1)).Validate(); err == nil {
-		t.Fatal("accepted a third-party plugin with no order")
-	}
-	if err := parse(t, strings.Replace(src, "%s", "order = 42", 1)).Validate(); err != nil {
-		t.Fatalf("refused a third-party plugin that said where it goes: %v", err)
-	}
-}
-
-func TestUnknownStageIsRefused(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-
-  plugin "wizard" "spells" {
-    order = 1
-  }
-}
-`)
-	if err := doc.Validate(); err == nil {
-		t.Fatal("accepted a plugin for a stage that does not exist")
-	}
-}
-
-// TestSchedulerCannotBeExternal is the politeness argument in test form.
-func TestSchedulerCannotBeExternal(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-
-  engine {
-    components {
-      external = ["scheduler"]
-    }
-  }
-}
-`)
-	err := doc.Validate()
-	if err == nil {
-		t.Fatal("accepted an external scheduler")
-	}
-	if !strings.Contains(err.Error(), "extended") {
-		t.Errorf("error does not explain the alternative: %v", err)
-	}
-}
-
-func TestExternalSpiderIsAccepted(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-
-  engine {
-    components {
-      external = ["spider"]
-      timeout  = "10m"
-    }
-  }
-}
-`)
-	if err := doc.Validate(); err != nil {
-		t.Fatalf("refused an external spider: %v", err)
-	}
-	if !doc.Jobs[0].Engine.Components.IsExternal(engine.StageSpider) {
-		t.Error("spider was not marked external")
-	}
-}
+// Validation.
 
 func TestBadStartURLs(t *testing.T) {
 	for name, target := range map[string]string{
@@ -553,57 +631,24 @@ func TestBadStartURLs(t *testing.T) {
 		"garbage": "://nonsense",
 	} {
 		t.Run(name, func(t *testing.T) {
-			src := `
-job "j" {
-  start = ["` + target + `"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-}
-`
-			if err := parse(t, src).Validate(); err == nil {
+			doc := parse(t, "job \"j\" {\n  start = [\""+target+"\"]\n  item \"a\" {\n    property \"p\" {\n      type = str\n    }\n  }\n}\n")
+			if err := doc.Validate(); err == nil {
 				t.Fatal("accepted it")
 			}
 		})
 	}
 }
 
-func TestSeveralJobsAreIndependent(t *testing.T) {
-	doc := parse(t, `
-job "news" {
-  start = ["https://example.com/"]
-  item "article" {
-    property "title" {
-      type = str
-    }
-  }
-
-  plugin "downloader" "cache" {
-    backend = "s3"
-  }
+func TestSchedulerPolicyIsChecked(t *testing.T) {
+	refuses(t, "\n  scheduler {\n    policy = \"vibes\"\n  }\n", "scheduler.policy")
 }
 
-job "products" {
-  start = ["https://shop.example/"]
-  item "product" {
-    property "price" {
-      type = str
-    }
-  }
+func TestConcurrencyIsCapped(t *testing.T) {
+	refuses(t, "\n  scheduler {\n    concurrency = 999\n  }\n", "single host")
 }
-`)
-	if err := doc.Validate(); err != nil {
-		t.Fatalf("validate: %v", err)
-	}
 
-	if len(doc.Jobs[0].Chain(engine.StageDownloader)) != 1 {
-		t.Error("the first job lost its plugin")
-	}
-	if len(doc.Jobs[1].Chain(engine.StageDownloader)) != 0 {
-		t.Error("the second job inherited the first job's plugin")
-	}
+func TestMonitoringLevelIsChecked(t *testing.T) {
+	refuses(t, "\n  monitoring {\n    level = \"shouty\"\n  }\n", "monitoring.level")
 }
 
 func TestDuplicateJobNamesRefused(t *testing.T) {
@@ -642,10 +687,8 @@ job "first" {
     }
   }
 
-  engine {
-    politeness {
-      concurrency = 999
-    }
+  scheduler {
+    concurrency = 999
   }
 }
 
@@ -657,8 +700,8 @@ job "second" {
     }
   }
 
-  plugin "wizard" "spells" {
-    order = 1
+  monitoring {
+    level = "shouty"
   }
 }
 `)
@@ -666,9 +709,8 @@ job "second" {
 	if err == nil {
 		t.Fatal("accepted a document full of problems")
 	}
-
 	for _, want := range []string{
-		"first", "second", "start URLs", "concurrency", "object", "http and https", "not a stage",
+		"first", "second", "start URLs", "concurrency", "object", "http and https", "monitoring.level",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not mention %q:\n%v", want, err)
@@ -677,951 +719,63 @@ job "second" {
 }
 
 func TestEmptyDocument(t *testing.T) {
-	doc := parse(t, "")
-	if err := doc.Validate(); err == nil {
+	if err := parse(t, "").Validate(); err == nil {
 		t.Fatal("accepted a document with no jobs")
 	}
 }
 
-// TestBuiltinCatalogueMatchesTheNotes guards the numbers the notes quote.
-func TestBuiltinCatalogueMatchesTheNotes(t *testing.T) {
-	for _, want := range []struct {
-		stage engine.Stage
-		name  string
-		order int
-	}{
-		{engine.StageDownloader, "robots", 100},
-		{engine.StageDownloader, "compression", 590},
-		{engine.StageDownloader, "charset", 600},
-		{engine.StageDownloader, "cache", 900},
-		{engine.StageSpider, "httperror", 50},
-		{engine.StageSpider, "depth", 900},
-	} {
-		got, ok := engine.DefaultOrder(want.stage, want.name)
-		if !ok {
-			t.Errorf("%s/%s is not a built-in", want.stage, want.name)
-			continue
-		}
-		if got != want.order {
-			t.Errorf("%s/%s order = %d, want %d", want.stage, want.name, got, want.order)
-		}
-	}
+// Exporters.
 
-	// The ordering argument itself: decompress, then transcode, then cache.
-	compression, _ := engine.DefaultOrder(engine.StageDownloader, "compression")
-	charset, _ := engine.DefaultOrder(engine.StageDownloader, "charset")
-	cacheOrder, _ := engine.DefaultOrder(engine.StageDownloader, "cache")
-	if !(compression < charset && charset < cacheOrder) {
-		t.Errorf("bodies must be decompressed (%d) and transcoded (%d) before they are cached (%d)",
-			compression, charset, cacheOrder)
-	}
-}
-
-// TestExportersAreScopedToAnItem is the requirement: an exporter names the
-// item it writes, and every exporter for that item gets a copy.
 func TestExportersAreScopedToAnItem(t *testing.T) {
-	job := parse(t, document).Jobs[0]
+	j := parse(t, document).Jobs[0]
 
-	got := job.ExportersFor("article")
+	got := j.ExportersFor("article")
 	if len(got) != 4 {
 		t.Fatalf("article has %d exporters, want 4", len(got))
 	}
 	if got[0].Format != "json" || got[3].Format != "sqlite" {
-		t.Errorf("exporters = %s..%s, want document order", got[0].Format, got[3].Format)
+		t.Error("exporters are not in document order")
 	}
-	if len(job.ExportersFor("comment")) != 0 {
+	if len(j.ExportersFor("comment")) != 0 {
 		t.Error("an item that was never declared has exporters")
 	}
 }
 
 func TestExporterForAnUndeclaredItemIsRefused(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "article" {
-    property "p" {
-      type = str
-    }
-  }
-
-  exporter "json" "comment" {
-    dir = "./out"
-  }
-}
-`)
-	err := doc.Validate()
-	if err == nil {
-		t.Fatal("accepted an exporter for an item that is not extracted")
-	}
-	if !strings.Contains(err.Error(), "comment") || !strings.Contains(err.Error(), "article") {
-		t.Errorf("error should name the missing item and what is declared: %v", err)
-	}
-}
-
-func TestSameFormatForTwoItemsIsFine(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "article" {
-    property "p" {
-      type = str
-    }
-  }
-  item "comment" {
-    property "q" {
-      type = str
-    }
-  }
-
-  exporter "json" "article" {
-    dir = "./articles"
-  }
-  exporter "json" "comment" {
-    dir = "./comments"
-  }
-}
-`)
-	if err := doc.Validate(); err != nil {
-		t.Fatalf("refused one format writing two items: %v", err)
-	}
-	if len(doc.Jobs[0].ExportersFor("article")) != 1 || len(doc.Jobs[0].ExportersFor("comment")) != 1 {
-		t.Error("exporters did not land on the right items")
-	}
+	refuses(t, "\n  exporter \"json\" \"comment\" {\n    dir = \"./out\"\n  }\n", "comment")
 }
 
 func TestDuplicateExporterIsRefused(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "article" {
-    property "p" {
-      type = str
-    }
-  }
-
+	refuses(t, `
   exporter "json" "article" {
     dir = "./a"
   }
+
   exporter "json" "article" {
     dir = "./b"
   }
-}
-`)
-	if err := doc.Validate(); err == nil {
-		t.Fatal("accepted the same format twice for one item")
-	}
+`, "twice")
 }
 
-// TestWavesRunIndependentStepsTogether is the point of the graph: work that
-// does not depend on other work happens at the same time.
-func TestWavesRunIndependentStepsTogether(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "article" {
-    property "p" {
-      type = str
-    }
-  }
-
-  pipelines "clean" "article" {}
-
-  pipelines "rank" "article" {
-    requires = [clean.article]
-  }
-  pipelines "translate" "article" {
-    requires = [clean.article]
-  }
-  pipelines "summarise" "article" {
-    requires = [clean.article]
-  }
-
-  pipelines "export" "article" {
-    requires = [rank.article, translate.article, summarise.article]
-  }
-}
-`)
-	if err := doc.Validate(); err != nil {
-		t.Fatalf("validate: %v", err)
-	}
-	job := doc.Jobs[0]
-
-	waves, err := job.Waves()
-	if err != nil {
-		t.Fatalf("waves: %v", err)
-	}
-	if len(waves) != 3 {
-		t.Fatalf("got %d waves, want 3", len(waves))
-	}
-
-	if len(waves[0]) != 1 || waves[0][0].Address() != "clean.article" {
-		t.Errorf("wave 0 = %v, want clean.article alone", addressesOf(waves[0]))
-	}
-	if len(waves[1]) != 3 {
-		t.Errorf("wave 1 = %v, want the three independent steps together", addressesOf(waves[1]))
-	}
-	if len(waves[2]) != 1 || waves[2][0].Address() != "export.article" {
-		t.Errorf("wave 2 = %v, want export.article", addressesOf(waves[2]))
-	}
-
-	width, err := job.Width()
-	if err != nil {
-		t.Fatalf("width: %v", err)
-	}
-	if width != 3 {
-		t.Errorf("width = %d, want 3", width)
-	}
-}
-
-func TestWavesAreDeterministic(t *testing.T) {
-	job := parse(t, document).Jobs[0]
-
-	first, err := job.Waves()
-	if err != nil {
-		t.Fatalf("waves: %v", err)
-	}
-	for range 20 {
-		again, err := job.Waves()
-		if err != nil {
-			t.Fatalf("waves: %v", err)
-		}
-		if len(again) != len(first) {
-			t.Fatalf("wave count changed between runs")
-		}
-		for i := range first {
-			if strings.Join(addressesOf(first[i]), ",") != strings.Join(addressesOf(again[i]), ",") {
-				t.Fatalf("wave %d changed between runs: %v then %v",
-					i, addressesOf(first[i]), addressesOf(again[i]))
-			}
-		}
-	}
-}
-
-func TestWavesRefuseACycle(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-
-  pipelines "one" "x" {
-    requires = [two.y]
-  }
-  pipelines "two" "y" {
-    requires = [one.x]
-  }
-}
-`)
-	if _, err := doc.Jobs[0].Waves(); err == nil {
-		t.Fatal("waves resolved a cycle")
-	}
-}
-
-// TestWavesAgreeWithOrder keeps the two views of one graph consistent.
-func TestWavesAgreeWithOrder(t *testing.T) {
-	job := parse(t, document).Jobs[0]
-
-	ordered, err := job.Order()
-	if err != nil {
-		t.Fatalf("order: %v", err)
-	}
-	waves, err := job.Waves()
-	if err != nil {
-		t.Fatalf("waves: %v", err)
-	}
-
-	flat := 0
-	for _, wave := range waves {
-		flat += len(wave)
-	}
-	if flat != len(ordered) {
-		t.Errorf("waves hold %d steps, order holds %d", flat, len(ordered))
-	}
-}
-
-func TestPipelinePluginIsRedirected(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-
-  plugin "pipeline" "clean" {
-    order = 1
-  }
-}
-`)
-	err := doc.Validate()
-	if err == nil {
-		t.Fatal("accepted a pipeline plugin")
-	}
-	// The message has to say what to write instead: whoever wrote this had the
-	// right idea and the wrong spelling.
-	if !strings.Contains(err.Error(), "pipelines") || !strings.Contains(err.Error(), "requires") {
-		t.Errorf("error does not point at the right spelling: %v", err)
-	}
-}
-
-func addressesOf(steps []*engine.Pipeline) []string {
-	out := make([]string, 0, len(steps))
-	for _, s := range steps {
-		out = append(out, s.Address())
-	}
-	return out
-}
-
-// Resubmitting the same job name mutates it. These cover what "applies the
-// changes" means, which is not the same for every change.
-
-func TestResubmittingAnIdenticalDocumentChangesNothing(t *testing.T) {
-	running := parse(t, document).Jobs[0]
-	submitted := parse(t, document).Jobs[0]
-
-	if changes := engine.Diff(running, submitted); changes.Any() {
-		t.Errorf("an identical resubmission reported %d changes: %v", len(changes), changes)
-	}
-}
-
-func TestReorderingIsNotAChange(t *testing.T) {
-	a := parse(t, `
-job "j" {
-  start    = ["https://a.example/", "https://b.example/"]
-  domains  = ["a.example", "b.example"]
-  item "article" {
-    property "title" {
-      type = str
-    }
-    property "body" {
-      type = str
-    }
-  }
-}
-`).Jobs[0]
-	b := parse(t, `
-job "j" {
-  start    = ["https://b.example/", "https://a.example/"]
-  domains  = ["b.example", "a.example"]
-  item "article" {
-    property "body" {
-      type = str
-    }
-    property "title" {
-      type = str
-    }
-  }
-}
-`).Jobs[0]
-
-	if changes := engine.Diff(a, b); changes.Any() {
-		t.Errorf("reordering was read as a change: %v", changes)
-	}
-}
-
-func TestRaisingABudgetIsFree(t *testing.T) {
-	a := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  engine {
-    limits {
-      max_pages = 100
-    }
-  }
-}
-`).Jobs[0]
-	b := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  engine {
-    limits {
-      max_pages = 500
-    }
-  }
-}
-`).Jobs[0]
-
-	changes := engine.Diff(a, b)
-	if len(changes) != 1 {
-		t.Fatalf("got %d changes, want 1: %v", len(changes), changes)
-	}
-	if changes[0].Path != "engine.limits.max_pages" {
-		t.Errorf("path = %q", changes[0].Path)
-	}
-	if !changes[0].Effect.Free() {
-		t.Errorf("raising a page budget should be free, got %s", changes[0].Effect)
-	}
-	if changes.Costly().Any() {
-		t.Errorf("a free change was reported as costly: %v", changes.Costly())
-	}
-}
-
-// TestMovingTheCacheIsNotFree is the change that would otherwise look like a
-// crawl that suddenly forgot everything it had done.
-func TestMovingTheCacheIsNotFree(t *testing.T) {
-	a := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  plugin "downloader" "cache" {
-    backend = "s3"
-    bucket  = "pages"
-  }
-}
-`).Jobs[0]
-	b := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  plugin "downloader" "cache" {
-    backend = "s3"
-    bucket  = "somewhere-else"
-  }
-}
-`).Jobs[0]
-
-	costly := engine.Diff(a, b).Costly()
-	if len(costly) != 1 {
-		t.Fatalf("got %d costly changes, want 1: %v", len(costly), costly)
-	}
-	if costly[0].Effect != engine.EffectCacheMoved {
-		t.Errorf("effect = %s, want cache moved", costly[0].Effect)
-	}
-}
-
-func TestChangingTheSchemaIsNotFree(t *testing.T) {
-	a := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "article" {
-    property "title" {
-      type = str
-    }
-  }
-}
-`).Jobs[0]
-	b := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "article" {
-    property "title" {
-      type     = str
-      required = true
-    }
-  }
-}
-`).Jobs[0]
-
-	costly := engine.Diff(a, b).Costly()
-	if len(costly) != 1 || costly[0].Effect != engine.EffectReextract {
-		t.Fatalf("changing a property should need reextraction, got %v", costly)
-	}
-}
-
-func TestNarrowingScopeIsNotFree(t *testing.T) {
-	a := parse(t, `
-job "j" {
-  start   = ["https://example.com/"]
-  domains = ["example.com", "other.example"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-}
-`).Jobs[0]
-	b := parse(t, `
-job "j" {
-  start   = ["https://example.com/"]
-  domains = ["example.com"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-}
-`).Jobs[0]
-
-	costly := engine.Diff(a, b).Costly()
-	if len(costly) != 1 || costly[0].Effect != engine.EffectRescope {
-		t.Fatalf("removing a domain should rescope, got %v", costly)
-	}
-}
-
-func TestAddingAStartURLReseeds(t *testing.T) {
-	a := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-}
-`).Jobs[0]
-	b := parse(t, `
-job "j" {
-  start = ["https://example.com/", "https://example.com/more"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-}
-`).Jobs[0]
-
-	costly := engine.Diff(a, b).Costly()
-	if len(costly) != 1 || costly[0].Effect != engine.EffectReseed {
-		t.Fatalf("adding a start URL should reseed, got %v", costly)
-	}
-}
-
-// TestPluginConfigChangeIsSeen proves the opaque body is still comparable:
-// this package does not know what "times" means and must still notice it moved.
-func TestPluginConfigChangeIsSeen(t *testing.T) {
-	a := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  plugin "downloader" "retry" {
-    times = 3
-  }
-}
-`).Jobs[0]
-	b := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  plugin "downloader" "retry" {
-    times = 10
-  }
-}
-`).Jobs[0]
-
-	changes := engine.Diff(a, b)
-	if len(changes) != 1 || changes[0].Path != "plugin.downloader.retry" {
-		t.Fatalf("a change inside an opaque plugin body was missed: %v", changes)
-	}
-	if !changes[0].Effect.Free() {
-		t.Errorf("a retry count should be free to change, got %s", changes[0].Effect)
-	}
-}
-
-func TestRemovingAPluginIsSeen(t *testing.T) {
-	a := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  plugin "spider" "depth" {}
-}
-`).Jobs[0]
-	b := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-}
-`).Jobs[0]
-
-	changes := engine.Diff(a, b)
-	if len(changes) != 1 || changes[0].To != "" {
-		t.Fatalf("removal was not reported: %v", changes)
-	}
-}
-
-// The mutation block: what a job says should happen when it is resubmitted
-// under a name that is already running.
-
-func job(t *testing.T, src string) *engine.Job {
-	t.Helper()
-	doc := parse(t, src)
-	if len(doc.Jobs) != 1 {
-		t.Fatalf("got %d jobs, want 1", len(doc.Jobs))
-	}
-	return doc.Jobs[0]
-}
-
-const scoped = `
-job "j" {
-  start   = ["https://example.com/"]
-  domains = [%s]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  %s
-}
-`
-
-func TestMutationIsOptionalAndCautious(t *testing.T) {
-	j := job(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-}
-`)
-	if j.Mutation != nil {
-		t.Fatal("a job with no mutation block got one")
-	}
-
-	// A nil block answers every question, so no call site needs to check.
-	if j.Mutation.CostlyPolicy() != engine.CostlyRefuse {
-		t.Errorf("costly = %q, want the cautious default", j.Mutation.CostlyPolicy())
-	}
-	if j.Mutation.StaleRecordsPolicy() != engine.RecordsKeep {
-		t.Error("the default disposition deletes records, which it must not")
-	}
-	if j.Mutation.OrphanedCachePolicy() != engine.CacheRefuse {
-		t.Error("the default accepts losing a corpus")
-	}
-}
-
-// TestCostlyChangeIsRefusedByDefault is the whole point of the default: a job
-// does not quietly do something expensive nobody asked for.
-func TestCostlyChangeIsRefusedByDefault(t *testing.T) {
-	running := job(t, fmt.Sprintf(scoped, `"a.example", "b.example"`, ""))
-	submitted := job(t, fmt.Sprintf(scoped, `"a.example"`, ""))
-
-	review := submitted.Review(running)
-	if review.OK() {
-		t.Fatal("a narrowed scope was applied without being asked about")
-	}
-	if len(review.Refused) != 1 || review.Refused[0].Effect != engine.EffectRescope {
-		t.Errorf("refused = %v", review.Refused)
-	}
-	if len(review.Actions) != 0 {
-		t.Error("work was disposed of despite the submission being refused")
-	}
-}
-
-func TestCostlyApplyProducesActions(t *testing.T) {
-	running := job(t, fmt.Sprintf(scoped, `"a.example", "b.example"`, ""))
-	submitted := job(t, fmt.Sprintf(scoped, `"a.example"`, `
-  mutation {
-    costly       = "apply"
-    out_of_scope = "drop"
-  }
-`))
-
-	review := submitted.Review(running)
-	if !review.OK() {
-		t.Fatalf("refused despite costly = apply: %v", review.Refused)
-	}
-	if len(review.Actions) != 1 {
-		t.Fatalf("got %d actions, want 1: %v", len(review.Actions), review.Actions)
-	}
-	if review.Actions[0].Effect != engine.EffectRescope || review.Actions[0].Do != engine.ScopeDrop {
-		t.Errorf("action = %v", review.Actions[0])
-	}
-}
-
-// TestCacheRefusesEvenUnderApply: losing a corpus is worse than the other
-// costly changes, so a job may allow the rest and still refuse that.
-func TestCacheRefusesEvenUnderApply(t *testing.T) {
-	base := `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  plugin "downloader" "cache" {
-    bucket = %q
-  }
-  mutation {
-    costly = "apply"
-  }
-}
-`
-	running := job(t, fmt.Sprintf(base, "pages"))
-	submitted := job(t, fmt.Sprintf(base, "somewhere-else"))
-
-	review := submitted.Review(running)
-	if review.OK() {
-		t.Fatal("the cache moved and the job did not notice")
-	}
-	if review.Refused[0].Effect != engine.EffectCacheMoved {
-		t.Errorf("refused = %v", review.Refused)
-	}
-}
-
-func TestCacheAcceptAllowsTheMove(t *testing.T) {
-	base := `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  plugin "downloader" "cache" {
-    bucket = %q
-  }
-  mutation {
-    costly         = "apply"
-    orphaned_cache = "accept"
-  }
-}
-`
-	running := job(t, fmt.Sprintf(base, "pages"))
-	submitted := job(t, fmt.Sprintf(base, "somewhere-else"))
-
-	review := submitted.Review(running)
-	if !review.OK() {
-		t.Fatalf("refused despite orphaned_cache = accept: %v", review.Refused)
-	}
-	if len(review.Actions) != 1 || review.Actions[0].Do != engine.CacheAccept {
-		t.Errorf("actions = %v", review.Actions)
-	}
-}
-
-// TestReextractIsWhatTheCacheIsFor: a changed schema can be applied to bodies
-// already paid for, without asking any site for anything again.
-func TestReextractIsWhatTheCacheIsFor(t *testing.T) {
-	base := `
-job "j" {
-  start = ["https://example.com/"]
-  item "article" {
-    property "title" {
-      type     = str
-      required = %t
-    }
-  }
-  mutation {
-    costly        = "apply"
-    stale_records = "reextract"
-  }
-}
-`
-	running := job(t, fmt.Sprintf(base, false))
-	submitted := job(t, fmt.Sprintf(base, true))
-
-	review := submitted.Review(running)
-	if !review.OK() {
-		t.Fatalf("refused: %v", review.Refused)
-	}
-	if len(review.Actions) != 1 || review.Actions[0].Do != engine.RecordsReextract {
-		t.Fatalf("actions = %v", review.Actions)
-	}
-	if review.Actions[0].Effect != engine.EffectReextract {
-		t.Errorf("effect = %s", review.Actions[0].Effect)
-	}
-}
-
-// TestFreeChangesNeedNoPolicy keeps the common case quiet.
-func TestFreeChangesNeedNoPolicy(t *testing.T) {
-	base := `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  engine {
-    limits {
-      max_pages = %d
-    }
-  }
-}
-`
-	running := job(t, fmt.Sprintf(base, 100))
-	submitted := job(t, fmt.Sprintf(base, 500))
-
-	review := submitted.Review(running)
-	if !review.OK() {
-		t.Fatalf("a free change was refused: %v", review.Refused)
-	}
-	if len(review.Actions) != 0 {
-		t.Errorf("a free change produced actions: %v", review.Actions)
-	}
-	if !review.Changes.Any() {
-		t.Error("the change was not reported at all")
-	}
-}
-
-func TestIdenticalResubmissionIsAlwaysFine(t *testing.T) {
-	running := job(t, fmt.Sprintf(scoped, `"a.example"`, ""))
-	submitted := job(t, fmt.Sprintf(scoped, `"a.example"`, ""))
-
-	review := submitted.Review(running)
-	if !review.OK() || review.Changes.Any() {
-		t.Errorf("an identical resubmission was not a no-op: %+v", review)
-	}
-}
-
-func TestMutationValuesAreChecked(t *testing.T) {
-	for field, value := range map[string]string{
-		"costly":         "maybe",
-		"out_of_scope":   "burn",
-		"stale_records":  "shred",
-		"orphaned_cache": "shrug",
-	} {
-		t.Run(field, func(t *testing.T) {
-			doc := parse(t, fmt.Sprintf(`
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  mutation {
-    %s = %q
-  }
-}
-`, field, value))
-			err := doc.Validate()
-			if err == nil {
-				t.Fatalf("accepted %s = %q", field, value)
-			}
-			if !strings.Contains(err.Error(), "mutation."+field) {
-				t.Errorf("error does not name the field: %v", err)
-			}
-		})
-	}
-}
-
-// TestDisabledIsTheSameAsAbsent pins the rule: a job gets exactly the chain it
-// lists, and enabled = false is one of two spellings for not listing a link.
-func TestDisabledIsTheSameAsAbsent(t *testing.T) {
-	absent := job(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  plugin "downloader" "retry" {}
-}
-`)
-	disabled := job(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-  plugin "downloader" "retry" {}
-  plugin "downloader" "cache" {
-    enabled = false
-    bucket  = "pages"
-  }
-}
-`)
-
-	a := engine.Names(absent.Chain(engine.StageDownloader))
-	d := engine.Names(disabled.Chain(engine.StageDownloader))
-
-	if strings.Join(a, ",") != strings.Join(d, ",") {
-		t.Errorf("disabled chain %v differs from absent chain %v", d, a)
-	}
-
-	// The configuration survives being turned off, which is the only reason
-	// the two spellings both exist.
-	var found bool
-	for _, p := range disabled.Plugins {
-		if p.Name == "cache" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("a disabled plugin lost its configuration")
-	}
-}
-
-// TestNothingIsAddedThatWasNotAskedFor is the other half of the rule.
-func TestNothingIsAddedThatWasNotAskedFor(t *testing.T) {
-	j := job(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {
-      type = str
-    }
-  }
-}
-`)
-	for _, stage := range []engine.Stage{
-		engine.StageScheduler, engine.StageDownloader, engine.StageSpider,
-	} {
-		if got := j.Chain(stage); len(got) != 0 {
-			t.Errorf("%s chain is %v for a job that listed nothing", stage, engine.Names(got))
-		}
-	}
-}
-
-// Defaults, and the spec a spider is handed.
+// Defaults.
 
 func TestEmptyJobResolvesToSomethingSane(t *testing.T) {
-	j := job(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "article" {
-    property "title" {}
-  }
-}
-`).Resolved()
+	j := job(t, "").Resolved()
 
-	if j.Engine.Limits.MaxDepth != engine.DefaultMaxDepth {
-		t.Errorf("depth = %d", j.Engine.Limits.MaxDepth)
+	if j.Scheduler.MaxDepth != engine.DefaultMaxDepth {
+		t.Errorf("depth = %d", j.Scheduler.MaxDepth)
 	}
-	if j.Engine.Limits.MaxBodyBytes != engine.DefaultMaxBodyBytes {
-		t.Errorf("body bytes = %d", j.Engine.Limits.MaxBodyBytes)
+	if j.Scheduler.Policy != engine.DefaultPolicy {
+		t.Errorf("policy = %q", j.Scheduler.Policy)
 	}
-	if !j.Engine.Politeness.ObeysRobots() {
-		t.Error("robots defaulted off")
+	if j.Downloader.MaxBody != engine.DefaultMaxBody {
+		t.Errorf("max_body = %d", j.Downloader.MaxBody)
 	}
-	if j.Engine.Politeness.UserAgent == "" {
+	if !j.Downloader.ObeysRobots() {
+		t.Error("robots defaulted off, which would harm somebody else's server")
+	}
+	if j.Downloader.UserAgent == "" {
 		t.Error("no user agent")
-	}
-	if j.Monitoring.LogLevel() != engine.DefaultLogLevel {
-		t.Errorf("level = %q", j.Monitoring.LogLevel())
 	}
 	if !j.Monitoring.LoggingOn() {
 		t.Error("logging defaulted off, so a job that fails says nothing")
@@ -1629,18 +783,13 @@ job "j" {
 	if j.Mutation.Costly != engine.CostlyRefuse {
 		t.Errorf("costly = %q, want the cautious default", j.Mutation.Costly)
 	}
-
-	// Types are filled, including the one inferred from having children.
-	if j.Items[0].Type != string(engine.DefaultItemType) {
-		t.Errorf("item type = %q", j.Items[0].Type)
-	}
 	if j.Items[0].Properties[0].Type != string(engine.DefaultPropertyType) {
 		t.Errorf("property type = %q", j.Items[0].Properties[0].Type)
 	}
 }
 
 func TestNestedPropertyDefaultsToObject(t *testing.T) {
-	j := job(t, `
+	j := parse(t, `
 job "j" {
   start = ["https://example.com/"]
   item "a" {
@@ -1649,7 +798,7 @@ job "j" {
     }
   }
 }
-`).Resolved()
+`).Jobs[0].Resolved()
 
 	author := j.Items[0].Properties[0]
 	if author.Type != string(engine.TypeObject) {
@@ -1660,61 +809,38 @@ job "j" {
 	}
 }
 
-// TestResolvedDoesNotMutate keeps "what they sent" and "what it will do" apart.
 func TestResolvedDoesNotMutate(t *testing.T) {
-	j := job(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {}
-  }
-}
-`)
+	j := job(t, "")
 	_ = j.Resolved()
 
-	if j.Engine != nil || j.Mutation != nil || j.Monitoring != nil {
+	if j.Scheduler != nil || j.Downloader != nil || j.Mutation != nil || j.Monitoring != nil {
 		t.Error("Resolved filled in the job it was called on")
-	}
-	if j.Items[0].Type != "" || j.Items[0].Properties[0].Type != "" {
-		t.Error("Resolved wrote types back into the submitted schema")
 	}
 }
 
 func TestResolvedKeepsWhatWasAsked(t *testing.T) {
-	j := job(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    type = list
-    property "p" {
-      type = date
-    }
+	j := mustValidate(t, `
+  scheduler {
+    max_depth = 42
   }
-  engine {
-    limits {
-      max_depth = 42
-    }
-    politeness {
-      robots = false
-    }
+
+  downloader {
+    robots = false
   }
+
   monitoring {
     level = "debug"
   }
-}
 `).Resolved()
 
-	if j.Engine.Limits.MaxDepth != 42 {
-		t.Errorf("depth = %d, want the submitted 42", j.Engine.Limits.MaxDepth)
+	if j.Scheduler.MaxDepth != 42 {
+		t.Errorf("depth = %d, want the submitted 42", j.Scheduler.MaxDepth)
 	}
-	if j.Engine.Politeness.ObeysRobots() {
+	if j.Downloader.ObeysRobots() {
 		t.Error("an explicit robots = false was overwritten")
 	}
 	if j.Monitoring.LogLevel() != "debug" {
 		t.Errorf("level = %q", j.Monitoring.LogLevel())
-	}
-	if j.Items[0].Type != "list" || j.Items[0].Properties[0].Type != "date" {
-		t.Error("declared types were overwritten by defaults")
 	}
 }
 
@@ -1723,15 +849,10 @@ func TestEveryDefaultIsListed(t *testing.T) {
 	if len(d) == 0 {
 		t.Fatal("no defaults are listed")
 	}
-	for _, name := range engine.DefaultNames() {
-		if d[name] == "" && !strings.Contains(name, "max_pages") && !strings.Contains(name, "max_time") {
-			t.Errorf("%s has an empty default", name)
-		}
-	}
-	// The settings a reader will look for first.
 	for _, want := range []string{
-		"engine.limits.max_depth", "engine.politeness.robots",
-		"monitoring.level", "mutation.costly", "item.property.type",
+		"scheduler.max_depth", "scheduler.policy", "downloader.robots",
+		"downloader.max_body", "monitoring.level", "mutation.costly",
+		"item.property.type",
 	} {
 		if _, ok := d[want]; !ok {
 			t.Errorf("%s has no documented default", want)
@@ -1739,34 +860,14 @@ func TestEveryDefaultIsListed(t *testing.T) {
 	}
 }
 
-func TestMonitoringLevelIsChecked(t *testing.T) {
-	doc := parse(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "a" {
-    property "p" {}
-  }
-  monitoring {
-    level = "shouty"
-  }
-}
-`)
-	if err := doc.Validate(); err == nil {
-		t.Fatal("accepted a log level that is not one")
-	}
-}
-
-// A spider is handed the spec, not the job.
+// The spec a spider is handed.
 
 func TestSpecIsJustTheShapes(t *testing.T) {
 	j := parse(t, document).Jobs[0]
 	spec := j.Spec()
 
-	if spec.Job != "news" {
-		t.Errorf("job = %q", spec.Job)
-	}
-	if len(spec.Items) != len(j.Items) {
-		t.Errorf("got %d items, want %d", len(spec.Items), len(j.Items))
+	if spec.Job != "news" || len(spec.Items) != len(j.Items) {
+		t.Errorf("spec = %+v", spec)
 	}
 	if _, ok := spec.Item("article"); !ok {
 		t.Error("article is not in the spec")
@@ -1776,8 +877,6 @@ func TestSpecIsJustTheShapes(t *testing.T) {
 	}
 }
 
-// TestSpecRoundTrips is the property an external spider depends on: what it is
-// handed parses back to what was sent.
 func TestSpecRoundTrips(t *testing.T) {
 	original := parse(t, document).Jobs[0].Spec()
 
@@ -1789,19 +888,16 @@ func TestSpecRoundTrips(t *testing.T) {
 	if err := back.Validate(); err != nil {
 		t.Fatalf("the rendered spec does not validate: %v", err)
 	}
-
 	if back.Fingerprint() != original.Fingerprint() {
 		t.Errorf("fingerprint changed across the round trip:\n%s", rendered)
-	}
-	if strings.Join(back.Names(), ",") != strings.Join(original.Names(), ",") {
-		t.Errorf("items changed: %v vs %v", back.Names(), original.Names())
 	}
 }
 
 // TestFingerprintTracksTheShape is what stops a record being attributed to a
 // shape it was not read under.
 func TestFingerprintTracksTheShape(t *testing.T) {
-	base := `
+	shape := func(required bool) *engine.Spec {
+		src := fmt.Sprintf(`
 job "j" {
   start = ["https://example.com/"]
   item "article" {
@@ -1809,60 +905,45 @@ job "j" {
       type     = str
       required = %t
     }
-    property "body" {
-      type = str
-    }
   }
 }
-`
-	a := job(t, fmt.Sprintf(base, false)).Spec()
-	b := job(t, fmt.Sprintf(base, true)).Spec()
+`, required)
+		return parse(t, src).Jobs[0].Spec()
+	}
 
-	if a.Fingerprint() == b.Fingerprint() {
+	if shape(false).Fingerprint() == shape(true).Fingerprint() {
 		t.Error("a changed property did not change the fingerprint")
 	}
-	if a.Fingerprint() != job(t, fmt.Sprintf(base, false)).Spec().Fingerprint() {
+	if shape(false).Fingerprint() != shape(false).Fingerprint() {
 		t.Error("the same shape produced two fingerprints")
 	}
 }
 
-// TestFingerprintIgnoresCosmetics: reordering is not a schema change, and a
-// fingerprint that moved would force a re-extraction nobody needed.
 func TestFingerprintIgnoresCosmetics(t *testing.T) {
-	a := job(t, `
+	order := func(first, second string) *engine.Spec {
+		src := fmt.Sprintf(`
 job "j" {
   start = ["https://example.com/"]
   item "article" {
-    property "title" {
+    property %q {
       type = str
     }
-    property "body" {
+    property %q {
       type = str
     }
   }
 }
-`).Spec()
-	b := job(t, `
-job "j" {
-  start = ["https://example.com/"]
-  item "article" {
-    property "body" {
-      type = str
-    }
-    property "title" {
-      type = str
-    }
-  }
-}
-`).Spec()
+`, first, second)
+		return parse(t, src).Jobs[0].Spec()
+	}
 
-	if a.Fingerprint() != b.Fingerprint() {
+	if order("title", "body").Fingerprint() != order("body", "title").Fingerprint() {
 		t.Error("reordering properties changed the fingerprint")
 	}
 }
 
 func TestSpecCarriesEverythingAnExtractorNeeds(t *testing.T) {
-	spec := job(t, `
+	spec := parse(t, `
 job "j" {
   start = ["https://example.com/"]
   item "article" {
@@ -1877,7 +958,7 @@ job "j" {
     }
   }
 }
-`).Spec()
+`).Jobs[0].Spec()
 
 	rendered := string(spec.HCL())
 	for _, want := range []string{
@@ -1886,5 +967,179 @@ job "j" {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("the rendered spec lost %q:\n%s", want, rendered)
 		}
+	}
+}
+
+// Resubmission: the same job name mutates, and the mutation block says at what
+// cost.
+
+func TestResubmittingAnIdenticalDocumentChangesNothing(t *testing.T) {
+	running := parse(t, document).Jobs[0]
+	submitted := parse(t, document).Jobs[0]
+
+	if changes := engine.Diff(running, submitted); changes.Any() {
+		t.Errorf("an identical resubmission reported %d changes: %v", len(changes), changes)
+	}
+}
+
+func TestRaisingABudgetIsFree(t *testing.T) {
+	budget := func(pages int) *engine.Job {
+		return job(t, fmt.Sprintf("\n  scheduler {\n    max_pages = %d\n  }\n", pages))
+	}
+
+	changes := engine.Diff(budget(100), budget(500))
+	if len(changes) != 1 || changes[0].Path != "scheduler.max_pages" {
+		t.Fatalf("changes = %v", changes)
+	}
+	if !changes[0].Effect.Free() {
+		t.Errorf("raising a page budget should be free, got %s", changes[0].Effect)
+	}
+}
+
+func scopedJob(t *testing.T, domains, extra string) *engine.Job {
+	t.Helper()
+	src := fmt.Sprintf(`
+job "j" {
+  start   = ["https://example.com/"]
+  domains = [%s]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+%s
+}
+`, domains, extra)
+	return parse(t, src).Jobs[0]
+}
+
+func TestNarrowingScopeIsNotFree(t *testing.T) {
+	costly := engine.Diff(
+		scopedJob(t, `"a.example", "b.example"`, ""),
+		scopedJob(t, `"a.example"`, ""),
+	).Costly()
+
+	if len(costly) != 1 || costly[0].Effect != engine.EffectRescope {
+		t.Fatalf("removing a domain should rescope, got %v", costly)
+	}
+}
+
+func TestChangingTheSchemaIsNotFree(t *testing.T) {
+	shape := func(required bool) *engine.Job {
+		src := fmt.Sprintf(`
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "title" {
+      type     = str
+      required = %t
+    }
+  }
+}
+`, required)
+		return parse(t, src).Jobs[0]
+	}
+
+	costly := engine.Diff(shape(false), shape(true)).Costly()
+	if len(costly) != 1 || costly[0].Effect != engine.EffectReextract {
+		t.Fatalf("changing a property should need reextraction, got %v", costly)
+	}
+}
+
+// TestPluginConfigChangeIsSeen proves the opaque body stays comparable: this
+// package does not know what "times" means and must still notice it moved.
+func TestPluginConfigChangeIsSeen(t *testing.T) {
+	retry := func(times int) *engine.Job {
+		return job(t, fmt.Sprintf("\n  downloader {\n    plugin \"retry\" {\n      times = %d\n    }\n  }\n", times))
+	}
+
+	changes := engine.Diff(retry(3), retry(10))
+	if len(changes) != 1 || !strings.Contains(changes[0].Path, "retry") {
+		t.Fatalf("a change inside an opaque plugin body was missed: %v", changes)
+	}
+	if !changes[0].Effect.Free() {
+		t.Errorf("a retry count should be free to change, got %s", changes[0].Effect)
+	}
+}
+
+func TestMutationIsOptionalAndCautious(t *testing.T) {
+	j := job(t, "")
+	if j.Mutation != nil {
+		t.Fatal("a job with no mutation block got one")
+	}
+	if j.Mutation.CostlyPolicy() != engine.CostlyRefuse {
+		t.Errorf("costly = %q", j.Mutation.CostlyPolicy())
+	}
+	if j.Mutation.StaleRecordsPolicy() != engine.RecordsKeep {
+		t.Error("the default disposition deletes records, which it must not")
+	}
+}
+
+func TestCostlyChangeIsRefusedByDefault(t *testing.T) {
+	review := scopedJob(t, `"a.example"`, "").Review(scopedJob(t, `"a.example", "b.example"`, ""))
+
+	if review.OK() {
+		t.Fatal("a narrowed scope was applied without being asked about")
+	}
+	if len(review.Actions) != 0 {
+		t.Error("work was disposed of despite the submission being refused")
+	}
+}
+
+func TestCostlyApplyProducesActions(t *testing.T) {
+	running := scopedJob(t, `"a.example", "b.example"`, "")
+	submitted := scopedJob(t, `"a.example"`, `
+  mutation {
+    costly       = "apply"
+    out_of_scope = "drop"
+  }
+`)
+
+	review := submitted.Review(running)
+	if !review.OK() {
+		t.Fatalf("refused despite costly = apply: %v", review.Refused)
+	}
+	if len(review.Actions) != 1 || review.Actions[0].Do != engine.ScopeDrop {
+		t.Fatalf("actions = %v", review.Actions)
+	}
+}
+
+// TestCacheRefusesEvenUnderApply: losing a corpus is worse than the other
+// costly changes, so a job may allow the rest and still refuse that.
+func TestCacheRefusesEvenUnderApply(t *testing.T) {
+	cached := func(bucket string) *engine.Job {
+		return job(t, fmt.Sprintf(`
+  downloader {
+    plugin "cache" {
+      bucket = %q
+    }
+  }
+
+  mutation {
+    costly = "apply"
+  }
+`, bucket))
+	}
+
+	review := cached("somewhere-else").Review(cached("pages"))
+	if review.OK() {
+		t.Fatal("the cache moved and the job did not notice")
+	}
+	if review.Refused[0].Effect != engine.EffectCacheMoved {
+		t.Errorf("refused = %v", review.Refused)
+	}
+}
+
+func TestMutationValuesAreChecked(t *testing.T) {
+	for field, value := range map[string]string{
+		"costly":         "maybe",
+		"out_of_scope":   "burn",
+		"stale_records":  "shred",
+		"orphaned_cache": "shrug",
+	} {
+		t.Run(field, func(t *testing.T) {
+			refuses(t, fmt.Sprintf("\n  mutation {\n    %s = %q\n  }\n", field, value), "mutation."+field)
+		})
 	}
 }

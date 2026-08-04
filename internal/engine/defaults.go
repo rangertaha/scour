@@ -10,53 +10,55 @@ import (
 	"time"
 )
 
-// Every default, in one place.
+// Every default, in one place, and every accessor that applies one.
 //
 // # Why they are all here
 //
-// A default scattered next to the field it fills is easy to write and
-// impossible to review: nobody can answer "what does an empty job do?" without
-// reading every file. Gathered, the question is answerable, [Defaults] can
-// print them, and a test can assert that nothing was left without one.
+// A default written next to the field it fills is easy to write and impossible
+// to review: nobody can answer "what does an empty job do?" without reading
+// every file. Gathered, the question is answerable, [Defaults] can print them,
+// and a test can assert nothing was left without one.
+//
+// # Why every accessor is nil-safe
+//
+// Each stage block is optional, so a job that configures nothing has nil where
+// its stages would be. Reading through a method rather than a field means an
+// absent block is never a special case at the call site, and there is exactly
+// one place a default can be applied from.
 //
 // # Why they are cautious
 //
 // A client who configures nothing is telling us they have not thought about it.
-// The answer to that is a crawl that is slow, shallow and polite rather than one
-// that gets somebody's address blocked, and a mutation policy that refuses what
-// is expensive rather than doing it quietly.
-//
-// # When they are applied
-//
-// At submission, not at run. A stored job records what it will actually do, so
-// resubmitting the same document next month does the same thing even if these
-// numbers have moved since. See [Job.Resolved].
+// The answer is a crawl that is slow, shallow and polite rather than one that
+// gets somebody's address blocked, and a mutation policy that refuses what is
+// expensive rather than doing it quietly.
 const (
 	// Schema.
 	DefaultItemType     = TypeObject
 	DefaultPropertyType = TypeStr
 
-	// Limits. MaxPages and MaxTime default to no limit, because a budget is a
-	// thing a person chooses; depth and body size do not, because an unbounded
-	// depth is not a crawl but the whole web, and the size of the largest page
-	// on the web is not a number anyone should discover by filling a disk.
-	DefaultMaxPages     = 0
-	DefaultMaxTime      = time.Duration(0)
-	DefaultMaxDepth     = 5
-	DefaultMaxBodyBytes = 32 << 20 // 32 MiB
-
-	// Politeness.
+	// Scheduler. Pages and time default to no limit because a budget is a
+	// thing a person chooses; depth does not, because an unbounded depth is
+	// not a crawl but the whole web.
+	DefaultPolicy      = "priority"
+	DefaultMaxPages    = 0
+	DefaultMaxTime     = time.Duration(0)
+	DefaultMaxDepth    = 5
 	DefaultRate        = time.Second
 	DefaultConcurrency = 2
-	DefaultRobots      = true
-	DefaultUserAgent   = "scour (+https://github.com/rangertaha/scour)"
 
-	// Components.
+	// Downloader.
+	DefaultRobots         = true
+	DefaultUserAgent      = "scour (+https://github.com/rangertaha/scour)"
+	DefaultRequestTimeout = 30 * time.Second
+	DefaultMaxBody        = 32 << 20 // 32 MiB
+
+	// External stages.
 	DefaultExternalTimeout = 5 * time.Minute
 
 	// Monitoring. Logging on and metrics off: a run that says nothing is hard
-	// to debug, and a run that publishes numbers nobody asked for needs
-	// somewhere to publish them.
+	// to debug, and a run that publishes numbers needs somewhere to publish
+	// them.
 	DefaultMetrics  = false
 	DefaultLogging  = true
 	DefaultLogLevel = "info"
@@ -78,29 +80,35 @@ const MaxConcurrency = 64
 // LogLevels are what monitoring.level may be.
 var LogLevels = []string{"debug", "info", "warn", "error"}
 
+// Policies are what scheduler.policy may be. They are alternatives rather than
+// a chain: one order comes out of the frontier.
+var Policies = []string{"priority", "breadth", "depth", "random"}
+
 // Defaults lists every default as it would be written in a document, so a
 // command can print them and a test can check none is missing.
 func Defaults() map[string]string {
 	return map[string]string{
-		"item.type":                     string(DefaultItemType),
-		"item.property.type":            string(DefaultPropertyType),
-		"engine.limits.max_pages":       fmt.Sprint(DefaultMaxPages),
-		"engine.limits.max_depth":       fmt.Sprint(DefaultMaxDepth),
-		"engine.limits.max_time":        DefaultMaxTime.String(),
-		"engine.limits.max_body_bytes":  fmt.Sprint(DefaultMaxBodyBytes),
-		"engine.politeness.rate":        DefaultRate.String(),
-		"engine.politeness.concurrency": fmt.Sprint(DefaultConcurrency),
-		"engine.politeness.robots":      fmt.Sprint(DefaultRobots),
-		"engine.politeness.user_agent":  DefaultUserAgent,
-		"engine.components.timeout":     DefaultExternalTimeout.String(),
-		"monitoring.metrics":            fmt.Sprint(DefaultMetrics),
-		"monitoring.logging":            fmt.Sprint(DefaultLogging),
-		"monitoring.level":              DefaultLogLevel,
-		"plugin.enabled":                fmt.Sprint(DefaultPluginEnabled),
-		"mutation.costly":               DefaultCostly,
-		"mutation.out_of_scope":         DefaultOutOfScope,
-		"mutation.stale_records":        DefaultStaleRecords,
-		"mutation.orphaned_cache":       DefaultOrphanedCache,
+		"item.type":               string(DefaultItemType),
+		"item.property.type":      string(DefaultPropertyType),
+		"scheduler.policy":        DefaultPolicy,
+		"scheduler.rate":          DefaultRate.String(),
+		"scheduler.concurrency":   fmt.Sprint(DefaultConcurrency),
+		"scheduler.max_depth":     fmt.Sprint(DefaultMaxDepth),
+		"scheduler.max_pages":     fmt.Sprint(DefaultMaxPages),
+		"scheduler.max_time":      DefaultMaxTime.String(),
+		"downloader.robots":       fmt.Sprint(DefaultRobots),
+		"downloader.user_agent":   DefaultUserAgent,
+		"downloader.timeout":      DefaultRequestTimeout.String(),
+		"downloader.max_body":     fmt.Sprint(DefaultMaxBody),
+		"external_timeout":        DefaultExternalTimeout.String(),
+		"monitoring.metrics":      fmt.Sprint(DefaultMetrics),
+		"monitoring.logging":      fmt.Sprint(DefaultLogging),
+		"monitoring.level":        DefaultLogLevel,
+		"plugin.enabled":          fmt.Sprint(DefaultPluginEnabled),
+		"mutation.costly":         DefaultCostly,
+		"mutation.out_of_scope":   DefaultOutOfScope,
+		"mutation.stale_records":  DefaultStaleRecords,
+		"mutation.orphaned_cache": DefaultOrphanedCache,
 	}
 }
 
@@ -115,7 +123,244 @@ func DefaultNames() []string {
 	return out
 }
 
-// Monitoring accessors, nil-safe like the rest.
+// Scheduler.
+
+// OrderPolicy is the order the frontier is drained in.
+func (s *Scheduler) OrderPolicy() string {
+	if s == nil || s.Policy == "" {
+		return DefaultPolicy
+	}
+	return s.Policy
+}
+
+// RateDuration is the least time between two requests to one host.
+func (s *Scheduler) RateDuration() (time.Duration, error) {
+	if s == nil || s.Rate == "" {
+		return DefaultRate, nil
+	}
+	d, err := time.ParseDuration(s.Rate)
+	if err != nil {
+		return 0, fmt.Errorf("scheduler.rate: %w", err)
+	}
+	return d, nil
+}
+
+// Parallelism is how many requests may be in flight to one host.
+func (s *Scheduler) Parallelism() int {
+	if s == nil || s.Concurrency == 0 {
+		return DefaultConcurrency
+	}
+	return s.Concurrency
+}
+
+// Depth is the depth ceiling.
+func (s *Scheduler) Depth() int {
+	if s == nil || s.MaxDepth == 0 {
+		return DefaultMaxDepth
+	}
+	return s.MaxDepth
+}
+
+// Pages is the fetch ceiling. Zero means no limit, which is one of the two
+// places an unset value is not replaced by a number.
+func (s *Scheduler) Pages() int {
+	if s == nil {
+		return DefaultMaxPages
+	}
+	return s.MaxPages
+}
+
+// MaxTimeDuration is the crawl budget. Zero means no limit.
+func (s *Scheduler) MaxTimeDuration() (time.Duration, error) {
+	if s == nil || s.MaxTime == "" {
+		return DefaultMaxTime, nil
+	}
+	d, err := time.ParseDuration(s.MaxTime)
+	if err != nil {
+		return 0, fmt.Errorf("scheduler.max_time: %w", err)
+	}
+	return d, nil
+}
+
+func (s *Scheduler) validate() []error {
+	if s == nil {
+		return nil
+	}
+	var problems []error
+
+	if s.Policy != "" && !slices.Contains(Policies, s.Policy) {
+		problems = append(problems, fmt.Errorf("scheduler.policy: %q is not one of %s",
+			s.Policy, strings.Join(Policies, ", ")))
+	}
+	if s.Concurrency < 0 {
+		problems = append(problems, fmt.Errorf("scheduler.concurrency: %d is negative", s.Concurrency))
+	}
+	if s.Concurrency > MaxConcurrency {
+		problems = append(problems, fmt.Errorf(
+			"scheduler.concurrency: %d is more than %d against a single host", s.Concurrency, MaxConcurrency))
+	}
+	if s.MaxDepth < 0 {
+		problems = append(problems, fmt.Errorf("scheduler.max_depth: %d is negative", s.MaxDepth))
+	}
+	if s.MaxPages < 0 {
+		problems = append(problems, fmt.Errorf("scheduler.max_pages: %d is negative", s.MaxPages))
+	}
+	if d, err := s.RateDuration(); err != nil {
+		problems = append(problems, err)
+	} else if d < 0 {
+		problems = append(problems, fmt.Errorf("scheduler.rate: %s is negative", d))
+	}
+	if d, err := s.MaxTimeDuration(); err != nil {
+		problems = append(problems, err)
+	} else if d < 0 {
+		problems = append(problems, fmt.Errorf("scheduler.max_time: %s is negative", d))
+	}
+
+	return problems
+}
+
+// Downloader.
+
+// ObeysRobots reports whether this job honours robots.txt.
+func (d *Downloader) ObeysRobots() bool {
+	if d == nil || d.Robots == nil {
+		return DefaultRobots
+	}
+	return *d.Robots
+}
+
+// Agent is the User-Agent this job identifies itself with.
+func (d *Downloader) Agent() string {
+	if d == nil || d.UserAgent == "" {
+		return DefaultUserAgent
+	}
+	return d.UserAgent
+}
+
+// RequestTimeout is how long one request may take.
+func (d *Downloader) RequestTimeout() (time.Duration, error) {
+	if d == nil || d.Timeout == "" {
+		return DefaultRequestTimeout, nil
+	}
+	v, err := time.ParseDuration(d.Timeout)
+	if err != nil {
+		return 0, fmt.Errorf("downloader.timeout: %w", err)
+	}
+	return v, nil
+}
+
+// BodyBytes is the largest body this job will accept.
+func (d *Downloader) BodyBytes() int64 {
+	if d == nil || d.MaxBody == 0 {
+		return DefaultMaxBody
+	}
+	return d.MaxBody
+}
+
+// IsExternal reports whether somebody else runs this stage.
+func (d *Downloader) IsExternal() bool { return d != nil && d.External }
+
+// Timeout is how long an external downloader has to answer.
+func (d *Downloader) ExternalWait() (time.Duration, error) {
+	if d == nil {
+		return DefaultExternalTimeout, nil
+	}
+	return externalWait("downloader", d.ExternalTimeout)
+}
+
+func (d *Downloader) validate() []error {
+	if d == nil {
+		return nil
+	}
+	var problems []error
+
+	if d.MaxBody < 0 {
+		problems = append(problems, fmt.Errorf("downloader.max_body: %d is negative", d.MaxBody))
+	}
+	if v, err := d.RequestTimeout(); err != nil {
+		problems = append(problems, err)
+	} else if v < 0 {
+		problems = append(problems, fmt.Errorf("downloader.timeout: %s is negative", v))
+	}
+	if _, err := d.ExternalWait(); err != nil {
+		problems = append(problems, err)
+	}
+
+	return problems
+}
+
+// Spider.
+
+// IsExternal reports whether somebody else runs this stage.
+func (s *Spider) IsExternal() bool { return s != nil && s.External }
+
+// ExternalWait is how long an external spider has to answer.
+func (s *Spider) ExternalWait() (time.Duration, error) {
+	if s == nil {
+		return DefaultExternalTimeout, nil
+	}
+	return externalWait("spider", s.ExternalTimeout)
+}
+
+func (s *Spider) validate() []error {
+	if s == nil {
+		return nil
+	}
+	if _, err := s.ExternalWait(); err != nil {
+		return []error{err}
+	}
+	return nil
+}
+
+// Pipeline.
+
+// IsExternal reports whether somebody else runs this stage.
+func (p *Pipeline) IsExternal() bool { return p != nil && p.External }
+
+// ExternalWait is how long an external pipeline has to answer.
+func (p *Pipeline) ExternalWait() (time.Duration, error) {
+	if p == nil {
+		return DefaultExternalTimeout, nil
+	}
+	return externalWait("pipeline", p.ExternalTimeout)
+}
+
+// externalWait parses one stage's external timeout.
+//
+// Generous by default, because the reason to bring your own stage is usually
+// that it does something slow: a model, a browser, a service somewhere else. A
+// stage that is merely slow must not look like one that has died.
+func externalWait(stage, value string) (time.Duration, error) {
+	if value == "" {
+		return DefaultExternalTimeout, nil
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s.external_timeout: %w", stage, err)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("%s.external_timeout: %s is negative", stage, d)
+	}
+	return d, nil
+}
+
+// IsExternal reports whether a job expects somebody else to run a stage.
+func (j *Job) IsExternal(s Stage) bool {
+	switch s {
+	case StageDownloader:
+		return j.Downloader.IsExternal()
+	case StageSpider:
+		return j.Spider.IsExternal()
+	case StagePipeline:
+		return j.Pipeline.IsExternal()
+	default:
+		// The scheduler has no external attribute at all, so this cannot be
+		// reached from a document. See [Scheduler].
+		return false
+	}
+}
+
+// Monitoring.
 
 // MetricsOn reports whether this job publishes measurements.
 func (m *Monitoring) MetricsOn() bool {
@@ -128,16 +373,14 @@ func (m *Monitoring) MetricsOn() bool {
 // LoggingOn reports whether this job logs.
 //
 // Logging defaults to on, so a job that says nothing about monitoring still
-// says something about itself when it goes wrong. That means the zero value of
-// the field cannot be read directly: false and unset are the same bool, and
-// unset has to mean on. A job turning logging off says so with an explicit
-// `logging = false`, which is why the field is read through here.
+// says something about itself when it goes wrong. That means the field cannot
+// be read directly: false and unset are the same bool, and unset has to mean
+// on. A job turning logging off says so in a block that sets something, which
+// is what [Monitoring.explicit] detects.
 func (m *Monitoring) LoggingOn() bool {
 	if m == nil {
 		return DefaultLogging
 	}
-	// An absent block means the default; a present block means what it says,
-	// which is the only reading under which turning logging off is possible.
 	return m.Logging || !m.explicit()
 }
 
@@ -166,7 +409,9 @@ func (m *Monitoring) validate() []error {
 	return nil
 }
 
-// Enabled reports whether a plugin is in its chain.
+// Plugins and schema.
+
+// IsEnabled reports whether a plugin is in its chain.
 func (p *Plugin) IsEnabled() bool {
 	if p.Enabled == nil {
 		return DefaultPluginEnabled
@@ -185,9 +430,9 @@ func (i *Item) ItemType() Type {
 // PropertyType is this property's type, defaulted.
 //
 // A property with children is an object whether it said so or not, which is the
-// one place a default is inferred from the shape rather than fixed. Validation
-// has already refused the case where the document says otherwise, so this
-// cannot quietly disagree with what was written.
+// one place a default is inferred from shape rather than fixed. Validation has
+// already refused the case where the document says otherwise, so this cannot
+// quietly disagree with what was written.
 func (p *Property) PropertyType() Type {
 	if p.Type != "" {
 		return Type(p.Type)
@@ -203,8 +448,8 @@ func (p *Property) PropertyType() Type {
 // A copy: what the client submitted and what the job will do are two different
 // things, and both are worth being able to show. The submitted form is what a
 // person recognises; this is what actually runs, and it is what should be
-// stored, so that a job resubmitted next month behaves the way it did today
-// even if these defaults have moved since.
+// stored, so a job resubmitted next month behaves the way it did today even if
+// these defaults have moved since.
 func (j *Job) Resolved() *Job {
 	out := *j
 
@@ -213,38 +458,51 @@ func (j *Job) Resolved() *Job {
 		out.Items = append(out.Items, item.resolved())
 	}
 
-	engine := Engine{}
-	if j.Engine != nil {
-		engine = *j.Engine
+	sched := &Scheduler{
+		Policy:      j.Scheduler.OrderPolicy(),
+		Concurrency: j.Scheduler.Parallelism(),
+		MaxDepth:    j.Scheduler.Depth(),
+		MaxPages:    j.Scheduler.Pages(),
+		Plugins:     resolvedPlugins(j.Scheduler.plugins()),
 	}
-	limits := Limits{
-		MaxPages:     engine.Limits.Pages(),
-		MaxDepth:     engine.Limits.Depth(),
-		MaxBodyBytes: engine.Limits.BodyBytes(),
+	if d, err := j.Scheduler.RateDuration(); err == nil {
+		sched.Rate = d.String()
 	}
-	if d, err := engine.Limits.MaxTimeDuration(); err == nil && d > 0 {
-		limits.MaxTime = d.String()
+	if d, err := j.Scheduler.MaxTimeDuration(); err == nil && d > 0 {
+		sched.MaxTime = d.String()
 	}
+	out.Scheduler = sched
 
-	robots := engine.Politeness.ObeysRobots()
-	politeness := Politeness{
-		Concurrency: engine.Politeness.Parallelism(),
-		Robots:      &robots,
-		UserAgent:   engine.Politeness.Agent(),
+	robots := j.Downloader.ObeysRobots()
+	down := &Downloader{
+		External:  j.Downloader.IsExternal(),
+		Robots:    &robots,
+		UserAgent: j.Downloader.Agent(),
+		MaxBody:   j.Downloader.BodyBytes(),
+		Plugins:   resolvedPlugins(j.Downloader.plugins()),
 	}
-	if d, err := engine.Politeness.RateDuration(); err == nil {
-		politeness.Rate = d.String()
+	if v, err := j.Downloader.RequestTimeout(); err == nil {
+		down.Timeout = v.String()
 	}
+	if v, err := j.Downloader.ExternalWait(); err == nil {
+		down.ExternalTimeout = v.String()
+	}
+	out.Downloader = down
 
-	components := Components{}
-	if engine.Components != nil {
-		components = *engine.Components
+	spider := &Spider{
+		External: j.Spider.IsExternal(),
+		Plugins:  resolvedPlugins(j.Spider.plugins()),
 	}
-	if d, err := engine.Components.ExternalTimeout(); err == nil {
-		components.Timeout = d.String()
+	if v, err := j.Spider.ExternalWait(); err == nil {
+		spider.ExternalTimeout = v.String()
 	}
+	out.Spider = spider
 
-	out.Engine = &Engine{Limits: &limits, Politeness: &politeness, Components: &components}
+	pipe := &Pipeline{External: j.Pipeline.IsExternal(), Steps: j.Steps()}
+	if v, err := j.Pipeline.ExternalWait(); err == nil {
+		pipe.ExternalTimeout = v.String()
+	}
+	out.Pipeline = pipe
 
 	out.Monitoring = &Monitoring{
 		Metrics: j.Monitoring.MetricsOn(),
@@ -259,16 +517,22 @@ func (j *Job) Resolved() *Job {
 		OrphanedCache: j.Mutation.OrphanedCachePolicy(),
 	}
 
-	out.Plugins = make([]*Plugin, 0, len(j.Plugins))
-	for _, p := range j.Plugins {
+	return &out
+}
+
+func resolvedPlugins(plugins []*Plugin) []*Plugin {
+	if len(plugins) == 0 {
+		return nil
+	}
+	out := make([]*Plugin, 0, len(plugins))
+	for _, p := range plugins {
 		clone := *p
 		enabled := p.IsEnabled()
 		clone.Enabled = &enabled
 		clone.Order = p.order()
-		out.Plugins = append(out.Plugins, &clone)
+		out = append(out, &clone)
 	}
-
-	return &out
+	return out
 }
 
 func (i *Item) resolved() *Item {

@@ -8,39 +8,39 @@ import (
 	"strings"
 )
 
-// validatePipelines checks the item graph: that every dependency exists, that
+// validateSteps checks the item graph: that every dependency exists, that
 // nothing depends on itself, and that there are no cycles.
 //
 // All of it at submission. A cycle found when the graph runs is a job that
 // hangs, and the person who wrote it has long since stopped watching.
-func (j *Job) validatePipelines() []error {
+func (j *Job) validateSteps() []error {
 	var problems []error
 
-	byAddress := make(map[string]*Pipeline, len(j.Pipelines))
-	for _, p := range j.Pipelines {
+	byAddress := make(map[string]*Step, len(j.Steps()))
+	for _, p := range j.Steps() {
 		address := p.Address()
 		if _, dup := byAddress[address]; dup {
-			problems = append(problems, fmt.Errorf("pipelines %q: declared twice", address))
+			problems = append(problems, fmt.Errorf("step %q: declared twice", address))
 			continue
 		}
 		byAddress[address] = p
 	}
 
-	for _, p := range j.Pipelines {
+	for _, p := range j.Steps() {
 		for _, req := range p.requires {
 			switch {
 			case req == p.Address():
-				problems = append(problems, fmt.Errorf("pipelines %q: requires itself", p.Address()))
+				problems = append(problems, fmt.Errorf("step %q: requires itself", p.Address()))
 			case byAddress[req] == nil:
 				problems = append(problems, fmt.Errorf(
-					"pipelines %q: requires %q, which is not declared. Declared: %s",
-					p.Address(), req, strings.Join(addresses(j.Pipelines), ", ")))
+					"step %q: requires %q, which is not declared. Declared: %s",
+					p.Address(), req, strings.Join(addresses(j.Steps()), ", ")))
 			}
 		}
 	}
 
-	if cycle := findCycle(j.Pipelines, byAddress); len(cycle) > 0 {
-		problems = append(problems, fmt.Errorf("pipelines: dependency cycle %s", strings.Join(cycle, " -> ")))
+	if cycle := findCycle(j.Steps(), byAddress); len(cycle) > 0 {
+		problems = append(problems, fmt.Errorf("pipeline: dependency cycle %s", strings.Join(cycle, " -> ")))
 	}
 
 	return problems
@@ -55,21 +55,21 @@ func (j *Job) validatePipelines() []error {
 // It returns an error if the graph does not resolve, which [Job.validate]
 // should already have reported: this is the second line of defence, not the
 // first.
-func (j *Job) Order() ([]*Pipeline, error) {
-	byAddress := make(map[string]*Pipeline, len(j.Pipelines))
-	for _, p := range j.Pipelines {
+func (j *Job) Order() ([]*Step, error) {
+	byAddress := make(map[string]*Step, len(j.Steps()))
+	for _, p := range j.Steps() {
 		byAddress[p.Address()] = p
 	}
 
 	// Kahn's algorithm, taking ready nodes in sorted order.
-	remaining := make(map[string]int, len(j.Pipelines))
-	dependents := make(map[string][]string, len(j.Pipelines))
+	remaining := make(map[string]int, len(j.Steps()))
+	dependents := make(map[string][]string, len(j.Steps()))
 
-	for _, p := range j.Pipelines {
+	for _, p := range j.Steps() {
 		count := 0
 		for _, req := range p.requires {
 			if byAddress[req] == nil {
-				return nil, fmt.Errorf("pipelines %q: requires %q, which is not declared", p.Address(), req)
+				return nil, fmt.Errorf("step %q: requires %q, which is not declared", p.Address(), req)
 			}
 			count++
 			dependents[req] = append(dependents[req], p.Address())
@@ -85,7 +85,7 @@ func (j *Job) Order() ([]*Pipeline, error) {
 	}
 	sort.Strings(ready)
 
-	out := make([]*Pipeline, 0, len(j.Pipelines))
+	out := make([]*Step, 0, len(j.Steps()))
 	for len(ready) > 0 {
 		address := ready[0]
 		ready = ready[1:]
@@ -104,8 +104,8 @@ func (j *Job) Order() ([]*Pipeline, error) {
 		}
 	}
 
-	if len(out) != len(j.Pipelines) {
-		return nil, fmt.Errorf("pipelines: dependency cycle among %s", strings.Join(unresolved(remaining), ", "))
+	if len(out) != len(j.Steps()) {
+		return nil, fmt.Errorf("pipeline: dependency cycle among %s", strings.Join(unresolved(remaining), ", "))
 	}
 	return out, nil
 }
@@ -131,20 +131,20 @@ func (j *Job) Order() ([]*Pipeline, error) {
 //
 // Within a wave the order is by address, so the same document always produces
 // the same plan.
-func (j *Job) Waves() ([][]*Pipeline, error) {
-	byAddress := make(map[string]*Pipeline, len(j.Pipelines))
-	for _, p := range j.Pipelines {
+func (j *Job) Waves() ([][]*Step, error) {
+	byAddress := make(map[string]*Step, len(j.Steps()))
+	for _, p := range j.Steps() {
 		byAddress[p.Address()] = p
 	}
 
-	remaining := make(map[string]int, len(j.Pipelines))
-	dependents := make(map[string][]string, len(j.Pipelines))
+	remaining := make(map[string]int, len(j.Steps()))
+	dependents := make(map[string][]string, len(j.Steps()))
 
-	for _, p := range j.Pipelines {
+	for _, p := range j.Steps() {
 		count := 0
 		for _, req := range p.requires {
 			if byAddress[req] == nil {
-				return nil, fmt.Errorf("pipelines %q: requires %q, which is not declared", p.Address(), req)
+				return nil, fmt.Errorf("step %q: requires %q, which is not declared", p.Address(), req)
 			}
 			count++
 			dependents[req] = append(dependents[req], p.Address())
@@ -152,10 +152,10 @@ func (j *Job) Waves() ([][]*Pipeline, error) {
 		remaining[p.Address()] = count
 	}
 
-	var waves [][]*Pipeline
+	var waves [][]*Step
 	done := 0
 
-	for done < len(j.Pipelines) {
+	for done < len(j.Steps()) {
 		var wave []string
 		for address, count := range remaining {
 			if count == 0 {
@@ -163,11 +163,11 @@ func (j *Job) Waves() ([][]*Pipeline, error) {
 			}
 		}
 		if len(wave) == 0 {
-			return nil, fmt.Errorf("pipelines: dependency cycle among %s", strings.Join(unresolved(remaining), ", "))
+			return nil, fmt.Errorf("pipeline: dependency cycle among %s", strings.Join(unresolved(remaining), ", "))
 		}
 		sort.Strings(wave)
 
-		steps := make([]*Pipeline, 0, len(wave))
+		steps := make([]*Step, 0, len(wave))
 		for _, address := range wave {
 			steps = append(steps, byAddress[address])
 			// Removed rather than zeroed, so it cannot be picked up again by
@@ -210,13 +210,13 @@ func (j *Job) Width() (int, error) {
 // One rather than all: a document usually has a single mistake in it, and a
 // list of every cycle a single mistake creates is harder to read than the path
 // that shows it.
-func findCycle(pipelines []*Pipeline, byAddress map[string]*Pipeline) []string {
+func findCycle(steps []*Step, byAddress map[string]*Step) []string {
 	const (
 		unvisited = 0
 		active    = 1
 		done      = 2
 	)
-	state := make(map[string]int, len(pipelines))
+	state := make(map[string]int, len(steps))
 
 	var path []string
 	var walk func(address string) []string
@@ -258,7 +258,7 @@ func findCycle(pipelines []*Pipeline, byAddress map[string]*Pipeline) []string {
 		return nil
 	}
 
-	for _, address := range addresses(pipelines) {
+	for _, address := range addresses(steps) {
 		if cycle := walk(address); cycle != nil {
 			return cycle
 		}
@@ -266,9 +266,9 @@ func findCycle(pipelines []*Pipeline, byAddress map[string]*Pipeline) []string {
 	return nil
 }
 
-func addresses(pipelines []*Pipeline) []string {
-	out := make([]string, 0, len(pipelines))
-	for _, p := range pipelines {
+func addresses(steps []*Step) []string {
+	out := make([]string, 0, len(steps))
+	for _, p := range steps {
 		out = append(out, p.Address())
 	}
 	sort.Strings(out)

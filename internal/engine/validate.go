@@ -82,16 +82,14 @@ func (j *Job) validate() []error {
 		}
 	}
 
-	if e := j.Engine; e != nil {
-		for _, err := range e.Limits.validate() {
-			problems = append(problems, prefix(err))
-		}
-		for _, err := range e.Politeness.validate() {
-			problems = append(problems, prefix(err))
-		}
-		for _, err := range e.Components.validate() {
-			problems = append(problems, prefix(err))
-		}
+	for _, err := range j.Scheduler.validate() {
+		problems = append(problems, prefix(err))
+	}
+	for _, err := range j.Downloader.validate() {
+		problems = append(problems, prefix(err))
+	}
+	for _, err := range j.Spider.validate() {
+		problems = append(problems, prefix(err))
 	}
 
 	for _, err := range j.Monitoring.validate() {
@@ -103,7 +101,7 @@ func (j *Job) validate() []error {
 	for _, err := range j.validatePlugins() {
 		problems = append(problems, prefix(err))
 	}
-	for _, err := range j.validatePipelines() {
+	for _, err := range j.validateSteps() {
 		problems = append(problems, prefix(err))
 	}
 	for _, err := range j.validateExporters() {
@@ -202,24 +200,9 @@ func (j *Job) validatePlugins() []error {
 	}
 	seen := map[slot]bool{}
 
-	for _, p := range j.Plugins {
-		stage := Stage(p.Stage)
-		where := fmt.Sprintf("plugin %q %q", p.Stage, p.Name)
-
-		if !stage.ValidPlugin() {
-			// The pipeline is a stage, but its extensions are not plugins.
-			// Saying so is worth more than listing what is, because somebody
-			// writing this has the right idea and the wrong spelling.
-			if stage == StagePipeline {
-				problems = append(problems, fmt.Errorf(
-					`%s: a pipeline step is a node in a graph, not a link in a chain. Write pipelines %q "<item>" and give it requires instead of order`,
-					where, p.Name))
-				continue
-			}
-			problems = append(problems, fmt.Errorf("%s: %q is not a stage, have %s",
-				where, p.Stage, strings.Join(stageNames(PluginStages), ", ")))
-			continue
-		}
+	for _, p := range j.Plugins() {
+		stage := p.Stage()
+		where := fmt.Sprintf("%s plugin %q", stage, p.Name)
 
 		key := slot{stage, p.Name}
 		if seen[key] {
@@ -227,11 +210,16 @@ func (j *Job) validatePlugins() []error {
 		}
 		seen[key] = true
 
-		// A plugin scour does not ship is fine, that is the point of plugins,
-		// but it has to say where in the chain it goes because we cannot guess.
-		if _, builtin := DefaultOrder(stage, p.Name); !builtin && p.Order == 0 {
+		// A plugin scour has no conventional position for is fine, that is the
+		// point of plugins, but it has to say where in the chain it goes
+		// because we cannot guess.
+		//
+		// This checks placement, not existence. Whether anything implements the
+		// name is the registry's business, and it is asked later, when the
+		// chain is built.
+		if _, placed := DefaultOrder(stage, p.Name); !placed && p.Order == 0 {
 			problems = append(problems, fmt.Errorf(
-				"%s: not a built-in, so it needs an explicit order. Built-ins for %s are %s",
+				"%s: no conventional order for this name, so it needs an explicit one. Catalogued for %s: %s",
 				where, stage, strings.Join(PlacementNames(stage), ", ")))
 		}
 		if p.Order < 0 {
@@ -246,31 +234,32 @@ func (j *Job) validatePlugins() []error {
 //
 // # A job gets exactly the chain it lists
 //
-// Nothing is added that the document did not ask for. There is no implicit set
-// of middleware that is on unless you turn it off, so a chain can be read off
-// the job and no reader has to know a list kept somewhere else.
+// Nothing is added that the document did not ask for, so a chain can be read
+// off the job and no reader has to know a list kept somewhere else.
 //
-// `enabled = false` therefore means precisely what leaving the block out means:
-// the link is not in the chain. The two spellings exist because they are
-// written for different reasons. Deleting a block throws away its
-// configuration; setting enabled = false keeps the configuration and stops the
-// link, which is what you want at three in the morning and what you want when
-// the setting took an afternoon to work out.
+// `enabled = false` therefore means precisely what leaving the block out means.
+// Both spellings exist because they are written for different reasons: deleting
+// a block throws away its configuration, and turning it off keeps it, which is
+// what you want when the setting took an afternoon to work out.
 func (j *Job) Chain(stage Stage) []*Plugin {
-	var out []*Plugin
-	for _, p := range j.Plugins {
-		if Stage(p.Stage) != stage {
-			continue
-		}
-		if !p.IsEnabled() {
-			continue
-		}
-		out = append(out, p)
+	var from []*Plugin
+	switch stage {
+	case StageScheduler:
+		from = j.Scheduler.plugins()
+	case StageDownloader:
+		from = j.Downloader.plugins()
+	case StageSpider:
+		from = j.Spider.plugins()
 	}
 
-	sort.SliceStable(out, func(a, b int) bool {
-		return out[a].order() < out[b].order()
-	})
+	out := make([]*Plugin, 0, len(from))
+	for _, p := range from {
+		if p.IsEnabled() {
+			out = append(out, p)
+		}
+	}
+
+	sort.SliceStable(out, func(a, b int) bool { return out[a].order() < out[b].order() })
 	return out
 }
 
@@ -288,7 +277,7 @@ func (p *Plugin) order() int {
 	if p.Order != 0 {
 		return p.Order
 	}
-	if def, ok := DefaultOrder(Stage(p.Stage), p.Name); ok {
+	if def, ok := DefaultOrder(p.Stage(), p.Name); ok {
 		return def
 	}
 	return 0

@@ -33,7 +33,7 @@ other, and the exporters at the end.
                            ▼
                     ┌──────────────┐      ┌───────────┐
                     │   PIPELINE   ├─────►│ EXPORTERS │
-                    │   (a DAG)    │      └───────────┘
+                    │   (a graph)  │      └───────────┘
                     └──────────────┘
 ```
 
@@ -41,19 +41,59 @@ The scheduler owns the frontier and is the only stage a job may not replace.
 Two schedulers handing out the same host cannot honour a crawl delay between
 them, so politeness forces one decision point per host.
 
+## A stage is a block, its plugins are inside it
+
+Each stage is a block in the job holding two different kinds of thing:
+
+```hcl
+job "example" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+
+  downloader {
+    robots = true            # what the downloader is
+
+    plugin "cache" {         # what has been added to it
+      backend = "s3"
+      bucket  = "pages"
+    }
+  }
+}
+```
+
+**An attribute is behaviour the stage always has.** No meaningful "off", no
+meaningful position in an order, and nowhere else it could have been written.
+
+**A nested plugin is something you added.** It reorders, it turns off, and
+somebody else can write it.
+
+That division is what stops a setting drifting away from whatever enforces it. A
+`max_body` kept in a different block would be a number the downloader might or
+might not be reading, and the way you would find out is by downloading four
+gigabytes.
+
+It also removes the stage label from plugins: the block a plugin is written in
+says which chain it joins, so the two cannot disagree. And the scheduler block
+simply has no `external` attribute, which makes writing one a parse error with a
+line and a column rather than a rule buried in a validator.
+
 ## Chains run both ways
 
-This is the part that makes `order` mean something, and the part that is easy
-to get wrong.
+This is what makes `order` mean something, and the part that is easy to get
+wrong.
 
-A middleware chain is not a list of steps executed once. It wraps the stage, so
-every link sees the request on the way out **and** the response on the way
-back, in opposite orders:
+A chain wraps its stage, so every link sees the request on the way out **and**
+the response on the way back, in opposite orders:
 
 ```
-order:      100        550        900
+order:      500        550        900
          ┌────────┐ ┌────────┐ ┌────────┐
-request  │ robots │→│ retry  │→│ cache  │→ ─┐
+request  │offsite │→│ retry  │→│ cache  │→ ─┐
          │        │ │        │ │        │   │ network
 response │        │←│        │←│        │← ─┘
          └────────┘ └────────┘ └────────┘
@@ -61,27 +101,28 @@ response │        │←│        │←│        │← ─┘
          last back              first back
 ```
 
-Consequences worth stating, because they are the reason the numbers are what
-they are:
-
 - **Low order is nearest the spider, high order is nearest the network.**
-- `robots` at 100 refuses a request before anything else pays for it.
 - `cache` at 900 is the last thing before the network, so a hit short-circuits
   the fetch only after every other request middleware has had its say. This is
-  Scrapy's `HttpCacheMiddleware` placement, and the reasoning is the same.
-- `charset` at 600 sits after `compression` at 590 and before `cache` at 900,
-  so what lands in the cache is decompressed and UTF-8.
+  Scrapy's `HttpCacheMiddleware` placement and the reasoning is the same.
+- `charset` at 600 sits after `compression` at 590 and before `cache` at 900, so
+  what lands in the cache is decompressed and UTF-8.
 
-A link may **short-circuit**: return a response without calling the rest, which
-is how a cache hit works. It may **drop**: refuse the request, which is how
-`robots` and `offsite` work. Both need to be in the plugin contract from the
-start, because they cannot be added to it later without changing every plugin.
+A link may **short-circuit**: return a result without calling the rest, which is
+how a cache hit works. It may **drop**: return `ErrDrop`, which is how offsite
+works. Both are in the contract from the start because neither can be added
+later without changing every link ever written.
+
+`internal/chain` does this by wrapping rather than by hooking a pair of
+`Request` and `Response` methods, which is the shape `net/http` middleware has
+and for the same reasons: short-circuit is not calling next, and a link needing
+state across both directions keeps it in a local variable.
 
 ## The job document
 
 One HCL file holds one or more jobs, submitted and accepted together. A job
-carries everything it needs, so nothing is inherited from whichever server
-picks it up and a job resubmitted next month does what it did today.
+carries everything it needs, so nothing is inherited from whichever server picks
+it up and a job resubmitted next month does what it did today.
 
 ```hcl
 job "news" {
@@ -127,20 +168,9 @@ job "news" {
       transforms = [text, trim]
     }
 
-    property "summary" {
-      type    = str
-      aliases = ["description", "excerpt", "standfirst"]
-    }
-
     property "pubdate" {
       type       = date
       aliases    = ["published", "datePublished"]
-      transforms = [datetime]
-    }
-
-    property "moddate" {
-      type       = date
-      aliases    = ["modified", "dateModified"]
       transforms = [datetime]
     }
 
@@ -152,63 +182,73 @@ job "news" {
     }
   }
 
-  # How the crawl behaves, as opposed to what it is looking for.
-  engine {
-    limits {
-      max_pages = 500
-      max_depth = 4
-      max_time  = "90m"
+  # The frontier: what is queued, in what order, and how hard one host may be
+  # leaned on. Politeness is here rather than in the downloader because pacing
+  # is decided when work is handed out, and because a rate is per host and
+  # shared between jobs.
+  scheduler {
+    policy      = "priority"
+    rate        = "2s"
+    concurrency = 2
+    max_depth   = 4
+    max_pages   = 500
+    max_time    = "90m"
+
+    plugin "cron" {
+      schedule = "0 */6 * * *"
+    }
+  }
+
+  downloader {
+    robots     = true
+    user_agent = "scour"
+    timeout    = "30s"
+    max_body   = 33554432
+
+    plugin "cache" {
+      order   = 900
+      backend = "s3"
+      bucket  = "pages"
     }
 
-    politeness {
-      rate        = "2s"
-      concurrency = 2
-      robots      = true
+    plugin "retry" {
+      order = 550
+      times = 3
+    }
+  }
+
+  spider {
+    plugin "depth" {
+      order = 900
+    }
+  }
+
+  # Item processing, as a dependency graph.
+  pipeline {
+    step "clean" "article" {
+      rule {}
+      rule {}
+    }
+
+    step "rank" "article" {
+      requires = [clean.article]
+    }
+
+    step "python" "enrich" {
+      requires = [clean.article, rank.article]
+      script   = "./enrich.py"
+    }
+
+    step "bash" "notify" {
+      requires = [python.enrich]
+      script   = "./notify.sh"
     }
   }
 
   monitoring {
     metrics = false
-    logging = false
+    logging = true
     level   = "info"
-  }
-
-  # Middleware. Two labels: the stage, then the implementation.
-  plugin "downloader" "cache" {
-    order   = 900
-    backend = "s3"
-    bucket  = "pages"
-  }
-
-  plugin "downloader" "retry" {
-    order = 550
-    times = 3
-  }
-
-  plugin "spider" "depth" {
-    order = 900
-  }
-
-  plugin "scheduler" "priority" {}
-
-  # Item processing, as a dependency graph.
-  pipelines "clean" "article" {
-    rule {}
-    rule {}
-  }
-
-  pipelines "rank" "article" {
-    requires = [clean.article]
-  }
-
-  pipelines "python" "enrich" {
-    requires = [clean.article, rank.article]
-    script   = "./enrich.py"
-  }
-
-  pipelines "bash" "notify" {
-    requires = [python.enrich]
-    script   = "./notify.sh"
   }
 
   # Optional. What to do when this job is resubmitted under a name that is
@@ -231,22 +271,34 @@ job "news" {
 ## Decisions
 
 **Plugins are middleware.** One word for one concept. A plugin is a link in a
-stage's chain, ordered by `order`, and the stage is the first label.
+stage's chain, ordered by `order`, and the block it sits in says which stage.
 
-**Caching is a downloader middleware.** Not an engine setting. A cache sits
-between a request and the network, which is what a downloader middleware is.
-Making it a setting would have made it the one part of the fetch path that
-could not be reordered, replaced or turned off.
+**A stage's settings live in the stage's block.** An attribute is what the stage
+always does; a nested plugin is what was added to it. That is also the answer to
+where caching goes: a cache sits between a request and the network, which is
+what a downloader middleware is, so it is `plugin "cache"` inside `downloader`.
+
+**Obligations are attributes, not plugins.** `robots`, `user_agent`, `timeout`
+and `max_body` were catalogued as middleware and should not have been. A crawl
+with no cache is a valid crawl that costs you money; a crawl with no robots
+handling harms somebody else's server. A thing whose absence hurts a third party
+must not be opt-in through a mechanism that defaults to absent. A knob you can
+deliberately turn off is fine; a mechanism that is silently missing is not.
+
+**Politeness cannot be middleware,** for a structural reason rather than a
+tasteful one. A rate limit is per host and shared: two jobs crawling one site
+must not each get their own allowance. Middleware is per job chain, so it could
+not express that. It lives in the scheduler, which is the one decision point per
+host.
 
 **`order` is explicit, never positional.** A chain whose order depends on where
 a block was written changes when somebody tidies the file.
 
 **Bare words are predeclared, not strings.** `type = str` and
 `transforms = [datetime]` are HCL variable references resolved against a
-vocabulary the parser knows. A typo becomes
-`job.hcl:14,16-19: Unknown variable` with a line and a column, instead of a
-string carried until something later fails to make sense of it. Quoted forms
-still work, because `"str"` and `str` decode to the same value.
+vocabulary the parser knows. A typo becomes `job.hcl:14,16-19: Unknown variable`
+with a line and a column, instead of a string carried until something later
+fails to make sense of it. Quoted forms still work.
 
 **`requires = [clean.article]` is a reference, not a string.** Read as a
 traversal, so a dependency on a step that does not exist is caught when the job
@@ -257,47 +309,32 @@ rest is kept as an opaque body and handed to the plugin's schema when it is
 built. That is what makes a plugin something somebody else can write, and it is
 also when a bad field gets an error with a line number on it.
 
-**Defaults are applied at submission, not at run.** A stored job records what it
-will actually do, rather than inheriting whatever the server meant that day.
+**A job gets exactly the chain it lists.** Nothing is added that the document did
+not ask for, so a chain can be read off the job without knowing a list kept
+somewhere else. `enabled = false` therefore means precisely what leaving the
+block out means. Both spellings exist because deleting a block throws away its
+configuration and turning it off keeps it, which is what you want when the
+setting took an afternoon to work out.
 
-**Every stage chains the same way,** the scheduler included. One mechanism, one
-set of rules about order, one thing to learn. A scheduler plugin is a link in a
-chain exactly as a downloader plugin is.
+**A pipeline step is a node in a graph, not a link in a chain.** One stage, one
+spelling: `step <kind> <name>` with `requires`. Giving it an `order` as well
+would be two ways of saying the same thing, and they would disagree.
+
+**Pipelines run concurrently.** The graph exists so independent work happens at
+the same time. `Waves()` groups the steps whose dependencies are already
+satisfied and which do not depend on each other; a runner starts a wave, waits,
+and starts the next. `Width()` is the widest wave, which is what a runner sizes
+its pool against. `Order()` flattens the same graph for showing a plan.
 
 **Exporters are per item, not per job.** A job extracting articles and comments
 wants them in different files, and an exporter handed both would have to be told
-which was which anyway. The item is the second label, matching how `plugin` and
-`pipelines` already read.
-
-**A pipeline step is a node in a graph, not a link in a chain.** One stage, one
-spelling: `pipelines <kind> <name>` with `requires`. Giving it an `order` as
-well would be two ways of saying the same thing, and they would disagree.
-
-**Pipelines run concurrently.** The graph exists so independent work happens at
-the same time. `Waves()` groups the steps into sets whose dependencies are
-already satisfied and which do not depend on each other; a runner starts a wave,
-waits, and starts the next. `Width()` is the widest wave, which is what a runner
-sizes its pool against. `Order()` flattens the same graph for showing a plan.
-
-**Resubmitting a job name mutates it and applies the changes.** The name is the
-identity: a client resubmitting the same crawl means the same crawl. But what
-"applies" means is not the same for every change, so a diff reports an effect
-per change and whoever accepts the submission decides what to do about the ones
-that are not free.
-
-**A job gets exactly the chain it lists.** Nothing is added that the document
-did not ask for, so a chain can be read off the job without knowing a list kept
-somewhere else. `enabled = false` therefore means precisely what leaving the
-block out means. Both spellings exist because they are written for different
-reasons: deleting a block throws away its configuration, and turning it off
-keeps it, which is what you want when the setting took an afternoon to work out.
+which was which anyway.
 
 **A spider is handed the spec, not the job.** It has no business knowing where
 bodies are cached, what the budget is or which exporters are attached, and
 handing it the whole job would make every one of those look like something it
 might depend on. The spec renders back to HCL, so a spider in another language
-gets the text a person would have written, and an author can check it against
-what they meant.
+gets the text a person would have written.
 
 **The spec is fingerprinted.** Resubmitting mutates a job, so the shape can
 change while the crawl runs, and a record extracted under one shape and
@@ -306,19 +343,17 @@ fingerprint changes exactly when the shape does: not when properties are
 reordered and not when the document is reformatted, because a fingerprint that
 moved for cosmetics would force a re-extraction nobody needed.
 
+**Resubmitting a job name mutates it and applies the changes.** The name is the
+identity. What "applies" means is not the same for every change, so a diff
+reports an effect per change and the `mutation` block says what should happen
+about the ones that are not free.
+
 **Everything has a default, and they are all in one file.** A default written
 next to the field it fills is impossible to review: nobody can answer "what does
 an empty job do?" without reading every file. `internal/engine/defaults.go` is
 the whole list, `Defaults()` prints it, and `Resolved()` returns the job with
 every one filled in, which is what should be stored so that resubmitting next
 month behaves the way it did today.
-
-**A job says what to do about its own mutation.** The diff knows what a
-resubmission would cost; the `mutation` block says what should happen about it,
-so the answer travels with the job rather than living in a flag somebody has to
-remember or a server default that differs between machines. The defaults are
-cautious throughout: refuse what is expensive, drop what is out of bounds, never
-delete anything.
 
 **Nesting requires `object`.** A property with children is an object whatever it
 says, and a mismatch is refused rather than inferred, because silently changing
@@ -327,14 +362,11 @@ a declared type is how a document stops meaning what it reads as.
 ## Plugin catalogue
 
 **A list, not a commitment.** These are positions, not working parts. A name
-here says where something would go if it existed, and nothing more. Four are
-needed to crawl anything; the rest are a queue to work through when there is
-something to work through them with.
-
-What exists is what a registry says exists, and that is asked when a chain is
-built, not when a document is validated. If this table decided what a job may
-name, a catalogue of intentions would validate as a set of working parts and
-the failure would arrive at run time on somebody else's machine.
+here says where something would go if it existed, and nothing more. What exists
+is what a registry says exists, and that is asked when a chain is built, not
+when a document is validated. If this table decided what a job may name, a
+catalogue of intentions would validate as a set of working parts and the failure
+would arrive at run time on somebody else's machine.
 
 The numbers are Scrapy's, because copying a known-good ordering is cheaper than
 rediscovering it. They live in `internal/engine/catalogue.go` and a test holds
@@ -344,11 +376,8 @@ them to what is written here.
 
 | Order | Name | What it does |
 | --- | --- | --- |
-| 100 | `robots` | Refuses what robots.txt forbids |
-| 400 | `useragent` | Sets the User-Agent |
 | 500 | `offsite` | Drops URLs outside `domains` / `included` / `excluded` |
 | 520 | `contenttype` | Refuses by extension and MIME before the body is read |
-| 540 | `timeout` | Per-request deadline |
 | 543 | `cookies` | Session cookies, per host |
 | 544 | `auth` | HTTP authentication |
 | 550 | `retry` | Retries the temporarily failed |
@@ -358,15 +387,17 @@ them to what is written here.
 | **600** | **`charset`** | **Transcodes the body to UTF-8** |
 | 610 | `proxy` | Routes through a proxy |
 | 630 | `redirect` | Follows HTTP redirects |
-| 700 | `maxsize` | Refuses bodies over the limit |
 | 850 | `stats` | Counts requests, responses and failures |
 | 900 | `cache` | Reads and writes the page cache |
 
+`robots`, `user_agent`, `timeout` and `max_body` are not here. They are
+`downloader` attributes, for the reason under Decisions.
+
 `charset` has no Scrapy equivalent, because Scrapy decodes in its response
-object rather than in a middleware. It is not optional here, and it must sit
-after `compression` and before `cache`: bodies are cached transcoded, so the
-corpus is UTF-8 whatever the site served. Getting this wrong does not merely
-score badly, it poisons the evidence every later measurement is taken against.
+object rather than in a middleware. It must sit after `compression` and before
+`cache`: bodies are cached transcoded, so the corpus is UTF-8 whatever the site
+served. Getting this wrong does not merely score badly, it poisons the evidence
+every later measurement is taken against.
 
 ### Spider
 
@@ -381,12 +412,12 @@ score badly, it poisons the evidence every later measurement is taken against.
 ### Scheduler
 
 No Scrapy equivalent: its scheduler is configured rather than extended. scour
-chains it exactly as the downloader is chained, because ordering the frontier
-is most of what a focused crawl is.
+chains it exactly as the downloader is chained, because ordering the frontier is
+most of what a focused crawl is.
 
-A request passes through on its way into the frontier and back out on its way
-to the downloader, so low order is nearest the spider that discovered it and
-high order is nearest the queue.
+A request passes through on its way into the frontier and back out on its way to
+the downloader, so low order is nearest the spider that discovered it and high
+order is nearest the queue.
 
 | Order | Name | What it does |
 | --- | --- | --- |
@@ -394,7 +425,7 @@ high order is nearest the queue.
 | 200 | `offsite` | Drops URLs outside `domains` / `included` / `excluded` |
 | 300 | `cron` | Defers a URL until it is due again |
 | 400 | `budget` | Refuses a URL the job can no longer pay for |
-| 500 | `priority` | Best first, by score. The default |
+| 500 | `priority` | Best first, by score |
 | 500 | `breadth` | Level by level, for an archival crawl |
 | 500 | `depth` | Follows a spur down before returning |
 | 500 | `random` | Samples without the sample being shaped by the scorer |
@@ -402,21 +433,16 @@ high order is nearest the queue.
 `offsite` appears in three chains and that is deliberate, not duplication. The
 spider's keeps an out-of-scope link out of the frontier, the scheduler's catches
 entries that were in scope when they were queued and are not any more, and the
-downloader's is the last check before the network. One concept, one word, three
-places it has to hold.
+downloader's is the last check before the network.
 
-`dupefilter` at 100 drops a URL already seen before anything else pays to think
-about it. The ordering policies sit at 500, against the queue, because deciding
-what comes out next is the last thing that happens on the way in and the first
-on the way out. They share an order because they are alternatives: loading two
-is legal and the later one wins, but it is almost certainly a mistake.
+The ordering policies at 500 are alternatives rather than a chain, and
+`scheduler.policy` is the attribute that picks one. They are catalogued because
+a job may want to bring its own.
 
 ### Pipeline
 
-Not a plugin stage. A pipeline step is a node in a graph, so it is written as
-`pipelines <kind> <name>` and ordered by `requires` rather than by a number.
-Writing `plugin "pipeline" ...` is refused, with a message saying what to write
-instead.
+Not a plugin stage. A step is a node in a graph, written as `step <kind> <name>`
+and ordered by `requires` rather than by a number.
 
 | Kind | What it does |
 | --- | --- |
@@ -430,17 +456,14 @@ instead.
 
 `json`, `jsonlines`, `csv`, `parquet`, `nats`, `sqlite`.
 
-Exporters are per item, named `exporter "<format>" "<item>"`. Every exporter
-naming an item receives a copy of each of those items, so writing one item to
-both json and sqlite is two blocks. An exporter naming an item the job does not
-extract is refused, because silently writing nothing is the failure mode nobody
-notices until they go looking for the output.
+Named `exporter "<format>" "<item>"`. An exporter naming an item the job does
+not extract is refused, because silently writing nothing is the failure mode
+nobody notices until they go looking for the output.
 
 ## Writing a plugin
 
 A link is given the next handler and returns a replacement. Whatever it does
 before calling next is the way out; whatever it does after is the way back.
-This is the shape `net/http` middleware has, for the reasons it has it.
 
 ```go
 func timing(next chain.Handler[*Request, *Response]) chain.Handler[*Request, *Response] {
@@ -453,23 +476,11 @@ func timing(next chain.Handler[*Request, *Response]) chain.Handler[*Request, *Re
 }
 ```
 
-A pair of `Request` and `Response` methods was the obvious alternative and is
-worse in three ways: it needs a convention for a link that wants to
-short-circuit, it makes a link that needs state across both directions stash it
-somewhere, and it cannot express "run this on the way back even though the way
-out failed", which is what a timer and a stats counter both want.
-
-Short-circuit and drop fall out of wrapping rather than needing anything added.
-Return a result without calling next and you have a cache hit; return `ErrDrop`
-and you have robots.txt refusing a URL. A drop is a sentinel rather than an
-ordinary error because a crawl that obeys robots drops requests all day, and
-counting those as failures would make a working crawl look broken.
-
-A plugin is registered by name, built from its undecoded body:
+A plugin is registered by name and built from its undecoded body:
 
 ```go
 func init() {
-    downloader.Register("cache", func(body hcl.Body) (Downloader, error) {
+    downloader.Register("cache", func(ctx context.Context, body hcl.Body) (Middleware, error) {
         var cfg struct {
             Backend string `hcl:"backend,optional"`
             Bucket  string `hcl:"bucket,optional"`
@@ -481,9 +492,8 @@ func init() {
 ```
 
 A plugin scour does not ship is accepted, because a plugin somebody else wrote
-is the point. What it cannot do is stay silent about where it goes: a built-in
-has a default `order`, and anything else has to say, so a submission naming an
-unknown plugin with no order is refused.
+is the point. What it cannot do is stay silent about where it goes: a catalogued
+name has a default `order`, and anything else has to say.
 
 ## Across machines
 
@@ -494,14 +504,10 @@ Servers join to form a cluster, and jobs run across it.
 - Jobs live in JetStream so any node can see them. Work distributes by queue
   group, so downloaders on different nodes pull from one subject with no
   coordinator.
-- **Bring your own stage.** Because stages talk over the bus rather than
-  calling each other, a spider somebody else wrote in another language is a
-  subscriber, not a fork. A job declares which stages it is bringing, and scour
-  publishes that stage's input and waits for its output instead of running its
-  own.
 - Bodies never travel on the bus. The cache holds them; messages carry the key.
-
-A job that brings its own spider:
+- **Bring your own stage.** Because stages talk over the bus rather than calling
+  each other, a spider somebody else wrote in another language is a subscriber,
+  not a fork. The stage says so itself:
 
 ```hcl
 job "news" {
@@ -513,32 +519,40 @@ job "news" {
     }
   }
 
-  engine {
-    components {
-      external = ["spider"]
-      timeout  = "10m"
-    }
+  spider {
+    external         = true
+    external_timeout = "10m"
   }
 }
 ```
 
-The scheduler cannot appear in that list. It is extended with plugins, never
-replaced, because two schedulers handing out the same host cannot honour a
-crawl delay between them.
+The `scheduler` block has no `external` attribute, so it cannot be handed over.
 
-Open: **job placement.** A job naming a local cache directory can only run
-where that directory is, so either placement is constrained by config or a job
-with a local cache is a single-node job by definition.
+Open: **job placement.** A job naming a local cache directory can only run where
+that directory is, so either placement is constrained by config or a job with a
+local cache is a single-node job by definition.
 
 ## Open questions
 
-**`politeness.robots` and `plugin "downloader" "robots"` are two mechanisms for
-one thing.** A job gets exactly the chain it lists, so robots.txt is only obeyed
-if the job lists the plugin, while `politeness.robots` defaults to true and
-reads as though it were the switch. By the argument that moved the cache out of
-the engine block, robots belongs to its plugin and `politeness` should be
-configuration the plugins read rather than settings the engine holds. Unresolved,
-and it is the same question for `rate` and `concurrency`.
+**What happens to work already done, in detail?** The `mutation` block says
+`drop` or `keep` or `reextract`. Whether a dropped frontier entry is deleted or
+merely marked, and whether a re-extraction re-runs the whole corpus or only what
+the changed property touches, is not decided.
+
+**Does an external stage get the spec pushed, or pull it?** The spec is
+separable and fingerprinted, so either works. Pushing it with every response
+wastes bandwidth; pulling it needs a request-reply the stage has to implement.
+
+**How does a run know it is finished?** An empty frontier is not enough: work
+may be leased, a response in flight, and an item mid-graph. Quiescence across
+four stages is the genuinely new distributed-systems problem here.
+
+**Where does the frontier live?** Nothing else in scour needs a database: bodies
+are in the cache, config is the job document, records are append-only. The
+frontier needs a priority queue with dedup and leases, which NATS cannot do
+because JetStream is FIFO and a focused crawl is ranking. Politeness argues for
+one writer per host, which would make SQLite correct and sharding by host the
+scaling story. Undecided, and it blocks the scheduler.
 
 ## Status
 
@@ -546,31 +560,22 @@ and it is the same question for `rate` and `concurrency`.
 | --- | --- |
 | `internal/cache` interface, registry, keying | Built, tested |
 | Backends: local, s3, gcs | Built, one shared contract suite, all passing |
-| HCL job document, nested blocks, multiple jobs | Built, tested |
-| Vocabulary: bare types and transforms | Built, tested |
-| Validation, every problem reported at once | Built, tested |
-| Plugin blocks, undecoded bodies, chain ordering | Built, tested. No plugin *implementations* yet |
-| Pipelines DAG: references, cycles, topological order | Built, tested |
-| Pipeline waves, for running independent steps at once | Built, tested |
-| Resubmission diff, with an effect per change | Built, tested |
-| Mutation policy: what a resubmission does to work already done | Built, tested |
-| Extraction spec: separable, renders to HCL, fingerprinted | Built, tested |
-| Defaults for every setting, in one file, with a resolved view | Built, tested |
 | `internal/registry`, generic, shared by every extension point | Built, cache runs on it |
 | `internal/chain`, middleware that wraps, with drop and short-circuit | Built, tested |
+| HCL job document, stage blocks, nested plugins, multiple jobs | Built, tested |
+| Vocabulary: bare types and transforms | Built, tested |
+| Validation, every problem reported at once | Built, tested |
+| Chain ordering, catalogued defaults | Built, tested |
+| Pipeline graph: references, cycles, topological order, waves | Built, tested |
+| Extraction spec: separable, renders to HCL, fingerprinted | Built, tested |
+| Defaults for every setting, in one file, with a resolved view | Built, tested |
+| Resubmission diff and mutation policy | Built, tested |
 | Plugin implementations, all of them | Not started |
-| Scheduler, downloader, spider, pipeline stages | Not started |
+| The stages themselves | Not started |
 | Exporters, all formats | Not started |
 | Cluster join, distributed jobs | Not started |
 
-`internal/engine/notes_test.go` reads this file. It parses and validates the
-job document above, and compares every number in the catalogue tables with the
+`internal/engine/notes_test.go` reads this file. It parses and validates the job
+documents in it, and compares every number in the catalogue tables with the
 catalogue the code uses. If the notes and the code disagree, the tests fail,
 which is the only way a document like this stays true.
-
-## Corrections applied to the original sketch
-
-`pipelines "bash"` had one label where every other block has two, and HCL
-requires a fixed label count. `pubdata` read as `pubdate`, `publised` as
-`published`. `summary` and `body` carried copy-pasted aliases belonging to
-other properties. The `http://` start URL became `https://`.

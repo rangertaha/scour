@@ -48,11 +48,8 @@ type Placement struct {
 // have, by stage. Almost none of them are written yet.
 var Placements = map[Stage][]Placement{
 	StageDownloader: {
-		{"robots", 100, "Refuses what robots.txt forbids"},
-		{"useragent", 400, "Sets the User-Agent"},
 		{"offsite", 500, "Drops URLs outside domains, included and excluded"},
 		{"contenttype", 520, "Refuses by extension and MIME before the body is read"},
-		{"timeout", 540, "Per-request deadline"},
 		{"cookies", 543, "Session cookies, per host"},
 		{"auth", 544, "HTTP authentication"},
 		{"retry", 550, "Retries the temporarily failed"},
@@ -62,7 +59,6 @@ var Placements = map[Stage][]Placement{
 		{"charset", 600, "Transcodes the body to UTF-8"},
 		{"proxy", 610, "Routes through a proxy"},
 		{"redirect", 630, "Follows HTTP redirects"},
-		{"maxsize", 700, "Refuses bodies over the limit"},
 		{"stats", 850, "Counts requests, responses and failures"},
 		{"cache", 900, "Reads and writes the page cache"},
 	},
