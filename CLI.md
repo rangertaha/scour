@@ -24,6 +24,61 @@ scour apply job.hcl        # do it
 with an effect per change, so a plan can say *raising a page budget is free* and
 *narrowing scope will drop 1,204 queued URLs* before anything happens.
 
+## The CLI is a client
+
+Everything that touches running state goes to a server. The CLI holds no
+frontier, no records and no idea what is running, so it asks.
+
+That splits the surface in two, and the split is worth being explicit about
+because it decides what works on a plane.
+
+**Local. Needs no server, ever.**
+
+```
+scour init        scour validate      scour show
+scour spec        scour defaults      scour try        scour train
+```
+
+These read a file and write a file. `try` and `train` are local on purpose: the
+loop a person is in while writing a job should not require standing up a
+cluster, and both work against the cache on disk.
+
+**Remote. Needs a server.**
+
+```
+scour plan        scour apply         scour ls         scour status
+scour logs        scour pause         scour resume     scour stop
+scour rm          scour records       scour nodes
+```
+
+### Why the server does the thinking
+
+`plan` cannot be computed here. A diff is *submitted document* against *running
+job*, and the CLI has only the first. So `plan` sends the document and renders
+what comes back.
+
+The same goes for accepting one. The server validates, diffs, applies the
+`mutation` policy and writes the result; the CLI never writes storage directly.
+One place enforces the rules, or an old client bypasses a newer one.
+
+`validate` is the exception that proves it: it does not reach the network at
+all, which is what makes it work offline and in CI, and is why it cannot know
+whether a plugin somebody else's node registers exists.
+
+### Connecting
+
+| Flag | Effect |
+| --- | --- |
+| `--server <url>` | Where the cluster is. Defaults to `nats://127.0.0.1:4222` |
+| `--timeout <duration>` | How long to wait for an answer |
+
+`SCOUR_SERVER` sets the same thing, so a shell that already knows which cluster
+it is pointed at does not repeat itself.
+
+A remote command with no server reachable says so, and says which address it
+tried. "connection refused" on its own has sent more people to the wrong
+problem than any other error message.
+
 ## Flat, not nested
 
 `scour validate`, not `scour job validate`.
@@ -383,6 +438,9 @@ scour stop <job>           Stop, and keep everything
 scour rm <job>             Forget it
 ```
 
+The document goes to the server, which has the running job to compare it with,
+and answers with the changes and what each costs.
+
 ```console
 $ scour plan job.hcl
 news: 3 changes
@@ -445,6 +503,10 @@ spec.hcl` writes a spec and not a spec with a progress line in the middle of it.
 **`--format json` wherever there is structure.** Human by default, because the
 common case is a person. Never a third format nobody maintains.
 
+**A remote command that cannot reach a server fails with code 3, not 1.** The
+document was not refused; nothing looked at it. Conflating those would tell a
+build the file is wrong when the cluster is down.
+
 **A file argument is positional.** `scour validate job.hcl`, not
 `scour validate --file job.hcl`. It is the subject of the sentence.
 
@@ -484,7 +546,9 @@ where that becomes an error.
 ## What exists today
 
 `init`, `validate`, `show`, `spec` and `defaults` are built and tested. They
-need only the engine package. Everything under Running, Output and The install
+are all local, which is why they work with nothing else built: they need only
+the engine package. The `--server` and `--timeout` flags arrive with the first
+command that has something to ask. Everything under Running, Output and The install
 waits on the stages.
 
 `cmd/scour/main_test.go` drives the whole command line, arguments and all,
