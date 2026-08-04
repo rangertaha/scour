@@ -49,26 +49,47 @@ scour defaults             Every default and its value
 
 #### `scour init [name]`
 
-Prints a small, commented job that validates as it stands, so it can be run and
-then grown. To stdout, so it composes:
+Prints a job that validates as it stands, so it can be run and then grown. To
+stdout, so it composes:
 
 ```console
-$ scour init news > news.hcl
+$ scour init --list
+basic      The plainest job that works. Start here
+listing    A directory of entries: jobs, venues, courses
+news       Articles: headline, byline, dates, body
+product    A shop: name, price, availability, images
+
+$ scour init news --template news > news.hcl
 $ scour validate news.hcl
 news.hcl: ok, 1 job(s): news
 ```
 
 | Flag | Effect |
 | --- | --- |
+| `-t`, `--template <name>` | Which starting point. Defaults to `basic` |
+| `--list` | List the templates and what they are for |
 | `-o`, `--out <file>` | Write to a file instead of stdout |
 | `--force` | Overwrite the file if it is already there |
+
+**The templates differ in what they extract, not in how they crawl.** All of
+them are polite, budgeted and cached, because a starting point gets copied
+without being read and its defaults are what most crawls will actually run at.
+Tests hold them to that: robots on, no faster than the default rate, a page
+ceiling, and a concurrency nobody would notice.
+
+**None of them contains a locator.** No `xpath`, no `css`, because the ones that
+work depend on the site and a wrong selector shipped in a template is worse than
+an absent one. They carry `aliases` instead, which is how a property is found
+before anything has been learned, and `scour train` proposes the rest once there
+are pages to look at.
 
 Writing to a file refuses to clobber one, because somebody running this twice in
 a directory they have been working in should not lose what they wrote the first
 time. Printing to stdout has no such problem, which is why it is the default.
 
-A test asserts that what `init` prints validates. A sample that does not work is
-worse than none, since the first thing anybody does with it is assume it does.
+A test renders every template, validates it, and checks it extracts something
+and has somewhere to put it. A sample that does not work is worse than none,
+since the first thing anybody does with it is assume it does.
 
 #### `scour validate <file>`
 

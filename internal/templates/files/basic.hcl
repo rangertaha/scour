@@ -1,35 +1,11 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-
-package engine
-
-import (
-	"fmt"
-	"strings"
-)
-
-// Example returns a starter job document, commented.
-//
-// It lives here rather than in the command line because the document is this
-// package's language, and because a test here validates it: a sample that does
-// not parse is worse than none, since the first thing anybody does with it is
-// assume it works.
-//
-// It is deliberately small. Everything left out has a default, and the point of
-// a starting document is to be read in one sitting and then grown, not to be a
-// catalogue of what is possible with most of it commented out.
-func Example(name string) []byte {
-	if strings.TrimSpace(name) == "" {
-		name = "example"
-	}
-
-	return fmt.Appendf(nil, `# A scour job. Everything a crawl needs is in here, so this document is the
+# A scour job. Everything a crawl needs is in here, so this document is the
 # whole of what it does: nothing is inherited from the server that runs it.
 #
-#   scour validate %[1]s.hcl    check it
-#   scour show     %[1]s.hcl    see it with every default filled in
-#   scour spec     %[1]s.hcl    see what the extractor is handed
+#   scour validate {{.Name}}.hcl    check it
+#   scour show     {{.Name}}.hcl    see it with every default filled in
+#   scour try      {{.Name}}.hcl    run one page and see what came out
 
-job %[1]q {
+job {{.Name | quote}} {
   # Where the crawl starts, and how far it may wander.
   start    = ["https://example.com/"]
   domains  = ["example.com"]
@@ -38,6 +14,7 @@ job %[1]q {
 
   # What to pull out of a page. Aliases are the other names a field goes by,
   # which is what lets it be found on a site that calls it something else.
+  # Leave xpath and css empty and let `scour train` propose them.
   item "article" {
     property "url" {
       type       = str
@@ -92,6 +69,4 @@ job %[1]q {
   exporter "json" "article" {
     dir = "./out"
   }
-}
-`, name)
 }

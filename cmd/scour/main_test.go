@@ -309,3 +309,59 @@ func mustInit(t *testing.T) []byte {
 	}
 	return []byte(out)
 }
+
+// Templates.
+
+func TestEveryTemplateInitsAndValidates(t *testing.T) {
+	listed, _, code := run(t, "init", "--list")
+	if code != cli.ExitOK {
+		t.Fatalf("--list exited %d", code)
+	}
+	if strings.TrimSpace(listed) == "" {
+		t.Fatal("--list printed nothing")
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(listed), "\n") {
+		name := strings.Fields(line)[0]
+
+		t.Run(name, func(t *testing.T) {
+			sample, _, code := run(t, "init", "crawl", "--template", name)
+			if code != cli.ExitOK {
+				t.Fatalf("init exited %d", code)
+			}
+			if !strings.Contains(sample, `job "crawl"`) {
+				t.Errorf("the template is not named after the argument:\n%s", sample)
+			}
+
+			path := write(t, name+".hcl", sample)
+			stdout, stderr, code := run(t, "validate", path)
+			if code != cli.ExitOK {
+				t.Fatalf("the %s template does not validate: %d\n%s%s", name, code, stdout, stderr)
+			}
+			// And it is a job somebody can immediately look at.
+			if _, _, code := run(t, "show", path); code != cli.ExitOK {
+				t.Errorf("show exited %d on the %s template", code, name)
+			}
+		})
+	}
+}
+
+func TestUnknownTemplateIsAUsageError(t *testing.T) {
+	_, stderr, code := run(t, "init", "--template", "carrier-pigeon")
+	if code != cli.ExitUsage {
+		t.Fatalf("exited %d, want a usage error", code)
+	}
+	// Guessing twice is worse than being told once.
+	if !strings.Contains(stderr, "basic") {
+		t.Errorf("the error does not list what there is: %s", stderr)
+	}
+}
+
+func TestInitDefaultsToTheBasicTemplate(t *testing.T) {
+	byDefault, _, _ := run(t, "init", "j")
+	explicit, _, _ := run(t, "init", "j", "--template", "basic")
+
+	if byDefault != explicit {
+		t.Error("init with no template is not the basic template")
+	}
+}
