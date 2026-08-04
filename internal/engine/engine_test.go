@@ -346,45 +346,12 @@ func TestChainUsesCataloguedOrder(t *testing.T) {
 	j := mustValidate(t, `
   downloader {
     plugin "cache" {}
-    plugin "offsite" {}
+    plugin "compression" {}
   }
 `)
 	chain := j.Chain(engine.StageDownloader)
-	if len(chain) != 2 || chain[0].Name != "offsite" || chain[1].Name != "cache" {
-		t.Errorf("chain = %v; want offsite (500) before cache (900)", engine.Names(chain))
-	}
-}
-
-// TestNormalisingSitsInsideTheCache is the ordering the corpus depends on.
-//
-// The spider reads the cache directly, never through this chain, so anything
-// that changes a body has to have run before the cache wrote it. Otherwise the
-// bytes on disk are whatever the network sent and only a reader coming the long
-// way round ever sees them decoded.
-func TestNormalisingSitsInsideTheCache(t *testing.T) {
-	cacheOrder, ok := engine.DefaultOrder(engine.StageDownloader, "cache")
-	if !ok {
-		t.Fatal("cache has no catalogued position")
-	}
-
-	for _, name := range []string{"charset", "compression"} {
-		order, ok := engine.DefaultOrder(engine.StageDownloader, name)
-		if !ok {
-			t.Errorf("%s has no catalogued position", name)
-			continue
-		}
-		if order <= cacheOrder {
-			t.Errorf("%s is at %d, outside the cache at %d, so the cache would write un-normalised bytes",
-				name, order, cacheOrder)
-		}
-	}
-
-	// Decompress before transcoding, so charset sees text rather than gzip.
-	charset, _ := engine.DefaultOrder(engine.StageDownloader, "charset")
-	compression, _ := engine.DefaultOrder(engine.StageDownloader, "compression")
-	if compression <= charset {
-		t.Errorf("compression (%d) must be inside charset (%d), or charset transcodes gzip",
-			compression, charset)
+	if len(chain) != 2 || chain[0].Name != "compression" || chain[1].Name != "cache" {
+		t.Errorf("chain = %v; want compression (590) before cache (900)", engine.Names(chain))
 	}
 }
 

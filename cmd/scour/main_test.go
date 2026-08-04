@@ -151,7 +151,7 @@ job "news" {
 
   downloader {
     plugin "cache" {}
-    plugin "offsite" {}
+    plugin "compression" {}
   }
 
   pipeline {
@@ -180,7 +180,7 @@ job "news" {
 		}
 	}
 	// The chain in the order it runs, which is the reason order numbers exist.
-	if !strings.Contains(stdout, "offsite(500) -> cache(900)") {
+	if !strings.Contains(stdout, "compression(590) -> cache(900)") {
 		t.Errorf("show does not report the chain in run order:\n%s", stdout)
 	}
 	// The graph as waves, because a flat list hides the concurrency.
