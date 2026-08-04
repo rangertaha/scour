@@ -4,6 +4,8 @@ go 1.25.0
 
 require (
 	github.com/hashicorp/hcl/v2 v2.24.0
+	github.com/urfave/cli/v3 v3.10.1
+	github.com/zclconf/go-cty v1.16.3
 	gocloud.dev v0.46.0
 )
 
@@ -57,7 +59,6 @@ require (
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
-	github.com/zclconf/go-cty v1.16.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.42.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.67.0 // indirect
