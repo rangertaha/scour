@@ -163,6 +163,101 @@ source.
 | `--json` | Print as JSON |
 
 
+### Developing a job
+
+The loop a person is actually in: change a selector, see what it pulls out, and
+do it again. It has to be fast, which means it must not touch the network twice
+for the same page.
+
+```
+scour try <file> [url]     Run one page and show what came out
+scour train <file>         Read the cache, propose locators, write them back
+```
+
+#### `scour try <file> [url]`
+
+Fetches one page, caches it, and runs it through extraction, printing what each
+property found.
+
+**The cache is used first, always.** A URL already in the cache is not fetched
+again, so the second run and the two hundredth cost nothing and the site is
+asked once. That is the whole reason this is usable as a development loop: the
+edit-run cycle is against bytes on disk, not against somebody's server.
+
+| Flag | Effect |
+| --- | --- |
+| `--url <url>` | The page, if not given positionally. Defaults to the job's first start URL |
+| `--refresh` | Fetch even if it is cached, and replace what is there |
+| `--item <name>` | Only this shape |
+| `--strict` | Exit non-zero if a required property found nothing |
+| `--json` | Print as JSON |
+
+```console
+$ scour try news.hcl https://example.com/story/1
+fetched  https://example.com/story/1  200  48.2 kB  text/html  (cached)
+
+article
+  url        https://example.com/story/1        <link rel=canonical>
+  title      "Something happened yesterday"     <h1 class=headline>
+  published  2026-08-04T09:15:00Z               <time datetime>
+  body       4,812 characters                   <div class=article-body>
+
+4 of 4 properties found.
+```
+
+Showing *where* each value came from is the point. A value on its own does not
+tell you whether the locator will hold on the next page; the node it came from
+does.
+
+`--strict` is for CI: a job whose `required` properties stopped matching has
+broken, and that should fail a build rather than quietly export nothing.
+
+#### `scour train <file>`
+
+Reads the pages already in the cache, works out how to find each property, and
+writes the locators back into the document.
+
+**The locators go into the document, as text.** Not into a model file, not into
+a database. The reason is that induction is a guess and a guess should be
+readable: `xpath = ["//h1[@class='headline']"]` is something a person can look
+at, disagree with, correct, and commit. A binary model can only be trusted or
+retrained.
+
+```console
+$ scour train news.hcl
+read 312 pages from the cache
+
+article
+  title      //h1[@class='headline']         308/312 pages
+  published  //time/@datetime                295/312
+  body       //div[@class='article-body']    311/312
+  author     //span[@class='byline']          97/312   weak
+
+Writing to news.hcl would change 4 properties. Pass --write to do it.
+```
+
+| Flag | Effect |
+| --- | --- |
+| `--write` | Edit the document in place instead of printing what would change |
+| `--item <name>` | Only this shape |
+| `--min <n>` | Ignore a locator matching fewer than this share of pages, as a percentage |
+| `--replace` | Also replace locators that are already there |
+
+Two rules about writing, and they are the ones worth arguing with:
+
+**A locator a person wrote is never replaced.** Training fills in what is empty
+and leaves alone what is not, unless `--replace` says otherwise. The document is
+the source of truth and a human's correction outranks a fresh guess, or the loop
+becomes: correct it, retrain, lose the correction, correct it again.
+
+**Comments and formatting survive.** The document is edited rather than
+regenerated, so the notes somebody left themselves are still there afterwards.
+This is why it is written with `hclwrite` and not with a template.
+
+The match count is written beside each locator as a comment, because a locator
+that worked on 97 of 312 pages and one that worked on 311 deserve different
+amounts of trust, and that number is invisible once the guess is in the file.
+
 ### Running
 
 These arrive with the engine.

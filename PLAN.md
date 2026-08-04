@@ -44,6 +44,16 @@ ordering policies, leases.
 *Proved by:* a recorded frontier handed out in the order each policy claims,
 and a lease that expires and is handed out again.
 
+**Phase 3.5. `scour try`, the development loop.** One page, fetched once,
+cached, and re-run against the cache from then on.
+
+Worth its own phase because it is the first thing that is *useful* rather than
+merely correct, and because it forces the cache and the downloader to work
+together before anything depends on them at scale. It also needs no scheduler:
+one URL, no frontier.
+
+*Proved by:* a second run against a local server that the server never sees.
+
 **Phase 4. The spider.** Parsing a response into items against the `item` and
 `property` blocks, and discovering links.
 
@@ -53,6 +63,18 @@ number rather than a pass or a fail.
 
 *Proved by:* a corpus, and per-field fill rates that get written down. The old
 implementation's numbers are on the `main` branch and are the bar.
+
+**Phase 4.5. `scour train`, locators written back into the document.**
+Induction over the cached pages, proposing an xpath or a css selector per
+property, edited into the job with `hclwrite` so comments survive.
+
+This is where the old implementation's induction returns, in a form that can be
+argued with: a locator in the document is something a person reads, corrects and
+commits, and a correction is never overwritten by a later guess. That last rule
+is the one that makes the loop converge instead of going in circles.
+
+*Proved by:* training over a corpus, hand-correcting one locator, retraining,
+and finding the correction still there.
 
 **Phase 5. Pipelines and exporters.** The DAG runner over `Waves()`, and the
 formats.
@@ -137,12 +159,18 @@ Phase 4 has its numbers, and deleted the day after.
 catalogued. Four are needed to crawl anything. The rest are a list to work
 through when there is something to work through them with, not Phase 2.
 
-## Not in this plan
+## Where induction went
 
-Training and induction. The old implementation learned locators from a corpus,
-and the job document now lets a person write `xpath` and `css` directly. Which
-of those is the product, and whether induction returns, is a question for after
-Phase 4 has numbers to compare against.
+The old implementation learned locators from a corpus into a model file. The job
+document now holds `xpath` and `css` directly, so induction has somewhere better
+to put its answer: back into the document, as text, where it can be read and
+corrected.
+
+That reframes what was an open question into a design. `scour train` proposes,
+the person disposes, and the model is a file in version control rather than an
+artefact nobody can inspect. What is still open is whether the learned locators
+are the product or a starting point, and that is answerable only once Phase 4
+has numbers to compare against the ones on `main`.
 
 ## Status
 
@@ -153,7 +181,9 @@ Phase 4 has numbers to compare against.
 | 1. The chain | Not started |
 | 2. Downloader and the four middleware | Not started |
 | 3. Frontier and scheduler | Blocked on the store decision |
+| 3.5. `scour try`, the development loop | Not started |
 | 4. Spider | Not started |
+| 4.5. `scour train`, locators into the document | Not started |
 | 5. Pipelines and exporters | Not started |
 | 6. The bus | Not started |
 | 7. The cluster | Not started |
