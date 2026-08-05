@@ -365,3 +365,101 @@ func names(entities []*entity.Entity) string {
 	}
 	return strings.Join(out, ", ")
 }
+
+// TestAPageDescribesTheEntityItNames.
+//
+// The feature this step was extended for, exercised through a document rather
+// than through the store, which is where it turned out not to work: an
+// entity-typed property with nested properties is the shape the step reads, and
+// validation refused exactly that shape, so nothing anybody could write reached
+// the code. The store's own tests passed the whole time, because they called
+// Describe directly.
+//
+// `author.role` is the person's role, not the article's. Putting it on the
+// article would attach it to every other article that person wrote.
+func TestAPageDescribesTheEntityItNames(t *testing.T) {
+	dir := t.TempDir()
+
+	src := `
+job "news" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+
+    property "author" {
+      type   = entity
+      entity = "person"
+
+      property "role" {
+        type = str
+      }
+
+      property "beat" {
+        type = str
+      }
+    }
+  }
+
+  pipeline {
+    step "entities" "article" {
+      dir = "` + dir + `"
+    }
+  }
+}
+`
+	doc, err := engine.Parse([]byte(src), "job.hcl")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("a document declaring what a page says about an author was refused: %v", err)
+	}
+
+	graph, err := pipeline.New(context.Background(), doc.Jobs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer graph.Close()
+
+	in := &record.Record{
+		Item: "article", URL: "https://example.com/a", Spec: "abc",
+		Fetched: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC),
+		Values: map[string]string{
+			"title":       "A story",
+			"author":      "Alex Doe",
+			"author.role": "correspondent",
+			"author.beat": "climate",
+		},
+	}
+	if _, err := graph.Run(context.Background(), []*record.Record{in}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	store, err := entity.New(context.Background(), entity.Config{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	person, err := store.Find(context.Background(), "person", "Alex Doe")
+	if err != nil {
+		t.Fatalf("the author was not asserted: %v", err)
+	}
+
+	props, err := store.Properties(context.Background(), person.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(props) != 2 {
+		t.Fatalf("Properties = %+v, want what the page said about the person", props)
+	}
+	if props[0].Name != "role" || props[0].Value != "correspondent" {
+		t.Errorf("props[0] = %+v, want the role, in the shape's order", props[0])
+	}
+	if props[1].Name != "beat" || props[1].Value != "climate" {
+		t.Errorf("props[1] = %+v, want the beat second", props[1])
+	}
+}

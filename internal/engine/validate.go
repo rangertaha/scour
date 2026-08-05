@@ -267,9 +267,18 @@ func validateProperties(props []*Property, where string) []error {
 		// mismatch is an error rather than an inference, because silently
 		// changing a declared type is how a document stops meaning what it
 		// reads as.
-		if len(p.Properties) > 0 && p.Type != "" && Type(p.Type) != TypeObject {
+		//
+		// An entity is the exception, and refusing it made the entity graph's
+		// properties unreachable from any document: an entity reference is a
+		// name that refers to something, and its children describe the thing
+		// referred to rather than the item. `author.role` is the person's role,
+		// which is exactly what the entities step reads and what nothing could
+		// express until this stopped refusing it.
+		if len(p.Properties) > 0 && p.Type != "" &&
+			Type(p.Type) != TypeObject && Type(p.Type) != TypeEntity {
 			problems = append(problems, fmt.Errorf(
-				"%s: has nested properties but is typed %s, which only object can hold", path, p.Type))
+				"%s: has nested properties but is typed %s, which only object and entity can hold",
+				path, p.Type))
 		}
 
 		problems = append(problems, validateProperties(p.Properties, path)...)

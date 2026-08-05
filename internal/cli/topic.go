@@ -11,7 +11,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hashicorp/hcl/v2/hclwrite"
 	ucli "github.com/urfave/cli/v3"
+	"github.com/zclconf/go-cty/cty"
 
 	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/classify"
@@ -379,6 +381,23 @@ func proposeLabels(ctx context.Context, a *App, path, corpusDir string, limit in
 	return nil
 }
 
+// hclString renders a string as HCL, which is not what %q renders.
+//
+// An HCL quoted string is a template: `${` opens an interpolation and `%{` a
+// directive, and the escapes for them are `$${` and `%%{`, which Go's %q knows
+// nothing about. A crawled URL carrying `${` is not exotic, and one written
+// with %q turned the labels file into a document that no longer parsed, with an
+// HCL diagnostic about an unknown variable rather than an error naming the URL.
+// Since propose rewrites the file in place, the person's corrections were then
+// in a file only a hand edit could recover. %q also emits Go's \xNN for bytes
+// that are not valid UTF-8, which HCL's scanner rejects outright.
+//
+// hclwrite is the library that knows the answer, and it was already in the
+// module and imported nowhere.
+func hclString(value string) string {
+	return string(hclwrite.TokensForValue(cty.StringVal(value)).Bytes())
+}
+
 // writeLabels rewrites a labels document.
 //
 // Rendered rather than edited in place, unlike the job document. A job document
@@ -395,11 +414,11 @@ func writeLabels(path string, doc *engine.Topics) error {
 	b.WriteString("// and corrected by hand: what you move between the lists is what wins.\n")
 
 	for _, one := range doc.Topics {
-		fmt.Fprintf(&b, "\ntopic %q {\n", one.Name)
+		fmt.Fprintf(&b, "\ntopic %s {\n", hclString(one.Name))
 		if len(one.Terms) > 0 {
 			fmt.Fprintf(&b, "  terms = [\n")
 			for _, term := range one.Terms {
-				fmt.Fprintf(&b, "    %q,\n", term)
+				fmt.Fprintf(&b, "    %s,\n", hclString(term))
 			}
 			fmt.Fprintf(&b, "  ]\n")
 		}
@@ -415,7 +434,7 @@ func writeLabels(path string, doc *engine.Topics) error {
 
 			fmt.Fprintf(&b, "\n  %s = [\n", list.name)
 			for _, url := range sorted {
-				fmt.Fprintf(&b, "    %q,\n", url)
+				fmt.Fprintf(&b, "    %s,\n", hclString(url))
 			}
 			fmt.Fprintf(&b, "  ]\n")
 		}

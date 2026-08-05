@@ -290,3 +290,47 @@ topic "climate" {
 		t.Errorf("the refusal does not name the subject: %s", got.stderr)
 	}
 }
+
+// TestALabelsFileSurvivesAnAwkwardURL.
+//
+// An HCL quoted string is a template: `${` opens an interpolation, and the
+// escape for a literal one is `$${`. Go's %q knows nothing about that, so a
+// crawled URL carrying `${` was written unescaped and the labels file stopped
+// parsing, with a diagnostic about an unknown variable rather than an error
+// naming the URL. Since propose rewrites the file in place, the corrections in
+// it were then recoverable only by hand.
+func TestALabelsFileSurvivesAnAwkwardURL(t *testing.T) {
+	server := twoSubjects(t)
+	dir := corpusFor(t, server)
+
+	awkward := server.URL + "/r?u=${next}"
+	escaped := strings.ReplaceAll(awkward, "${", "$${")
+
+	labels := filepath.Join(dir, "labels.hcl")
+	if err := os.WriteFile(labels, []byte(
+		"\ntopic \"climate\" {\n  terms = [\"emissions\", \"carbon\"]\n\n  about = [\n    \""+
+			escaped+"\",\n  ]\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := scour(t, dir, "topic", "propose", labels, "--write"); got.code != 0 {
+		t.Fatalf("propose: exit %d\n%s%s", got.code, got.stdout, got.stderr)
+	}
+
+	// The file it wrote is still a labels document.
+	again := scour(t, dir, "topic", "propose", labels)
+	if again.code != 0 {
+		t.Fatalf("the rewritten document no longer parses: exit %d\n%s", again.code, again.stderr)
+	}
+
+	text, err := os.ReadFile(labels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(text), "$${next}") {
+		t.Errorf("the interpolation was not kept escaped for HCL:\n%s", text)
+	}
+	if strings.Contains(string(text), "\""+awkward+"\"") {
+		t.Errorf("the URL was written as a live template:\n%s", text)
+	}
+}
