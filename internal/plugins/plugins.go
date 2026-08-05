@@ -47,6 +47,8 @@ import (
 
 	// Exporters.
 	_ "github.com/rangertaha/scour/internal/exporter/files"
+	_ "github.com/rangertaha/scour/internal/exporter/nats"
+	_ "github.com/rangertaha/scour/internal/exporter/sqlite"
 
 	// Classifier kinds, which the topic middleware builds from a stored model.
 	_ "github.com/rangertaha/scour/internal/classify/bayes"

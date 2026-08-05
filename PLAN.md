@@ -118,9 +118,18 @@ number rather than a pass or a fail.
 *Proved by:* a corpus, and per-field fill rates that get written down. The old
 implementation's numbers are on the `main` branch and are the bar.
 
-*Where it is:* built and tested. Four ways to find a value, taught before
-guessed, and every value says which of them found it. The fill rates against a
-real corpus are not measured yet, which is the part of this phase still owed.
+*Where it is:* built, tested, and measured. Four ways to find a value, taught
+before guessed, and every value says which of them found it.
+
+The number is 54.7% overall over a corpus of fifteen deliberately diverse
+hand-written pages, with title at 93.3% and body at 86.7%: see the table in
+NOTES.md. A floor per property is asserted in a test, as a ratchet that is
+raised when extraction improves and never lowered to make a change pass.
+
+Fifteen hand-written pages are a floor-check and not a claim about the open web.
+What the table is actually for is the breakdown by how each value was found: on
+this corpus almost everything is a guess, which is the argument for `scour
+train` stated as a measurement rather than as a preference.
 
 **Phase 4.5. `scour train`, locators written back into the document.**
 Induction over the cached pages, proposing an xpath or a css selector per

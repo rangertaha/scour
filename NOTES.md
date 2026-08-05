@@ -386,6 +386,60 @@ month behaves the way it did today.
 says, and a mismatch is refused rather than inferred, because silently changing
 a declared type is how a document stops meaning what it reads as.
 
+## Fill rates, measured
+
+Extraction is the first thing here whose quality is a number rather than a pass
+or a fail, and for a long time the number had never been taken. `extract.Rates`
+takes it. It runs a job over a set of pages and reports, per property, how many
+pages produced a value, which of the four ways found it, how many values the
+transforms emptied, and how many required properties came back missing.
+
+Measured on 5 August 2026, over the corpus in `internal/extract/testdata`:
+fifteen hand-written pages, and the job in `corpus/job.hcl`, which is the news
+template scour ships with two class selectors and one date regex added.
+
+An article came out of all fifteen pages. Ten of the fifteen were complete, and
+seven required properties were missing across the other five.
+
+| Property | Found | Rate | css | xpath | regex | semantics | empty | missing |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `url` (required) | 11 | 73.3% | 0 | 0 | 0 | 11 | 0 | 4 |
+| `title` (required) | 14 | 93.3% | 0 | 0 | 0 | 14 | 0 | 1 |
+| `summary` | 8 | 53.3% | 0 | 0 | 0 | 8 | 0 | 0 |
+| `author` | 9 | 60.0% | 0 | 0 | 0 | 9 | 0 | 0 |
+| `author.name` | 6 | 40.0% | 0 | 0 | 0 | 6 | 0 | 0 |
+| `author.profile` | 2 | 13.3% | 0 | 0 | 0 | 2 | 1 | 0 |
+| `published` | 11 | 73.3% | 0 | 0 | 4 | 7 | 0 | 0 |
+| `modified` | 3 | 20.0% | 0 | 0 | 0 | 3 | 0 | 0 |
+| `section` | 5 | 33.3% | 0 | 0 | 0 | 5 | 0 | 0 |
+| `body` (required) | 13 | 86.7% | 9 | 0 | 0 | 4 | 0 | 2 |
+
+Overall 54.7%, counting one opportunity per declared property per page.
+
+**The breakdown by how a value was found is the point of the table.** A property
+found by semantics on ninety per cent of pages and one found by a taught
+selector on ninety per cent are the same number describing two different
+situations. The taught one breaks loudly when a site changes its markup. The
+guessed one drifts onto whatever else on the page answers to the name, quietly,
+while the rate stays at ninety. On this corpus almost everything is guessed:
+every title, every url, and every summary. The two taught selectors carry nine
+of the thirteen bodies and the taught regex four of the eleven dates, and that
+is the whole of what is not a guess. It is the argument for `scour train` stated
+as a measurement rather than as an opinion.
+
+**A found value is not a correct value.** The rate counts a value, and several
+of these are imprecise on purpose: the body of the split-body page comes back as
+the whole of `<main>`, headline included. Measuring correctness needs expected
+values written down per page, which is a larger job and a different one.
+
+**Fifteen hand-written pages are a floor-check, not a claim about the open web.**
+Nothing here is a sample of anything. What the corpus is for is a ratchet:
+`TestFillRatesOverTheCorpusClearTheFloor` holds each rate to about one page
+below what was measured, so a change that makes extraction worse fails the
+build. The floors go up when extraction improves and are never lowered to make a
+change pass. Real numbers over a real crawl are still owed, and the old
+implementation's are on the `main` branch.
+
 ## Events are items, converted at the edge
 
 There is no event block. An item is what a job declares, and what leaves the
@@ -1422,6 +1476,7 @@ four stages is the genuinely new distributed-systems problem here.
 | The scheduler: the chain, scope, budget, politeness | Built, tested |
 | The `dupefilter` middleware | Built, tested |
 | `internal/extract`: four ways to find a value, provenance on each | Built, tested |
+| Fill rates, measured over a corpus and held to a floor | Built, tested |
 | The spider: the chain, link discovery, the spec fingerprint | Built, tested |
 | The `httperror` middleware | Built, tested |
 | `internal/record`: the flat form, and the measurement rendering | Built, tested |
