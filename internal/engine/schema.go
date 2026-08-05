@@ -326,7 +326,7 @@ func (i *Item) Tags() []string {
 	}
 	for _, p := range i.Properties {
 		if p.Tag || Type(p.Type) == TypeEntity {
-			out = append(out, p.Name)
+			out = append(out, flattened(p.Name, p)...)
 		}
 	}
 	sort.Strings(out)
@@ -338,10 +338,32 @@ func (i *Item) Fields() []string {
 	var out []string
 	for _, p := range i.Properties {
 		if !p.Tag && Type(p.Type) != TypeEntity {
-			out = append(out, p.Name)
+			out = append(out, flattened(p.Name, p)...)
 		}
 	}
 	sort.Strings(out)
+	return out
+}
+
+// flattened is a property's leaf names, dotted, which is what a record calls
+// them.
+//
+// An object property has no value of its own: a record from `property "author"
+// { property "name" {} }` carries `author.name` and never `author`. Both lists
+// above named the parent, so nothing matched, and the measurement an item
+// rendered to had no author in it at all while the csv, parquet and sqlite
+// exports of the same record each had an `author.name` column. The nats
+// exporter is built on measurements, so every nested property a job declared
+// was silently absent from what it published.
+func flattened(prefix string, p *Property) []string {
+	if len(p.Properties) == 0 {
+		return []string{prefix}
+	}
+
+	var out []string
+	for _, nested := range p.Properties {
+		out = append(out, flattened(prefix+"."+nested.Name, nested)...)
+	}
 	return out
 }
 

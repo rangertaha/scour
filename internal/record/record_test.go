@@ -173,3 +173,57 @@ func TestWithoutATimeTheFetchIsAllThereIs(t *testing.T) {
 		t.Errorf("measurement = %+v", m)
 	}
 }
+
+// TestAMeasurementCarriesNestedProperties.
+//
+// An object property has no value of its own: a record from `property "author"
+// { property "name" {} }` carries `author.name` and never `author`. Tags and
+// Fields named the parent, so nothing matched, and the measurement had no
+// author in it at all, while the csv, parquet and sqlite exports of the same
+// record each had an `author.name` column. The nats exporter is built on
+// measurements, so every nested property a job declared was silently absent
+// from what it published: the stream and the files disagreed about what the
+// crawl had found.
+func TestAMeasurementCarriesNestedProperties(t *testing.T) {
+	doc, err := engine.Parse([]byte(`
+job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+
+    property "author" {
+      type = object
+
+      property "name" {
+        type = str
+      }
+    }
+  }
+}
+`), "job.hcl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	shape := doc.Jobs[0].Items[0]
+
+	r := &record.Record{
+		Item: "article", URL: "https://example.com/a", Spec: "abc",
+		Fetched: time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC),
+		Values:  map[string]string{"title": "One", "author.name": "Alex Doe"},
+	}
+
+	m := r.Measure(shape)
+	if got := m.Fields["author.name"]; got != "Alex Doe" {
+		t.Errorf("Fields[author.name] = %q, and a nested property was dropped: %v", got, m.Fields)
+	}
+	if got := m.Fields["title"]; got != "One" {
+		t.Errorf("Fields[title] = %q", got)
+	}
+}
