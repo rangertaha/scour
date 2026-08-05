@@ -78,6 +78,13 @@ func serve(t *testing.T, h http.HandlerFunc) *site {
 
 	s := &site{}
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// robots.txt is fetched by the downloader itself, outside the chain
+		// and outside the cache, so it is neither this handler's business nor
+		// something to count as a page.
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
 		s.hits.Add(1)
 		h(w, r)
 	}))
@@ -637,13 +644,22 @@ func TestAFetchThatFailedIsNotCached(t *testing.T) {
 		fmt.Fprint(w, "hello")
 	})
 
+	// A site whose robots.txt is fine and whose pages hang up, so the failure
+	// happens at the fetch rather than before the chain is ever entered.
+	rude := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		conn.Close()
+	})
+
 	dir := t.TempDir()
 	s := stage(t, dir, "")
 
-	// A port nothing is listening on, so the fetch fails rather than the site.
-	dead := "http://127.0.0.1:1/article"
-	if _, err := s.Handle(context.Background(), &downloader.Request{URL: dead}); err == nil {
-		t.Fatal("fetched from a port nothing is listening on")
+	if _, err := s.Handle(context.Background(), &downloader.Request{URL: rude.URL + "/article"}); err == nil {
+		t.Fatal("a server that hung up produced a response")
 	}
 
 	entries, err := os.ReadDir(dir)

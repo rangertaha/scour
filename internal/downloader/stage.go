@@ -12,6 +12,7 @@ import (
 
 	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/plugin"
+	"github.com/rangertaha/scour/internal/robots"
 )
 
 // Stage is a job's downloader: the core, the middleware it asked for, and
@@ -69,9 +70,23 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Stage, error) {
 		return nil, err
 	}
 
+	// Outside everything, so a URL the site refused is refused before the cache
+	// is consulted and before anything else pays for it. See [guard] for why
+	// this is not a plugin with a configurable position.
+	handler := built.Handler(core)
+	if job.Downloader.ObeysRobots() {
+		// robots.txt is read to the cap RFC 9309 sets rather than the job's
+		// max_body, which is a limit on pages: a job that will not download a
+		// megabyte of HTML still has to be able to read a site's rules.
+		reader := *core
+		reader.MaxBody = robots.MaxSize
+
+		handler = newGuard(&reader, core.Agent).wrap(handler)
+	}
+
 	return &Stage{
 		job:     job.Name,
-		handler: built.Handler(core),
+		handler: handler,
 		chain:   built,
 	}, nil
 }

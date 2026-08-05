@@ -838,6 +838,24 @@ them to what is written here.
 `robots`, `user_agent`, `timeout` and `max_body` are not here. They are
 `downloader` attributes, for the reason under Decisions.
 
+**robots is not in the table for a second reason too.** There is exactly one
+correct position for it, and a position that can be configured is a position
+that can be configured wrongly. It wraps the entire chain, so a refused URL is
+refused before the cache is consulted and before a retry is scheduled. A job can
+turn it off, which is sometimes legitimate against a site you own; it cannot
+quietly move it behind the cache, which never is.
+
+robots.txt is fetched with the bare fetcher rather than through the chain.
+Through the chain it would be checked against robots.txt, which is a loop, and
+it would land in the page cache, where it would be served back long after the
+site changed its mind. What a site permits has to be current. A success is kept
+for the life of the job on this node; a failure is not kept at all, so a network
+blip costs one request rather than a host.
+
+What each answer means is RFC 9309 §2.3.1: 2xx is the rules, 4xx is a site with
+nothing to say, and anything else is a site that could not tell us, which is not
+the same as a site that said yes.
+
 **Decoding is not in this table, and that is deliberate.**
 
 Turning bytes into text is what reading a body means, not a position in a chain.
@@ -1350,6 +1368,8 @@ four stages is the genuinely new distributed-systems problem here.
 | `internal/plugin`, the seam from a job's plugin list to a chain | Built, tested |
 | `internal/downloader`: the core fetch, agent, timeout, body limit | Built, tested |
 | The `cache` middleware: hits, sidecar, ttl, statuses | Built, tested |
+| `internal/robots`: RFC 9309, written rather than imported | Built, tested |
+| robots.txt obeyed, outside the whole chain | Built, tested |
 | HCL job document, stage blocks, nested plugins, multiple jobs | Built, tested |
 | Vocabulary: bare types and transforms | Built, tested |
 | Validation, every problem reported at once | Built, tested |

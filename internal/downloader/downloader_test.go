@@ -76,6 +76,26 @@ func stage(t *testing.T, j *engine.Job) *downloader.Stage {
 	return s
 }
 
+// serve is a test site that answers robots.txt itself, so that a test about
+// fetching is not also a test about politeness.
+//
+// Every job here runs with robots on, because that is the default, so each of
+// these quietly proves the guard lets an unrestricted site through as well as
+// whatever it was written for.
+func serve(t *testing.T, h http.HandlerFunc) *httptest.Server {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		h(w, r)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
 func get(t *testing.T, s *downloader.Stage, url string) *downloader.Response {
 	t.Helper()
 
@@ -89,12 +109,11 @@ func get(t *testing.T, s *downloader.Stage, url string) *downloader.Response {
 // The core.
 
 func TestFetchesAPage(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("X-Served-By", "test")
 		fmt.Fprint(w, "<h1>hello</h1>")
-	}))
-	defer server.Close()
+	})
 
 	before := time.Now()
 	resp := get(t, stage(t, job(t, "")), server.URL+"/article")
@@ -127,10 +146,9 @@ func TestFetchesAPage(t *testing.T) {
 func TestTheJobSaysWhoWeAre(t *testing.T) {
 	var agent atomic.Value
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		agent.Store(r.UserAgent())
-	}))
-	defer server.Close()
+	})
 
 	get(t, stage(t, job(t, "")), server.URL)
 	if got := agent.Load(); got != engine.DefaultUserAgent {
@@ -151,10 +169,9 @@ func TestTheJobSaysWhoWeAre(t *testing.T) {
 func TestARequestMayOverrideTheAgent(t *testing.T) {
 	var agent atomic.Value
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		agent.Store(r.UserAgent())
-	}))
-	defer server.Close()
+	})
 
 	s := stage(t, job(t, ""))
 	req := &downloader.Request{URL: server.URL, Header: http.Header{"User-Agent": {"something-else"}}}
@@ -175,12 +192,11 @@ func TestARequestMaySendABody(t *testing.T) {
 	}
 	var got atomic.Value
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		got.Store(sent{method: r.Method, body: string(body)})
 		fmt.Fprint(w, "results")
-	}))
-	defer server.Close()
+	})
 
 	s := stage(t, job(t, ""))
 	resp, err := s.Handle(context.Background(), &downloader.Request{
@@ -202,10 +218,9 @@ func TestARequestMaySendABody(t *testing.T) {
 // TestAStatusNobodyWantedIsStillAResponse. Whether a 404 is a failure is the
 // spider's decision, and returning an error here would take it away.
 func TestAStatusNobodyWantedIsStillAResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gone", http.StatusNotFound)
-	}))
-	defer server.Close()
+	})
 
 	resp := get(t, stage(t, job(t, "")), server.URL)
 	if resp.Status != http.StatusNotFound {
@@ -224,13 +239,12 @@ func TestAStatusNobodyWantedIsStillAResponse(t *testing.T) {
 func TestAHugeBodyIsRefusedOnItsDeclaredLength(t *testing.T) {
 	body := strings.Repeat("x", 4096)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		// Declared, which is what a server sending a video does and what
 		// makes refusing it cheap.
 		w.Header().Set("Content-Length", fmt.Sprint(len(body)))
 		fmt.Fprint(w, body)
-	}))
-	defer server.Close()
+	})
 
 	s := stage(t, job(t, `
   downloader {
@@ -252,14 +266,13 @@ func TestAHugeBodyIsRefusedOnItsDeclaredLength(t *testing.T) {
 // TestABodyThatDeclaresNothingIsRefusedWhileReading. A chunked response has no
 // length to check, and a server may simply lie, so the read is bounded too.
 func TestABodyThatDeclaresNothingIsRefusedWhileReading(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		// Flushing before the body is complete forces chunked encoding, so no
 		// Content-Length is sent.
 		fmt.Fprint(w, "start")
 		w.(http.Flusher).Flush()
 		fmt.Fprint(w, strings.Repeat("x", 4096))
-	}))
-	defer server.Close()
+	})
 
 	s := stage(t, job(t, `
   downloader {
@@ -281,12 +294,11 @@ func TestABodyThatDeclaresNothingIsRefusedWhileReading(t *testing.T) {
 func TestABodyExactlyAtTheLimitIsFine(t *testing.T) {
 	body := strings.Repeat("x", 100)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "start")
 		w.(http.Flusher).Flush()
 		fmt.Fprint(w, body[5:])
-	}))
-	defer server.Close()
+	})
 
 	resp := get(t, stage(t, job(t, `
   downloader {
@@ -302,10 +314,9 @@ func TestABodyExactlyAtTheLimitIsFine(t *testing.T) {
 // TestNoLimitReadsWhatever, which is what a fetcher built by hand for a test
 // gets rather than a surprise.
 func TestNoLimitReadsWhatever(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, strings.Repeat("x", 5000))
-	}))
-	defer server.Close()
+	})
 
 	f := &downloader.Fetcher{Client: server.Client()}
 	resp, err := f.Handle(context.Background(), &downloader.Request{URL: server.URL})
@@ -323,15 +334,12 @@ func TestNoLimitReadsWhatever(t *testing.T) {
 func TestTheTimeoutCoversTheBody(t *testing.T) {
 	release := make(chan struct{})
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "headers are here")
 		w.(http.Flusher).Flush()
 		<-release
-	}))
-	defer func() {
-		close(release)
-		server.Close()
-	}()
+	})
+	defer close(release)
 
 	s := stage(t, job(t, `
   downloader {
@@ -350,10 +358,9 @@ func TestTheTimeoutCoversTheBody(t *testing.T) {
 }
 
 func TestACancelledContextStopsTheFetch(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "hello")
-	}))
-	defer server.Close()
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -385,11 +392,10 @@ func TestTheBodyIsNotDecodedOnTheWayIn(t *testing.T) {
 	// "цена" in windows-1251, declared only in the Content-Type header.
 	raw := []byte{0xf6, 0xe5, 0xed, 0xe0}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=windows-1251")
 		w.Write(raw)
-	}))
-	defer server.Close()
+	})
 
 	resp := get(t, stage(t, job(t, "")), server.URL)
 
@@ -431,11 +437,10 @@ func TestTheChainWrapsTheFetch(t *testing.T) {
 	downloader.Register("test-outer", noting("test-outer", &log))
 	downloader.Register("test-inner", noting("test-inner", &log))
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		log = append(log, "fetch")
 		fmt.Fprint(w, "hello")
-	}))
-	defer server.Close()
+	})
 
 	s := stage(t, job(t, `
   downloader {
@@ -472,10 +477,9 @@ func TestAMiddlewareMayAnswerWithoutFetching(t *testing.T) {
 		}, nil
 	})
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		fetched.Add(1)
-	}))
-	defer server.Close()
+	})
 
 	resp := get(t, stage(t, job(t, `
   downloader {
