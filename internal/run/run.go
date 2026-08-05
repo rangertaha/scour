@@ -32,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -119,6 +120,30 @@ type Options struct {
 	// arrangements comparable.
 	Fetch downloader.Handler
 	Read  spider.Handler
+}
+
+// external refuses a job whose stages are somewhere else when nothing was
+// supplied to reach them.
+//
+// The seam is [Options.Fetch] and [Options.Read]: that is the whole of what
+// running on a bus changes here, and a caller that has not used it is a caller
+// with no way to reach the stage the job named. Checked here rather than in
+// each command, so a new caller cannot forget.
+func external(job *engine.Job) error {
+	var stages []string
+	if job.Downloader != nil && job.Downloader.IsExternal() {
+		stages = append(stages, "downloader")
+	}
+	if job.Spider != nil && job.Spider.IsExternal() {
+		stages = append(stages, "spider")
+	}
+	if len(stages) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"run: job %q: its %s is external, and this run has no way to reach one. "+
+			"Run it on a node that serves the stage, or take `external = true` out of the document",
+		job.Name, strings.Join(stages, " and "))
 }
 
 // Run is one job, ready to crawl.
@@ -219,6 +244,17 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Run, error) {
 		Eval:     opts.Eval,
 		Canon:    r.canon,
 	}, opts.Open); err != nil {
+		return nil, err
+	}
+
+	// A job that says its downloader is external and a caller that supplied no
+	// handler for it do not agree, and crawling locally is the wrong way to
+	// resolve that. `scour show` reports the setting back to the operator as
+	// "yes, waiting 5m0s", so a run that quietly ignored it left them believing
+	// their pages were being fetched somewhere they were not. Refused by name,
+	// which is what the whole engine does with a job it cannot honour.
+	if err := external(job); err != nil && opts.Fetch == nil && opts.Read == nil {
+		r.sched.Close()
 		return nil, err
 	}
 

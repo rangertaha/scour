@@ -151,11 +151,20 @@ type Downloader struct {
 	conn   *Conn
 	job    string
 	bodies cache.Store
+	wait   time.Duration
 }
 
-// NewDownloader returns a client for one job's downloader.
-func (c *Conn) NewDownloader(job string, bodies cache.Store) *Downloader {
-	return &Downloader{conn: c, job: job, bodies: bodies}
+// NewDownloader returns a client for one job's downloader, waiting the given
+// time for an answer.
+//
+// The wait is a parameter rather than [Timeout] because the job document has a
+// field for it, `external_timeout`, and it was read by nothing: `scour show`
+// told an operator their job waited ten minutes while the bound was a
+// two-minute constant. A setting the document accepts and the code ignores is
+// worse than one that does not exist, because the operator has been told
+// otherwise. Zero means [Timeout].
+func (c *Conn) NewDownloader(job string, bodies cache.Store, wait time.Duration) *Downloader {
+	return &Downloader{conn: c, job: job, bodies: bodies, wait: wait}
 }
 
 // Handle implements [downloader.Handler].
@@ -172,7 +181,7 @@ func (d *Downloader) Handle(ctx context.Context, req *downloader.Request) (*down
 		return nil, fmt.Errorf("bus: %w", err)
 	}
 
-	timed, cancel := withTimeout(ctx)
+	timed, cancel := withTimeout(ctx, d.wait)
 	defer cancel()
 
 	msg, err := d.conn.RequestWithContext(timed, Subject(d.job, DownloadSubject), payload)
@@ -257,11 +266,14 @@ type Spider struct {
 	conn   *Conn
 	job    string
 	bodies cache.Store
+	wait   time.Duration
 }
 
-// NewSpider returns a client for one job's spider.
-func (c *Conn) NewSpider(job string, bodies cache.Store) *Spider {
-	return &Spider{conn: c, job: job, bodies: bodies}
+// NewSpider returns a client for one job's spider, waiting the given time for
+// an answer. Zero means [Timeout]. See [Conn.NewDownloader] for why it is a
+// parameter.
+func (c *Conn) NewSpider(job string, bodies cache.Store, wait time.Duration) *Spider {
+	return &Spider{conn: c, job: job, bodies: bodies, wait: wait}
 }
 
 // Handle implements [spider.Handler].
@@ -298,7 +310,7 @@ func (s *Spider) Handle(ctx context.Context, resp *downloader.Response) (*spider
 		return nil, fmt.Errorf("bus: %w", err)
 	}
 
-	timed, cancel := withTimeout(ctx)
+	timed, cancel := withTimeout(ctx, s.wait)
 	defer cancel()
 
 	msg, err := s.conn.RequestWithContext(timed, Subject(s.job, ReadSubject), payload)
@@ -341,9 +353,12 @@ func reply[T any](msg *nats.Msg, payload T) {
 //
 // The cancel comes back rather than being dropped: a request that returns early
 // leaves a timer running otherwise, and a crawl makes one of these per page.
-func withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+func withTimeout(ctx context.Context, wait time.Duration) (context.Context, context.CancelFunc) {
 	if _, has := ctx.Deadline(); has {
 		return ctx, func() {}
 	}
-	return context.WithTimeout(ctx, Timeout)
+	if wait <= 0 {
+		wait = Timeout
+	}
+	return context.WithTimeout(ctx, wait)
 }

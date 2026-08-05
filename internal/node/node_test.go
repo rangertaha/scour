@@ -185,8 +185,8 @@ func TestTwoNodesOneJobWorkOnBoth(t *testing.T) {
 	crawl, err := run.New(ctx, job, run.Options{
 		Dir:   t.TempDir(),
 		Open:  func(cfg frontier.Config) (frontier.Frontier, error) { return sqlite.Open(cfg) },
-		Fetch: first.NewDownloader("news", shared),
-		Read:  first.NewSpider("news", shared),
+		Fetch: first.NewDownloader("news", shared, 0),
+		Read:  first.NewSpider("news", shared, 0),
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)

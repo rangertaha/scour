@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rangertaha/scour/internal/downloader"
 	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/frontier"
 	"github.com/rangertaha/scour/internal/frontier/sqlite"
@@ -640,4 +641,54 @@ func TestAPoliteCrawlIsNotMistakenForAStalledOne(t *testing.T) {
 	if got := r.Stats().Store.Load(); got != 0 {
 		t.Errorf("a healthy crawl counted %d refused writes", got)
 	}
+}
+
+// TestAJobWhoseStageIsElsewhereIsRefusedRatherThanRunLocally.
+//
+// `external = true` was accepted by the parser, validated, carried into the
+// resolved job, and reported back to the operator by `scour show` as "yes,
+// waiting 5m0s". Nothing in a running crawl read it. So a job that said its
+// downloader was somewhere else was crawled locally, in full, while the tool
+// told the operator otherwise: the pages were fetched from this machine, with
+// this machine's address and this machine's rate limit, which is the whole
+// reason somebody moves a downloader elsewhere.
+//
+// The check is at the seam rather than in each command, because Options.Fetch
+// and Options.Read are the only way to reach a stage that is not here, and a
+// caller that has not used one has no way to reach it.
+func TestAJobWhoseStageIsElsewhereIsRefusedRatherThanRunLocally(t *testing.T) {
+	server, hits := site(t)
+
+	_, err := run.New(context.Background(), document(t, server, `
+  downloader {
+    external = true
+  }
+`), run.Options{
+		Dir:  t.TempDir(),
+		Open: func(cfg frontier.Config) (frontier.Frontier, error) { return sqlite.Open(cfg) },
+	})
+	if err == nil {
+		t.Fatal("a job whose downloader is elsewhere was accepted by a run that cannot reach one")
+	}
+	if !strings.Contains(err.Error(), "external") {
+		t.Errorf("the error does not say what is wrong: %v", err)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("it fetched %d pages locally before refusing", hits.Load())
+	}
+
+	// And a run that was given a way to reach it is not refused.
+	r, err := run.New(context.Background(), document(t, server, `
+  downloader {
+    external = true
+  }
+`), run.Options{
+		Dir:   t.TempDir(),
+		Open:  func(cfg frontier.Config) (frontier.Frontier, error) { return sqlite.Open(cfg) },
+		Fetch: downloader.HandlerFunc(func(context.Context, *downloader.Request) (*downloader.Response, error) { return nil, nil }),
+	})
+	if err != nil {
+		t.Fatalf("a run given a handler for the external stage was refused anyway: %v", err)
+	}
+	r.Close()
 }

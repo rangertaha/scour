@@ -187,8 +187,8 @@ func TestTheSameJobProducesTheSameRecordsEitherWay(t *testing.T) {
 	}
 
 	overBus := crawl(t, j, run.Options{
-		Fetch: conn.NewDownloader(j.Name, store),
-		Read:  conn.NewSpider(j.Name, store),
+		Fetch: conn.NewDownloader(j.Name, store, 0),
+		Read:  conn.NewSpider(j.Name, store, 0),
 	})
 
 	if len(overBus) != len(direct) {
@@ -239,7 +239,7 @@ func TestABodyNeverCrossesTheBus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client := conn.NewDownloader(j.Name, store)
+	client := conn.NewDownloader(j.Name, store, 0)
 	resp, err := client.Handle(ctx, &downloader.Request{URL: server.URL + "/story/1", Job: j.Name})
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
@@ -287,7 +287,7 @@ func TestADropTravelsAsADrop(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = conn.NewDownloader(j.Name, store).Handle(ctx, &downloader.Request{URL: server.URL + "/a"})
+	_, err = conn.NewDownloader(j.Name, store, 0).Handle(ctx, &downloader.Request{URL: server.URL + "/a"})
 	if !chain.Dropped(err) {
 		t.Fatalf("err = %v, want a drop", err)
 	}
@@ -303,7 +303,7 @@ func TestNothingServingIsNotATimeout(t *testing.T) {
 	store := bodies(t)
 
 	started := time.Now()
-	_, err := conn.NewDownloader("nobody-serves-this", store).Handle(
+	_, err := conn.NewDownloader("nobody-serves-this", store, 0).Handle(
 		context.Background(), &downloader.Request{URL: "https://example.com/a"})
 
 	if !errors.Is(err, bus.ErrNoStage) {
@@ -337,7 +337,7 @@ func TestTwoWorkersShareTheWork(t *testing.T) {
 		}
 	}
 
-	client := conn.NewDownloader(j.Name, store)
+	client := conn.NewDownloader(j.Name, store, 0)
 	for i := range 20 {
 		if _, err := client.Handle(ctx, &downloader.Request{
 			URL: fmt.Sprintf("%s/story/%d", server.URL, i%2+1),
