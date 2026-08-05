@@ -1421,6 +1421,9 @@ four stages is the genuinely new distributed-systems problem here.
 | `internal/scope`: domains, included, excluded, one implementation | Built, tested |
 | The scheduler: the chain, scope, budget, politeness | Built, tested |
 | The `dupefilter` middleware | Built, tested |
+| `internal/extract`: four ways to find a value, provenance on each | Built, tested |
+| The spider: the chain, link discovery, the spec fingerprint | Built, tested |
+| The `httperror` middleware | Built, tested |
 | `internal/downloader`: the core fetch, agent, timeout, body limit | Built, tested |
 | The `cache` middleware: hits, sidecar, ttl, statuses | Built, tested |
 | `internal/robots`: RFC 9309, written rather than imported | Built, tested |

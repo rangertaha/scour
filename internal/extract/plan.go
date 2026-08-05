@@ -1,0 +1,152 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package extract
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/andybalholm/cascadia"
+	"github.com/antchfx/xpath"
+
+	"github.com/rangertaha/scour/internal/engine"
+)
+
+// itemPlan is one shape with every locator compiled.
+type itemPlan struct {
+	item  *engine.Item
+	props []*propPlan
+}
+
+// propPlan is one property with its locators compiled and its aliases folded
+// into the names it answers to.
+type propPlan struct {
+	prop *engine.Property
+
+	css    []cascadia.Selector
+	xpath  []*xpath.Expr
+	regex  []*regexp.Regexp
+	names  []string // the property's name and its aliases, lowercased
+	nested []*propPlan
+}
+
+func planItem(item *engine.Item) (*itemPlan, error) {
+	plan := &itemPlan{item: item}
+	for _, p := range item.Properties {
+		compiled, err := planProperty(item.Name, p)
+		if err != nil {
+			return nil, err
+		}
+		plan.props = append(plan.props, compiled)
+	}
+	return plan, nil
+}
+
+// planProperty compiles what a property was taught.
+//
+// Every failure here is a document that cannot work, and it is reported when
+// the extractor is built rather than on whichever page first reaches the
+// selector. A crawl that ran for an hour before finding out a selector was
+// misspelt has wasted an hour and somebody's bandwidth.
+func planProperty(item string, p *engine.Property) (*propPlan, error) {
+	plan := &propPlan{prop: p, names: names(p)}
+
+	for _, selector := range p.CSS {
+		compiled, err := cascadia.Compile(selector)
+		if err != nil {
+			return nil, fmt.Errorf("extract: %s.%s: css %q: %w", item, p.Name, selector, err)
+		}
+		plan.css = append(plan.css, compiled)
+	}
+	for _, expr := range p.XPath {
+		compiled, err := xpath.Compile(expr)
+		if err != nil {
+			return nil, fmt.Errorf("extract: %s.%s: xpath %q: %w", item, p.Name, expr, err)
+		}
+		plan.xpath = append(plan.xpath, compiled)
+	}
+	for _, pattern := range p.Regexes {
+		compiled, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("extract: %s.%s: regex %q: %w", item, p.Name, pattern, err)
+		}
+		plan.regex = append(plan.regex, compiled)
+	}
+
+	for _, nested := range p.Properties {
+		compiled, err := planProperty(item+"."+p.Name, nested)
+		if err != nil {
+			return nil, err
+		}
+		plan.nested = append(plan.nested, compiled)
+	}
+	return plan, nil
+}
+
+// names is what a property answers to: its own name and every alias, plus the
+// spellings the same word takes in markup.
+//
+// `published_at` in a document is `publishedAt` in JSON-LD, `published-at` in a
+// class and `article:published_time` in Open Graph. A crawler that matched only
+// the exact string would find none of them, and asking every job to list four
+// spellings of its own field names is asking them to do this by hand.
+func names(p *engine.Property) []string {
+	seen := map[string]bool{}
+	var out []string
+
+	add := func(name string) {
+		for _, form := range spellings(name) {
+			if form != "" && !seen[form] {
+				seen[form] = true
+				out = append(out, form)
+			}
+		}
+	}
+
+	add(p.Name)
+	for _, alias := range p.Aliases {
+		add(alias)
+	}
+	return out
+}
+
+// spellings folds one name into the forms markup writes it in.
+func spellings(name string) []string {
+	name = strings.TrimSpace(strings.ToLower(name))
+	if name == "" {
+		return nil
+	}
+
+	flat := strings.NewReplacer("_", "", "-", "", ":", "", " ", "").Replace(name)
+	snake := strings.NewReplacer("-", "_", ":", "_", " ", "_").Replace(name)
+	kebab := strings.NewReplacer("_", "-", ":", "-", " ", "-").Replace(name)
+
+	return []string{name, flat, snake, kebab}
+}
+
+// answersTo reports whether a name from a page is one this property goes by.
+func (p *propPlan) answersTo(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return false
+	}
+
+	// Namespaced properties are matched on the last segment too, so a property
+	// called "published" finds `article:published_time` and `og:published`.
+	candidates := []string{name}
+	if i := strings.LastIndexAny(name, ":."); i >= 0 && i+1 < len(name) {
+		candidates = append(candidates, name[i+1:])
+	}
+
+	for _, candidate := range candidates {
+		for _, form := range spellings(candidate) {
+			for _, want := range p.names {
+				if form == want {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}

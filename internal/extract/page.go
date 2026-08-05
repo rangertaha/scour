@@ -1,0 +1,324 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package extract
+
+import (
+	"encoding/json"
+	"strings"
+
+	"golang.org/x/net/html"
+)
+
+// page is one parsed document, with the things every property wants read once
+// rather than once per property.
+//
+// A job with twenty properties would otherwise walk the tree twenty times
+// looking for the same meta elements.
+type page struct {
+	url  string
+	root *html.Node
+
+	// meta is what the page says about itself: Open Graph, Twitter cards,
+	// ordinary named meta elements and HTTP-equiv ones, keyed by the name as
+	// written.
+	meta map[string]string
+
+	// linked is every JSON-LD object on the page, flattened to one level of
+	// string values.
+	linked map[string]string
+
+	// micro is every itemprop, keyed by the property name.
+	micro map[string]string
+
+	// text is the page's visible text, for the regexes.
+	text string
+
+	// hrefs is every link, in document order and unresolved.
+	hrefs []string
+}
+
+func newPage(url string, root *html.Node) *page {
+	p := &page{
+		url:    url,
+		root:   root,
+		meta:   map[string]string{},
+		linked: map[string]string{},
+		micro:  map[string]string{},
+	}
+	p.walk(root)
+	p.text = textOf(root)
+	return p
+}
+
+// walk reads everything the semantic lookup needs in one pass.
+func (p *page) walk(n *html.Node) {
+	if n.Type == html.ElementNode {
+		switch n.Data {
+		case "meta":
+			// name, property and http-equiv are three spellings of the same
+			// idea, and pages use all three for the same fields.
+			value := attr(n, "content")
+			for _, key := range []string{"property", "name", "itemprop", "http-equiv"} {
+				if got := attr(n, key); got != "" && value != "" {
+					p.meta[strings.ToLower(got)] = value
+				}
+			}
+
+		case "link":
+			if rel := attr(n, "rel"); rel != "" {
+				if href := attr(n, "href"); href != "" {
+					p.meta["link:"+strings.ToLower(rel)] = href
+				}
+			}
+
+		case "script":
+			if strings.EqualFold(attr(n, "type"), "application/ld+json") {
+				// Read from the child text nodes rather than through textOf,
+				// which skips scripts on purpose: their contents are code
+				// everywhere except here, where they are the page's own
+				// description of itself.
+				p.readLinkedData(raw(n))
+			}
+
+		case "a":
+			if href := attr(n, "href"); href != "" {
+				p.hrefs = append(p.hrefs, href)
+			}
+		}
+
+		if prop := attr(n, "itemprop"); prop != "" {
+			if _, seen := p.micro[strings.ToLower(prop)]; !seen {
+				p.micro[strings.ToLower(prop)] = nodeValue(n)
+			}
+		}
+	}
+
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		p.walk(child)
+	}
+}
+
+// readLinkedData flattens JSON-LD to the string fields a property could match.
+//
+// Flattened rather than walked as a graph, because what a property wants is
+// "the headline", and every shape a publisher writes puts it under that name
+// somewhere. Arrays and nested objects are descended into; the first value for
+// a name wins, because the outermost object is the page's own.
+func (p *page) readLinkedData(body string) {
+	var parsed any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(body)), &parsed); err != nil {
+		// Malformed JSON-LD is extremely common and never worth failing a page
+		// over: it is one of four ways to find a value.
+		return
+	}
+	p.flatten("", parsed)
+}
+
+func (p *page) flatten(prefix string, value any) {
+	switch v := value.(type) {
+	case map[string]any:
+		for name, inner := range v {
+			p.flatten(name, inner)
+		}
+	case []any:
+		for _, inner := range v {
+			p.flatten(prefix, inner)
+		}
+	case string:
+		p.remember(prefix, v)
+	case float64:
+		p.remember(prefix, trimFloat(v))
+	case bool:
+		if v {
+			p.remember(prefix, "true")
+		} else {
+			p.remember(prefix, "false")
+		}
+	}
+}
+
+func (p *page) remember(name, value string) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	value = strings.TrimSpace(value)
+	if name == "" || value == "" {
+		return
+	}
+	if _, seen := p.linked[name]; !seen {
+		p.linked[name] = value
+	}
+}
+
+// links returns every href on the page, resolved and deduplicated, in document
+// order.
+//
+// Resolution and scope are the scheduler's business; what this owes is the list
+// as the page wrote it, made absolute so that whoever queues them does not have
+// to know which page they were on.
+func (p *page) links() []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(p.hrefs))
+
+	for _, href := range p.hrefs {
+		resolved := resolve(p.url, href)
+		if resolved == "" || seen[resolved] {
+			continue
+		}
+		seen[resolved] = true
+		out = append(out, resolved)
+	}
+	return out
+}
+
+// raw is an element's literal text, scripts included. The only caller is
+// JSON-LD, which is the one script whose contents are data.
+func raw(n *html.Node) string {
+	var b strings.Builder
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == html.TextNode {
+			b.WriteString(child.Data)
+		}
+	}
+	return b.String()
+}
+
+// attr returns an attribute's value.
+func attr(n *html.Node, name string) string {
+	for _, a := range n.Attr {
+		if strings.EqualFold(a.Key, name) {
+			return strings.TrimSpace(a.Val)
+		}
+	}
+	return ""
+}
+
+// nodeValue is what an element means as a value.
+//
+// The attribute where one lives, if the element is one that keeps its value in
+// an attribute, and its text otherwise. A `<time datetime="2026-08-05">` says
+// August in its attribute and "yesterday" in its text, and the machine-readable
+// one is the one worth having.
+func nodeValue(n *html.Node) string {
+	if n.Type != html.ElementNode {
+		return strings.TrimSpace(textOf(n))
+	}
+
+	switch n.Data {
+	case "meta":
+		return attr(n, "content")
+	case "time":
+		if v := attr(n, "datetime"); v != "" {
+			return v
+		}
+	case "a", "link", "area":
+		if v := attr(n, "href"); v != "" {
+			return v
+		}
+	case "img", "source", "iframe", "embed", "audio", "video", "script":
+		if v := attr(n, "src"); v != "" {
+			return v
+		}
+	case "input":
+		if v := attr(n, "value"); v != "" {
+			return v
+		}
+	case "data":
+		if v := attr(n, "value"); v != "" {
+			return v
+		}
+	case "abbr":
+		if v := attr(n, "title"); v != "" {
+			return v
+		}
+	}
+
+	if v := attr(n, "content"); v != "" {
+		return v
+	}
+	return strings.TrimSpace(textOf(n))
+}
+
+// textOf reduces a subtree to its text.
+//
+// Script and style are skipped: their contents are code, and a body that
+// swallowed the analytics snippet is a body nobody can classify.
+func textOf(n *html.Node) string {
+	var b strings.Builder
+	collect(&b, n)
+	return b.String()
+}
+
+func collect(b *strings.Builder, n *html.Node) {
+	if n.Type == html.TextNode {
+		b.WriteString(n.Data)
+		return
+	}
+	if n.Type == html.ElementNode {
+		switch n.Data {
+		case "script", "style", "noscript", "template":
+			return
+		}
+	}
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		collect(b, child)
+		if child.Type == html.ElementNode && block(child.Data) {
+			// Block elements end a line, or "one<div>two</div>" reads as
+			// "onetwo" and every extracted body is a run-on sentence.
+			b.WriteString("\n")
+		}
+	}
+}
+
+func block(tag string) bool {
+	switch tag {
+	case "p", "div", "br", "li", "tr", "section", "article", "header", "footer",
+		"h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "ul", "ol",
+		"table", "figure", "figcaption", "main", "aside", "nav":
+		return true
+	}
+	return false
+}
+
+// describe says what a node is, in the shape somebody would write it.
+//
+// "<h1 class=headline>" rather than a selector, because it reports what was
+// found rather than what would find it again. The two are different claims and
+// only the first one is knowable from one page.
+func describe(n *html.Node) string {
+	if n == nil {
+		return ""
+	}
+	if n.Type != html.ElementNode {
+		return "text"
+	}
+
+	var b strings.Builder
+	b.WriteString("<")
+	b.WriteString(n.Data)
+
+	for _, key := range []string{"itemprop", "property", "name", "rel", "class", "id", "datetime", "type"} {
+		if v := attr(n, key); v != "" {
+			b.WriteString(" ")
+			b.WriteString(key)
+			b.WriteString("=")
+			b.WriteString(truncate(v, 40))
+			break
+		}
+	}
+	b.WriteString(">")
+	return b.String()
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
+func trimFloat(v float64) string {
+	s := strings.TrimRight(strings.TrimRight(formatFloat(v), "0"), ".")
+	if s == "" || s == "-" {
+		return "0"
+	}
+	return s
+}
