@@ -329,3 +329,26 @@ func TestBayesStraddlesTheMiddleOnALopsidedCorpus(t *testing.T) {
 		t.Errorf("a negative example scored %.2f, above the middle", off)
 	}
 }
+
+// TestParseRefRefusesAVersionWithSomethingAfterIt.
+//
+// Sscanf stops at the first thing it cannot read and reports success for what
+// came before it, so "climate@7-experimental" parsed as climate@7. The store's
+// listing strips ".json" and parses what is left, so a file kept beside a model
+// as climate@9.bak.json was read as the classifier climate@9: `scour topic
+// list` announced a version whose file was not there, and Get failed with "not
+// trained".
+func TestParseRefRefusesAVersionWithSomethingAfterIt(t *testing.T) {
+	for _, s := range []string{
+		"climate@7-experimental",
+		"climate@9.bak",
+		"climate@2x",
+	} {
+		if ref, err := classify.ParseRef(s); err == nil {
+			t.Errorf("ParseRef(%q) = %v, want a refusal", s, ref)
+		}
+	}
+	if ref, err := classify.ParseRef("climate@7"); err != nil || ref.Version != 7 {
+		t.Errorf("ParseRef(\"climate@7\") = %v, %v", ref, err)
+	}
+}

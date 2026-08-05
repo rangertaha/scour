@@ -294,7 +294,17 @@ func better(a, b string, depths map[string]int) bool {
 	if strings.Count(a, " ") != strings.Count(b, " ") {
 		return strings.Count(a, " ") < strings.Count(b, " ")
 	}
-	return len(a) < len(b)
+	if len(a) != len(b) {
+		return len(a) < len(b)
+	}
+	// Alphabetical last, so that this is a total order and not merely a
+	// preference. Two candidates equal on every rule above are ordinary:
+	// `<span class="author byline">` offers `.author` and `.byline`, same node,
+	// same rank, same length. Without this the winner was whichever Go's
+	// randomised map iteration reached first, so training the same corpus twice
+	// produced a different document each time and a diff on every run, against
+	// the promise this package makes that induction is repeatable.
+	return a < b
 }
 
 // rank is how much a selector commits to, highest first.

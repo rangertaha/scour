@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -96,8 +97,14 @@ func ParseRef(s string) (Ref, error) {
 		return Ref{}, fmt.Errorf("classifier %q: needs a version, as in %s@1", s, s)
 	}
 
-	var v int
-	if _, err := fmt.Sscanf(version, "%d", &v); err != nil || v < 1 {
+	// Atoi rather than Sscanf, which stops at the first thing it cannot read
+	// and reports success for what came before it. "climate@7-experimental"
+	// parsed as climate@7, and the store's listing, which strips ".json" and
+	// parses what is left, therefore read a file named climate@9.bak.json as
+	// the classifier climate@9: `scour topic list` announced a version whose
+	// file was not there, and Get failed with "not trained".
+	v, err := strconv.Atoi(version)
+	if err != nil || v < 1 {
 		return Ref{}, fmt.Errorf("classifier %q: %q is not a version", s, version)
 	}
 	if strings.TrimSpace(name) == "" {
