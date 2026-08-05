@@ -54,8 +54,8 @@ func Crawl(a *App) *ucli.Command {
 			&ucli.BoolFlag{Name: "verbose", Aliases: []string{"v"}, Usage: "log every page", Destination: &verbose},
 			&ucli.BoolFlag{Name: "fresh", Usage: "forget what a previous run queued", Destination: &fresh},
 		},
-		Action: oneFile(func(path string) error {
-			return runCrawl(context.Background(), a, path, jobName, dir, verbose, fresh)
+		Action: oneFile(func(ctx context.Context, path string) error {
+			return runCrawl(ctx, a, path, jobName, dir, verbose, fresh)
 		}),
 	}
 }
@@ -128,7 +128,17 @@ func runCrawl(ctx context.Context, a *App, path, jobName, dir string, verbose, f
 		return Failedf("%v", err)
 	}
 
-	left, err := crawl.Waiting(ctx)
+	// The summary is reported on a context of its own, because the crawl's may
+	// be the reason there is something to report. On ctrl-c this asked the
+	// frontier how much was left using the context that had just been
+	// cancelled, so the run ended with "frontier/sqlite: len: context
+	// canceled" and a non-zero exit instead of saying it had been stopped and
+	// how far it got. What a person wants after pressing the key is exactly
+	// that summary: how much was done, and how much the next run will take.
+	after, done := context.WithTimeout(context.WithoutCancel(ctx), run.Shutdown)
+	defer done()
+
+	left, err := crawl.Waiting(after)
 	if err != nil {
 		return Failedf("%v", err)
 	}

@@ -61,8 +61,8 @@ func Train(a *App) *ucli.Command {
 			&ucli.IntFlag{Name: "pages", Value: 200, Usage: "how many cached pages to learn from", Destination: &limit},
 			&ucli.BoolFlag{Name: "write", Usage: "edit the document instead of printing what would change", Destination: &write},
 		},
-		Action: oneFile(func(path string) error {
-			return runTrain(context.Background(), a, path, jobName, itemName, dir, min/100, limit, write)
+		Action: oneFile(func(ctx context.Context, path string) error {
+			return runTrain(ctx, a, path, jobName, itemName, dir, min/100, limit, write)
 		}),
 	}
 }

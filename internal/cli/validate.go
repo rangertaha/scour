@@ -23,7 +23,7 @@ func Validate(a *App) *ucli.Command {
 			"somebody else's node registers exists.\n\n" +
 			"Exits 0 if the document would be accepted, 1 if it would be refused,\n" +
 			"and 3 if the file could not be read.",
-		Action: oneFile(func(path string) error {
+		Action: oneFile(func(_ context.Context, path string) error {
 			doc, err := Load(path)
 			if err != nil {
 				return err
@@ -43,11 +43,25 @@ func Validate(a *App) *ucli.Command {
 // One at a time: a document holds as many jobs as it likes and they are
 // accepted or refused together, but two documents would need rules about what
 // happens when the first is accepted and the second is not.
-func oneFile(fn func(path string) error) func(context.Context, *ucli.Command) error {
-	return func(_ context.Context, cmd *ucli.Command) error {
+// # Why the context is a parameter
+//
+// Because dropping it here made ctrl-c stop nothing. This helper took a
+// callback of one path and threw the context away, so a command that needed one
+// had no choice but to make its own, and both of the long-running commands did:
+// `scour run` and `scour train` each called context.Background(). The context
+// main builds is the one signal.NotifyContext cancels on an interrupt, so
+// discarding it meant a crawl could not be interrupted at all. It kept crawling
+// until it ran out of pages, and the only way to stop it was to press ctrl-c a
+// second time, which kills the process outright and is exactly what the
+// resumable frontier exists to avoid.
+//
+// The context threads through now, so a command cannot fail to have one and
+// nothing has a reason to invent one.
+func oneFile(fn func(ctx context.Context, path string) error) func(context.Context, *ucli.Command) error {
+	return func(ctx context.Context, cmd *ucli.Command) error {
 		switch cmd.Args().Len() {
 		case 1:
-			return fn(cmd.Args().First())
+			return fn(ctx, cmd.Args().First())
 		case 0:
 			return Usagef("no document given")
 		default:

@@ -24,6 +24,15 @@ job "news" {
 }
 `
 
+// wait is how long a test may wait for something that should already have
+// happened.
+//
+// Generous on purpose. These are wall-clock waits against an embedded NATS, and
+// the suite runs several packages at once, three of which start one. A bound
+// tight enough to feel fast is a bound that fails on a loaded machine and reads
+// as flakiness rather than as the timing it is.
+const wait = 30 * time.Second
+
 func jobs(t *testing.T, conn *bus.Conn) *bus.Jobs {
 	t.Helper()
 
@@ -185,7 +194,7 @@ func TestANodePicksUpWorkWithoutBeingTold(t *testing.T) {
 		if !change.Replayed {
 			t.Errorf("the first thing on an empty cluster was %+v", change)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(wait):
 		t.Fatal("the watch never said it had caught up")
 	}
 
@@ -201,7 +210,7 @@ func TestANodePicksUpWorkWithoutBeingTold(t *testing.T) {
 		if !strings.Contains(string(change.Document), "example.com") {
 			t.Error("the change arrived without the document")
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(wait):
 		t.Fatal("a submitted job was never reported")
 	}
 
@@ -213,7 +222,7 @@ func TestANodePicksUpWorkWithoutBeingTold(t *testing.T) {
 		if !change.Deleted {
 			t.Errorf("a deleted job arrived as %+v", change)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(wait):
 		t.Fatal("a deleted job was never reported")
 	}
 }

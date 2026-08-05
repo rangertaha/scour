@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -26,7 +27,7 @@ func Spec(a *App) *ucli.Command {
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "job", Usage: "which job, if the document holds several", Destination: &jobName},
 		},
-		Action: oneFile(func(path string) error {
+		Action: oneFile(func(_ context.Context, path string) error {
 			doc, err := Accept(path)
 			if err != nil {
 				return err

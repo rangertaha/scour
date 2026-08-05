@@ -20,6 +20,22 @@ import (
 
 var fetched = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 
+// wait is how long a test may wait for a message that should already be there.
+//
+// Generous on purpose. These are wall-clock waits, and the whole suite runs
+// several packages at once, two of which also start an embedded NATS: a bound
+// tight enough to be "fast" is a bound that fails on a loaded machine and reads
+// as flakiness rather than as the timing it is. Five seconds failed exactly
+// once, in a full-suite run, and never on its own.
+//
+// A test that asserts something did NOT arrive uses [never] instead, which has
+// to be short for the opposite reason.
+const wait = 30 * time.Second
+
+// never is how long to wait before concluding nothing is coming. Short, because
+// every one of these is time the suite spends proving a negative.
+const never = 200 * time.Millisecond
+
 // serving starts an embedded server for one test.
 //
 // Its own store directory, always. Two embedded servers left to NATS's own
@@ -136,7 +152,7 @@ func TestAHeadlineHappensOnceAndGoesToOneSubject(t *testing.T) {
 		headline("https://example.com/b", "Two"))
 
 	for _, want := range []string{"One", "Two"} {
-		msg, err := sub.NextMsg(5 * time.Second)
+		msg, err := sub.NextMsg(wait)
 		if err != nil {
 			t.Fatalf("waiting for %q: %v", want, err)
 		}
@@ -185,7 +201,7 @@ func TestAPriceGetsOneSubjectPerCompany(t *testing.T) {
 		price("https://example.com/acme", "acme", "178.23"),
 		price("https://example.com/globex", "globex", "12.10"))
 
-	msg, err := one.NextMsg(5 * time.Second)
+	msg, err := one.NextMsg(wait)
 	if err != nil {
 		t.Fatalf("the company's own subject received nothing: %v", err)
 	}
@@ -201,14 +217,14 @@ func TestAPriceGetsOneSubjectPerCompany(t *testing.T) {
 
 	// The other company must not be on this subject, or subscribing to one
 	// company would be subscribing to all of them.
-	if extra, err := one.NextMsg(200 * time.Millisecond); err == nil {
+	if extra, err := one.NextMsg(never); err == nil {
 		t.Errorf("another company arrived on this company's subject: %s", extra.Data)
 	}
 
 	// And both are still there for whoever wants the lot.
 	subjects := map[string]bool{}
 	for range 2 {
-		msg, err := all.NextMsg(5 * time.Second)
+		msg, err := all.NextMsg(wait)
 		if err != nil {
 			t.Fatalf("the wildcard received %d: %v", len(subjects), err)
 		}
@@ -254,7 +270,7 @@ func TestCloseFlushesOrARunThatEndsPublishesNothing(t *testing.T) {
 	if err := conn.Flush(); err != nil {
 		t.Fatal(err)
 	}
-	msg, err := sub.NextMsg(time.Second)
+	msg, err := sub.NextMsg(wait)
 	if err != nil {
 		t.Fatalf("nothing was published by the time the run ended: %v", err)
 	}
@@ -302,7 +318,7 @@ func TestAnItemWithNoShapeStillPublishes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	msg, err := sub.NextMsg(5 * time.Second)
+	msg, err := sub.NextMsg(wait)
 	if err != nil {
 		t.Fatalf("an item with no shape published nothing: %v", err)
 	}
@@ -339,7 +355,7 @@ func TestAnEntityCannotAddASubjectLevel(t *testing.T) {
   }
 `), price("https://example.com/a", "acme.co uk", "1.00"))
 
-	msg, err := all.NextMsg(5 * time.Second)
+	msg, err := all.NextMsg(wait)
 	if err != nil {
 		t.Fatalf("the wildcard stopped matching: %v", err)
 	}
@@ -373,7 +389,7 @@ func TestAnExporterPublishesOnTheConnectionTheNodeLent(t *testing.T) {
   }
 `), headline("https://example.com/a", "One"))
 
-	msg, err := sub.NextMsg(5 * time.Second)
+	msg, err := sub.NextMsg(wait)
 	if err != nil {
 		t.Fatalf("nothing was published on the lent connection: %v", err)
 	}

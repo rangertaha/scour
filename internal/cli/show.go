@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -33,7 +34,7 @@ func Show(a *App) *ucli.Command {
 			&ucli.BoolFlag{Name: "json", Usage: "print as JSON", Destination: &asJSON},
 			&ucli.StringFlag{Name: "job", Usage: "which job, if the document holds several", Destination: &jobName},
 		},
-		Action: oneFile(func(path string) error {
+		Action: oneFile(func(_ context.Context, path string) error {
 			doc, err := Accept(path)
 			if err != nil {
 				return err

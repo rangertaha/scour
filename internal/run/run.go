@@ -79,6 +79,15 @@ func Hold(fetch time.Duration) time.Duration {
 	return max(Lease, fetch+time.Minute)
 }
 
+// Shutdown is how long the tidying up after a crawl may take.
+//
+// It runs on a context that is deliberately not the crawl's, so an interrupted
+// crawl can still write the records it is holding, close its exports and say
+// what it did. It still needs a bound: a store that has stopped answering must
+// not turn ctrl-c into a process that never exits, which is the thing pressing
+// ctrl-c was meant to avoid.
+const Shutdown = 30 * time.Second
+
 // Idle is how long the loop waits when the frontier has nothing due but is not
 // empty, which is what politeness looks like from here.
 const Idle = 50 * time.Millisecond
@@ -472,7 +481,22 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 	wg.Wait()
 	close(problems)
 
-	if err := r.flush(ctx); err != nil {
+	// Tidying up runs on a context of its own, because the one the crawl ran
+	// under may be the reason it stopped.
+	//
+	// Cancellation means "start nothing new", and everything after this point
+	// is finishing what was already started: writing the records the pipeline
+	// is holding, closing the exports, counting what is left. Doing that on the
+	// cancelled context meant ctrl-c produced "frontier/sqlite: len: context
+	// canceled" and a non-zero exit instead of the summary, and the Stopped
+	// ending the loop had carefully computed never reached the person who
+	// pressed the key. The records in flight were dropped with it.
+	//
+	// Bounded, because a shutdown that cannot finish still has to end.
+	shutdown, done := context.WithTimeout(context.WithoutCancel(ctx), Shutdown)
+	defer done()
+
+	if err := r.flush(shutdown); err != nil {
 		return ending.Load().(Ending), err
 	}
 
@@ -519,7 +543,9 @@ func (r *Run) one(ctx context.Context, req *scheduler.Request) {
 	case err != nil:
 		r.stats.Failed.Add(1)
 		r.log.WarnContext(ctx, "fetch failed", "url", req.URL, "error", err)
-		r.bookkeeping(ctx, "report a failure", req.URL, r.sched.Fail(ctx, req.Hash, req.Attempt))
+		r.report(ctx, "report a failure", req.URL, func(ctx context.Context) error {
+			return r.sched.Fail(ctx, req.Hash, req.Attempt)
+		})
 		return
 	}
 
@@ -561,10 +587,13 @@ func (r *Run) one(ctx context.Context, req *scheduler.Request) {
 }
 
 func (r *Run) done(ctx context.Context, req *scheduler.Request) {
-	r.bookkeeping(ctx, "report a page finished", req.URL, r.sched.Done(ctx, req.Hash, req.Attempt))
+	r.report(ctx, "report a page finished", req.URL, func(ctx context.Context) error {
+		return r.sched.Done(ctx, req.Hash, req.Attempt)
+	})
 }
 
-// bookkeeping records a frontier write that failed.
+// report performs a frontier write that describes work already done, and counts
+// it when it fails.
 //
 // One place, because there were three and each of them logged and moved on. A
 // crawl whose store has started refusing writes is not a quiet crawl: pages
@@ -572,12 +601,21 @@ func (r *Run) done(ctx context.Context, req *scheduler.Request) {
 // expire, and the operator sees a run that took twice as long for no stated
 // reason. These are recoverable, so they do not fail the run the way a lost
 // URL does; they are counted, and the summary says so.
-func (r *Run) bookkeeping(ctx context.Context, what, url string, err error) {
-	if err == nil {
-		return
+func (r *Run) report(ctx context.Context, what, url string, write func(context.Context) error) {
+	// A report is not cancelled with the crawl, for the same reason the tidying
+	// up is not: it describes work that has already happened. On ctrl-c the
+	// fetch in flight failed with "context canceled" and the Fail that should
+	// have released its lease failed the same way, so the URL stayed held for
+	// the length of the lease and the resume that ctrl-c is supposed to make
+	// safe had nothing due. Bounded, so a store that has stopped answering
+	// cannot hold the shutdown open.
+	ctx, done := context.WithTimeout(context.WithoutCancel(ctx), Shutdown)
+	defer done()
+
+	if err := write(ctx); err != nil {
+		r.stats.Store.Add(1)
+		r.log.WarnContext(ctx, "could not "+what, "url", url, "error", err)
 	}
-	r.stats.Store.Add(1)
-	r.log.WarnContext(ctx, "could not "+what, "url", url, "error", err)
 }
 
 func (r *Run) keep(records []*record.Record) {
