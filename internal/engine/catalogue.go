@@ -22,18 +22,22 @@ import "sort"
 // the response on the way back, in opposite orders. Low order is nearest the
 // spider; high order is nearest the network.
 //
-//	order:      100        550        900
+//	order:      500        550        900
 //	         ┌────────┐ ┌────────┐ ┌────────┐
-//	request  │ robots │→│ retry  │→│ cache  │→ ─┐
+//	request  │offsite │→│ retry  │→│ cache  │→ ─┐
 //	         │        │ │        │ │        │   │ network
 //	response │        │←│        │←│        │← ─┘
 //	         └────────┘ └────────┘ └────────┘
 //
-// That is why the numbers are what they are. `robots` at 100 refuses a request
-// before anything else pays for it. `cache` at 900 is the last thing before the
-// network, so a hit short-circuits the fetch only after every other request
-// middleware has had its say, which is where Scrapy puts HttpCacheMiddleware
-// and for the same reason.
+// That is why the numbers are what they are. `offsite` at 500 drops a URL out
+// of scope before anything else pays for it. `cache` at 900 is the last thing
+// before the network, so a hit short-circuits the fetch only after every other
+// request middleware has had its say, which is where Scrapy puts
+// HttpCacheMiddleware and for the same reason.
+//
+// robots is not here because it is not a plugin: `robots = true` is an
+// attribute of the downloader block, since there is nowhere else it could be
+// written and nothing to reorder it against.
 type Placement struct {
 	// Name is the second label of a plugin block.
 	Name string

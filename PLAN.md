@@ -24,17 +24,24 @@ Both are in the contract from the start or not at all.
 and back. A short-circuit at the middle link means the outer links still see a
 response and the inner ones never ran.
 
-**Phase 2. The downloader, and the four middleware that decide whether a corpus
-is trustworthy.** `charset`, `cache`, `robots`, `redirect`.
+**Phase 2. The downloader, and the middleware that decide whether a corpus is
+trustworthy.** `cache`, `robots`, `redirect`.
 
-`charset` first, not last. Bodies are cached transcoded, so a downloader that
-writes raw bytes does not merely score badly on non-UTF-8 sites, it fills the
-cache with evidence that is wrong, and every measurement taken afterwards is
-taken against it. This is the single highest-risk item in the plan.
+Encoding is the highest-risk item, and it is not one of them. The cache holds
+what the server sent, so what makes the corpus trustworthy is that a hit still
+carries the headers the body arrived with. A page in windows-1251 that declared
+its encoding in the `Content-Type` header and nowhere else decodes correctly on
+the way in and into mojibake on the way back out if they are lost, and nothing
+about the resulting text says it went wrong. That is why a cache entry is two
+keys rather than one.
 
-*Proved by:* fetching a windows-1251 page from a local server and reading UTF-8
-back out of the cache. robots.txt honoured under a server that disallows.
-Redirects landing at their target.
+*Proved by:* fetching a windows-1251 page from a local server, checking that
+what is on disk is the bytes it sent, and decoding the same text out of a hit as
+out of the fetch. robots.txt honoured under a server that disallows. Redirects
+landing at their target.
+
+*Where it is:* the downloader and `cache` are built and tested. `robots` and
+`redirect` are not.
 
 **Phase 3. The frontier and the scheduler.** Dedup, depth, politeness, the
 ordering policies, leases. SQLite, one database, hand-written SQL: see

@@ -105,8 +105,10 @@ response │        │←│        │←│        │← ─┘
 - `cache` at 900 is the last thing before the network, so a hit short-circuits
   the fetch only after every other request middleware has had its say. This is
   Scrapy's `HttpCacheMiddleware` placement and the reasoning is the same.
-- `charset` at 600 sits after `compression` at 590 and before `cache` at 900, so
-  what lands in the cache is decompressed and UTF-8.
+- Decoding is not in this chain at all. The cache holds what the server sent,
+  and `Response.Text()` decodes on demand through the same function the spider
+  uses when it reads a body back out. See
+  [Decoding is not in this table](#downloader) for why.
 
 A link may **short-circuit**: return a result without calling the rest, which is
 how a cache hit works. It may **drop**: return `ErrDrop`, which is how offsite
@@ -853,6 +855,21 @@ a better answer, while a corpus decoded on the way in has its mistakes baked in
 until somebody re-crawls. It is smaller, too, and faithful enough to
 revalidate.
 
+**Two keys per page.** The body under the URL's key, and the status, the final
+URL and the response headers under the same key with `.meta` on the end.
+
+The sidecar exists because a body on its own is not re-readable. A page in
+windows-1251 that declares its encoding in the `Content-Type` header and nowhere
+else decodes correctly on the way in and into mojibake on the way back out, and
+nothing about the resulting text says it went wrong. The headers are what makes
+a hit the response that was received rather than a body with its provenance
+filed off.
+
+This could have lived in the records database instead. It lives in the cache
+because a corpus that cannot be read without a second database that happens to
+still exist is not a corpus. `cache.Store` stays what it was, a key holding
+bytes; using two of them is the middleware's business and none of the store's.
+
 ### Spider
 
 | Order | Name | What it does |
@@ -1331,6 +1348,8 @@ four stages is the genuinely new distributed-systems problem here.
 | `internal/registry`, generic, shared by every extension point | Built, cache runs on it |
 | `internal/chain`, middleware that wraps, with drop and short-circuit | Built, tested |
 | `internal/plugin`, the seam from a job's plugin list to a chain | Built, tested |
+| `internal/downloader`: the core fetch, agent, timeout, body limit | Built, tested |
+| The `cache` middleware: hits, sidecar, ttl, statuses | Built, tested |
 | HCL job document, stage blocks, nested plugins, multiple jobs | Built, tested |
 | Vocabulary: bare types and transforms | Built, tested |
 | Validation, every problem reported at once | Built, tested |
