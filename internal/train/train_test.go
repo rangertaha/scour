@@ -211,7 +211,7 @@ func TestWhatItWroteIsMarked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	edited, written, err := train.Write(document, proposals)
+	edited, written, err := train.Write(document, "news", proposals)
 	if err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestWhatItWroteIsMarked(t *testing.T) {
 	}
 
 	// The marker is findable again, which is what the next run reads.
-	induced := train.MarkInduced(edited)
+	induced := train.MarkInduced(edited, "news")
 	if !induced["article.headline"] {
 		t.Errorf("the marker was not found again: %v", induced)
 	}
@@ -258,7 +258,7 @@ job "news" {
 	if err != nil {
 		t.Fatal(err)
 	}
-	edited, written, err := train.Write(document, proposals)
+	edited, written, err := train.Write(document, "news", proposals)
 	if err != nil || written == 0 {
 		t.Fatalf("write: %d, %v", written, err)
 	}
@@ -282,7 +282,7 @@ func TestRunningItTwiceReplacesItsOwnGuess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	edited, _, err := train.Write(document, first)
+	edited, _, err := train.Write(document, "news", first)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestRunningItTwiceReplacesItsOwnGuess(t *testing.T) {
 	next := job(t, string(edited))
 	for _, item := range next.Items {
 		for _, prop := range item.Properties {
-			if train.MarkInduced(edited)[item.Name+"."+prop.Name] {
+			if train.MarkInduced(edited, "news")[item.Name+"."+prop.Name] {
 				prop.Induced = true
 			}
 		}
@@ -302,7 +302,7 @@ func TestRunningItTwiceReplacesItsOwnGuess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	twice, _, err := train.Write(edited, second)
+	twice, _, err := train.Write(edited, "news", second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestWritingIsAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	written, err := train.WriteFile(path, proposals)
+	written, err := train.WriteFile(path, "news", proposals)
 	if err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -408,7 +408,7 @@ job "news" {
 				t.Fatalf("learn: %v", err)
 			}
 
-			edited, written, err := train.Write([]byte(document), proposals)
+			edited, written, err := train.Write([]byte(document), "news", proposals)
 			if err != nil {
 				t.Fatalf("write: %v", err)
 			}
@@ -424,5 +424,84 @@ job "news" {
 				t.Errorf("the document no longer decodes: %v\n%s", err, edited)
 			}
 		})
+	}
+}
+
+// TestTwoJobsWithOneItemNameDoNotCollide.
+//
+// The search for where a locator goes was line-oriented with no notion of a job
+// block, so it took the first `item "x"` in the file. Two jobs each declaring
+// an item of the same name, crawling different sites, is an ordinary document:
+// training the second wrote its induced selector into the first, so one job
+// began extracting with a selector induced from a site it had never fetched and
+// the other still had no locator. The reader of that document saw a plausible
+// css line under a marker saying scour had put it there.
+func TestTwoJobsWithOneItemNameDoNotCollide(t *testing.T) {
+	document := []byte(`
+job "uk" {
+  item "article" {
+    property "headline" {
+      type = str
+    }
+  }
+}
+
+job "eu" {
+  item "article" {
+    property "headline" {
+      type = str
+    }
+  }
+}
+`)
+
+	edited, written, err := train.Write(document, "eu", []train.Proposal{
+		{Item: "article", Property: "headline", Selector: ".eu-hed"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written != 1 {
+		t.Fatalf("written = %d, want 1", written)
+	}
+
+	uk, eu, _ := strings.Cut(string(edited), `job "eu"`)
+	if strings.Contains(uk, ".eu-hed") {
+		t.Error("the eu job's selector was written into the uk job")
+	}
+	if !strings.Contains(eu, ".eu-hed") {
+		t.Error("the eu job did not get its selector")
+	}
+}
+
+// TestAMarkerInAnotherJobIsNotThisJobsMarker.
+//
+// The other half of the same mistake. MarkInduced keyed on item and property
+// alone, so a marker in one job reported the other job's property as induced,
+// and a locator a person had written by hand was proposed for replacement.
+func TestAMarkerInAnotherJobIsNotThisJobsMarker(t *testing.T) {
+	document := []byte(`
+job "uk" {
+  item "article" {
+    property "headline" {
+      css = [".uk-hed"] ` + train.Marker + `
+    }
+  }
+}
+
+job "eu" {
+  item "article" {
+    property "headline" {
+      css = [".written-by-hand"]
+    }
+  }
+}
+`)
+
+	if train.MarkInduced(document, "eu")["article.headline"] {
+		t.Error("a hand-written locator was reported as one scour had induced")
+	}
+	if !train.MarkInduced(document, "uk")["article.headline"] {
+		t.Error("the job's own marker was not seen")
 	}
 }

@@ -20,8 +20,21 @@ import (
 //
 // So this edits lines. It is less clever than rewriting the tree and it is the
 // only approach that leaves the rest of the file alone.
-func Write(document []byte, proposals []Proposal) ([]byte, int, error) {
+// # Why the job name is a parameter
+//
+// Because two jobs in one document may each declare an item of the same name,
+// crawling different sites, and the search for where a locator goes was
+// line-oriented with no notion of a job at all: it took the first `item "x"` in
+// the file. Training the second job wrote its induced selector into the first,
+// so one job started extracting with a selector induced from a site it had
+// never fetched and the other still had no locator. Both silently.
+func Write(document []byte, job string, proposals []Proposal) ([]byte, int, error) {
 	lines := strings.Split(string(document), "\n")
+
+	from, to := bounds(lines, job)
+	if from < 0 {
+		return document, 0, fmt.Errorf("train: no job %q in the document", job)
+	}
 
 	var written int
 	for _, proposal := range proposals {
@@ -29,7 +42,7 @@ func Write(document []byte, proposals []Proposal) ([]byte, int, error) {
 			continue
 		}
 
-		at, indent, existing := find(lines, proposal)
+		at, indent, existing := find(lines, from, to, proposal)
 		if at < 0 {
 			continue
 		}
@@ -41,6 +54,9 @@ func Write(document []byte, proposals []Proposal) ([]byte, int, error) {
 			lines = append(lines[:existing], append(replacement, lines[existing+1:]...)...)
 		} else {
 			lines = append(lines[:at], append(replacement, lines[at:]...)...)
+			// An inserted line moves the job's closing brace down with it, and
+			// the next proposal is searched for in the same range.
+			to++
 		}
 		written++
 	}
@@ -58,12 +74,13 @@ func Write(document []byte, proposals []Proposal) ([]byte, int, error) {
 // inside the item block, and gives up rather than guessing if the document is
 // shaped in a way it does not recognise: a tool that edits a file it has
 // misread is worse than one that says it could not.
-func find(lines []string, proposal Proposal) (insertAt int, indent string, replace int) {
+func find(lines []string, from, to int, proposal Proposal) (insertAt int, indent string, replace int) {
 	item := `item "` + proposal.Item + `"`
 	property := `property "` + proposal.Property + `"`
 
 	inItem, depth := false, 0
-	for i, line := range lines {
+	for i := from; i < to; i++ {
+		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 
 		if !inItem {
@@ -89,7 +106,7 @@ func find(lines []string, proposal Proposal) (insertAt int, indent string, repla
 			indent = leading(line) + "  "
 			replace = -1
 
-			for j := i + 1; j < len(lines); j++ {
+			for j := i + 1; j < to; j++ {
 				body := strings.TrimSpace(lines[j])
 				switch {
 				case strings.HasPrefix(body, "css ") || strings.HasPrefix(body, "css="):
@@ -120,6 +137,39 @@ func find(lines []string, proposal Proposal) (insertAt int, indent string, repla
 	return -1, "", -1
 }
 
+// bounds is the half-open line range of a job block, or -1 if the document has
+// no such job.
+//
+// Line-oriented and conservative for the same reason the rest of this file is:
+// the alternative is a parser and a printer, and that returns somebody a file
+// they do not recognise. A job whose block cannot be delimited is one this
+// gives up on rather than guesses at.
+func bounds(lines []string, job string) (int, int) {
+	want := `job "` + job + `"`
+
+	for i, line := range lines {
+		if !strings.HasPrefix(strings.TrimSpace(line), want) {
+			continue
+		}
+		depth := strings.Count(line, "{") - strings.Count(line, "}")
+		if depth <= 0 {
+			// Opened and closed on one line, so there is nothing inside it to
+			// edit.
+			return i, i + 1
+		}
+		for j := i + 1; j < len(lines); j++ {
+			depth += strings.Count(lines[j], "{") - strings.Count(lines[j], "}")
+			if depth <= 0 {
+				return i, j + 1
+			}
+		}
+		// Unbalanced: the document would not parse either, so say so by
+		// finding nothing rather than editing to the end of the file.
+		return -1, -1
+	}
+	return -1, -1
+}
+
 // closes reports whether a block opens and closes on one line.
 //
 // Counted rather than matched on a suffix, because `property "a" {}` and
@@ -147,13 +197,13 @@ func leading(line string) string {
 // A copy is written and renamed, so a failure halfway leaves the original
 // rather than half a file: this is somebody's job document and it may be the
 // only copy.
-func WriteFile(path string, proposals []Proposal) (int, error) {
+func WriteFile(path, job string, proposals []Proposal) (int, error) {
 	document, err := os.ReadFile(path)
 	if err != nil {
 		return 0, fmt.Errorf("train: %w", err)
 	}
 
-	edited, written, err := Write(document, proposals)
+	edited, written, err := Write(document, job, proposals)
 	if err != nil || written == 0 {
 		return written, err
 	}
@@ -174,13 +224,23 @@ func WriteFile(path string, proposals []Proposal) (int, error) {
 	return written, nil
 }
 
-// MarkInduced reads a document and says which properties hold a locator this
-// wrote, which is what tells [Learn] what it may replace.
-func MarkInduced(document []byte) map[string]bool {
+// MarkInduced reads a document and says which properties of one job hold a
+// locator this wrote, which is what tells [Learn] what it may replace.
+//
+// Scoped to a job for the reason [Write] is: a marker in another job's item of
+// the same name used to report this job's property as induced, so a locator a
+// person had written by hand was proposed for replacement.
+func MarkInduced(document []byte, job string) map[string]bool {
 	induced := map[string]bool{}
 
+	lines := strings.Split(string(document), "\n")
+	from, to := bounds(lines, job)
+	if from < 0 {
+		return induced
+	}
+
 	var item, property string
-	for _, line := range strings.Split(string(document), "\n") {
+	for _, line := range lines[from:to] {
 		trimmed := strings.TrimSpace(line)
 
 		switch {

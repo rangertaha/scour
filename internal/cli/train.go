@@ -85,7 +85,7 @@ func runTrain(ctx context.Context, a *App, path, jobName, itemName, dir string, 
 	// Which locators this wrote last time, which is the only thing it may
 	// replace. Read from the markers in the file rather than from anywhere
 	// else, so the document is the whole of the state.
-	induced := train.MarkInduced(document)
+	induced := train.MarkInduced(document, job.Name)
 	for _, item := range job.Items {
 		for _, prop := range item.Properties {
 			prop.Induced = induced[item.Name+"."+prop.Name]
@@ -142,7 +142,7 @@ func runTrain(ctx context.Context, a *App, path, jobName, itemName, dir string, 
 		return nil
 	}
 
-	written, err := train.WriteFile(path, proposals)
+	written, err := train.WriteFile(path, job.Name, proposals)
 	if err != nil {
 		return Failedf("%v", err)
 	}
