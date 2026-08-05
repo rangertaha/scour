@@ -80,6 +80,7 @@ func Run(t *testing.T, open Open) {
 	t.Run("AMergeIsProposedRecordedAndUndoable", func(t *testing.T) { testResolution(t, open) })
 	t.Run("AProposedMergeIsAcceptedByTheStore", func(t *testing.T) { testAProposedMergeIsAcceptedByTheStore(t, open) })
 	t.Run("RetractKeepsWhatIsStillAsserted", func(t *testing.T) { testRetractKeepsWhatIsStillAsserted(t, open) })
+	t.Run("AKindIsTheSameKindWhoeverSpelledIt", func(t *testing.T) { testAKindIsTheSameKindWhoeverSpelledIt(t, open) })
 }
 
 func said(job, url string) entity.Provenance {
@@ -651,5 +652,39 @@ func testAProposedMergeIsAcceptedByTheStore(t *testing.T, open Open) {
 	// And what the store proposed, the store accepts.
 	if err := g.Merge(ctx, proposed[0].From, proposed[0].To, proposed[0].Rule, from); err != nil {
 		t.Fatalf("the store refused a merge it proposed itself: %v", err)
+	}
+}
+
+// testAKindIsTheSameKindWhoeverSpelledIt: a stray space is not a second type.
+//
+// KindID trimmed and Assert did not, so an entity asserted from
+// `entity = "person "` could never be tagged: Tag said there was no such kind
+// while the caller had used the identical string.
+func testAKindIsTheSameKindWhoeverSpelledIt(t *testing.T, open Open) {
+	ctx := context.Background()
+	g := open(t)
+	from := said("news", "https://a.example/1")
+
+	spaced, err := g.Assert(ctx, "person ", "Alex Doe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := g.Assert(ctx, "person", "Alex Doe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spaced != plain {
+		t.Fatalf("a stray space made a second person: %s and %s", spaced, plain)
+	}
+
+	if err := g.Tag(ctx, entity.KindID("person "), "climate@7", from); err != nil {
+		t.Fatalf("a type asserted with a stray space could not be tagged: %v", err)
+	}
+	topics, err := g.Topics(ctx, entity.KindID("person"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topics) != 1 {
+		t.Errorf("the type's topics = %+v, want the one it was tagged with", topics)
 	}
 }

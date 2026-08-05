@@ -355,8 +355,19 @@ SELECT e.id AS id, COALESCE(a.canonical, e.id) AS canonical
 // when a merge happened would mean an assertion could no longer be found by the
 // spelling it was made under, and that is what [Store.Retract] needs.
 func ID(kind, name string) string {
-	sum := sha256.Sum256([]byte(strings.ToLower(kind) + "\x00" + normalise(name)))
+	// The kind is trimmed as well as lowered, so that `entity = "person "` in a
+	// document is the same type as `entity = "person"`. It was not, and KindID
+	// trims, so an entity asserted with a stray space could never be tagged:
+	// Tag said there was no such kind while the caller had used the identical
+	// string.
+	sum := sha256.Sum256([]byte(normaliseKind(kind) + "\x00" + normalise(name)))
 	return hex.EncodeToString(sum[:12])
+}
+
+// normaliseKind is how a type name is compared: trimmed and lowered, matching
+// what [KindID] does, so the two cannot disagree about what a type is called.
+func normaliseKind(kind string) string {
+	return strings.ToLower(strings.TrimSpace(kind))
 }
 
 // normalise is how much of a name is compared: case, surrounding space, and
@@ -394,7 +405,7 @@ ON CONFLICT (id) DO UPDATE SET
 	last_seen  = `+s.sql.Greatest("last_seen", "excluded.last_seen")+`,
 	first_seen = `+s.sql.Least("first_seen", "excluded.first_seen")+`,
 	assertions = assertions + 1`),
-		id, strings.ToLower(kind), strings.TrimSpace(name), at, at); err != nil {
+		id, normaliseKind(kind), strings.TrimSpace(name), at, at); err != nil {
 		return "", fmt.Errorf("entity: assert %s: %w", name, err)
 	}
 

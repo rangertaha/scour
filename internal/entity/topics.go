@@ -59,7 +59,7 @@ const KindPrefix = "kind:"
 // mistyped entity id, which is what makes tagging a subject that does not exist
 // refusable.
 func KindID(kind string) string {
-	return KindPrefix + strings.ToLower(strings.TrimSpace(kind))
+	return KindPrefix + normaliseKind(kind)
 }
 
 // Tag records that a subject is about a topic.

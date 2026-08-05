@@ -112,10 +112,9 @@ func Topic(a *App) *ucli.Command {
 				ArgsUsage: "<labels.hcl>",
 				Flags: append([]ucli.Flag{
 					&ucli.StringFlag{Name: "corpus", Usage: "where the cached pages are", Destination: &corpus},
-					&ucli.IntFlag{Name: "pages", Value: 2000, Usage: "how many cached pages to look at", Destination: &limit},
 				}, shared...),
 				Action: oneFile(func(ctx context.Context, path string) error {
-					return trainTopics(ctx, a, path, dir, corpus, limit)
+					return trainTopics(ctx, a, path, dir, corpus)
 				}),
 			},
 		},
@@ -231,6 +230,8 @@ type page struct {
 // keyed by key would produce a labels file full of hashes that nobody could
 // review. A body whose sidecar is missing is skipped rather than labelled with
 // its hash, because a label somebody cannot read is a label they cannot check.
+// A limit of zero reads everything, which is what training wants: the labels
+// decide the set, and a cut would silently change it.
 func pages(ctx context.Context, dir string, limit int) ([]page, error) {
 	if dir == "" {
 		dir = filepath.Join(".scour", "cache")
@@ -269,7 +270,7 @@ func pages(ctx context.Context, dir string, limit int) ([]page, error) {
 		if err != nil {
 			return nil, err
 		}
-		if len(out) >= limit {
+		if limit > 0 && len(out) >= limit {
 			break
 		}
 		if strings.HasSuffix(key, ".meta") {
@@ -457,13 +458,22 @@ func writeLabels(path string, doc *engine.Topics) error {
 	return nil
 }
 
-func trainTopics(ctx context.Context, a *App, path, dir, corpusDir string, limit int) error {
+func trainTopics(ctx context.Context, a *App, path, dir, corpusDir string) error {
 	doc, err := readLabels(path)
 	if err != nil {
 		return err
 	}
 
-	corpus, err := pages(ctx, corpusDir, limit)
+	// Unlimited, whatever --pages says, because the labels are what decide the
+	// training set and the flag decides how much to look at when proposing.
+	//
+	// Truncating first meant a labelled page beyond the cut was dropped from
+	// training and reported as though the cache did not hold it, which it did.
+	// The cut is by hash order, so it was also one-sided: the same labels file
+	// produced a differently balanced corpus, and therefore a differently
+	// calibrated model, depending on a paging flag. It bit with default flags
+	// whenever a crawl grew the cache between propose and train.
+	corpus, err := pages(ctx, corpusDir, 0)
 	if err != nil {
 		return Failedf("%v", err)
 	}
