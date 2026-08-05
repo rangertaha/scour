@@ -1424,6 +1424,9 @@ four stages is the genuinely new distributed-systems problem here.
 | `internal/extract`: four ways to find a value, provenance on each | Built, tested |
 | The spider: the chain, link discovery, the spec fingerprint | Built, tested |
 | The `httperror` middleware | Built, tested |
+| `internal/record`: the flat form, and the measurement rendering | Built, tested |
+| The pipeline: waves, concurrency, clean, validate, dedupe, rank | Built, tested |
+| Exporters: the registry, json, jsonlines, csv | Built, tested |
 | `internal/downloader`: the core fetch, agent, timeout, body limit | Built, tested |
 | The `cache` middleware: hits, sidecar, ttl, statuses | Built, tested |
 | `internal/robots`: RFC 9309, written rather than imported | Built, tested |
@@ -1443,7 +1446,7 @@ four stages is the genuinely new distributed-systems problem here.
 | Events as items: tags, fields, time. Parquet archive | Designed. Schema built |
 | Plugin implementations, all of them | Not started |
 | The stages themselves | Not started |
-| Exporters, all formats | Not started |
+| Exporters: parquet, nats, sqlite | Not started |
 | Cluster join, distributed jobs | Not started |
 | Jobs in a KV bucket, server-side writes | Decided, not started |
 | Frontier in SQLite, one shared database | Built, tested, benchmarked |
