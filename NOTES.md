@@ -929,19 +929,25 @@ order is nearest the queue.
 | Order | Name | What it does |
 | --- | --- | --- |
 | 100 | `dupefilter` | Decides what counts as already seen |
-| 200 | `offsite` | Drops URLs outside `domains` / `included` / `excluded` |
 | 300 | `cron` | Defers a URL until it is due again |
-| 400 | `budget` | Refuses a URL the job can no longer pay for |
 | 450 | `topic` | Scores a URL against a topic, before the policy orders it |
 | 500 | `priority` | Best first, by score |
 | 500 | `breadth` | Level by level, for an archival crawl |
 | 500 | `depth` | Follows a spur down before returning |
 | 500 | `random` | Samples without the sample being shaped by the scorer |
 
-`offsite` appears in three chains and that is deliberate, not duplication. The
-spider's keeps an out-of-scope link out of the frontier, the scheduler's catches
-entries that were in scope when they were queued and are not any more, and the
-downloader's is the last check before the network.
+**The scheduler enforces the job's own attributes itself,** rather than through
+plugins, which is why `offsite` and `budget` are not in this table. `domains`,
+`included`, `excluded`, `max_depth` and `max_pages` are all attributes, and an
+attribute's enforcement cannot be optional: a plugin that could be turned off is
+a boundary that can be crossed by deleting a line. The check is on the way into
+the frontier, outside the chain, the same way robots.txt sits outside the
+downloader's.
+
+`offsite` stays in the spider's and the downloader's tables, and there it really
+is optional. Those two are catching work that did not come through this
+scheduler, which on a single node is pure redundancy and across a cluster with a
+spider somebody else wrote is not.
 
 The ordering policies at 500 are alternatives rather than a chain, and
 `scheduler.policy` is the attribute that picks one. They are catalogued because
@@ -1411,6 +1417,10 @@ four stages is the genuinely new distributed-systems problem here.
 | `internal/registry`, generic, shared by every extension point | Built, cache runs on it |
 | `internal/chain`, middleware that wraps, with drop and short-circuit | Built, tested |
 | `internal/plugin`, the seam from a job's plugin list to a chain | Built, tested |
+| `internal/urls`: what makes two addresses one page | Built, tested |
+| `internal/scope`: domains, included, excluded, one implementation | Built, tested |
+| The scheduler: the chain, scope, budget, politeness | Built, tested |
+| The `dupefilter` middleware | Built, tested |
 | `internal/downloader`: the core fetch, agent, timeout, body limit | Built, tested |
 | The `cache` middleware: hits, sidecar, ttl, statuses | Built, tested |
 | `internal/robots`: RFC 9309, written rather than imported | Built, tested |

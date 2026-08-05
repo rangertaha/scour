@@ -178,9 +178,7 @@ SELECT u.hash, u.url, u.host, u.depth, u.score, u.parent, u.discovered
           </thead>
           <tbody>
             <tr><td class="num">100</td><td><code>dupefilter</code></td><td>Decides what counts as already seen</td></tr>
-            <tr><td class="num">200</td><td><code>offsite</code></td><td>Drops URLs outside the job's scope</td></tr>
             <tr><td class="num">300</td><td><code>cron</code></td><td>Defers a URL until it is due again</td></tr>
-            <tr><td class="num">400</td><td><code>budget</code></td><td>Refuses a URL the job can no longer pay for</td></tr>
             <tr><td class="num">450</td><td><code>topic</code></td><td>Scores a URL against a topic, before the policy orders it</td></tr>
             <tr><td class="num">500</td><td><code>priority</code></td><td>Best first, by score. The default</td></tr>
             <tr><td class="num">500</td><td><code>breadth</code></td><td>Level by level, for an archival crawl</td></tr>
@@ -194,9 +192,30 @@ SELECT u.hash, u.url, u.host, u.depth, u.score, u.parent, u.discovered
       against the queue because deciding what comes out next is the last thing
       that happens on the way in and the first on the way out.</p>
 
-      <p><code>dupefilter</code> at 100 drops a URL already seen before anything
-      else pays to think about it, which is the same argument as
-      <code>robots</code> being outside the downloader's chain, one layer up.</p>
+      <p><code>dupefilter</code> at 100 is outermost because everything after
+      it is work: a URL already seen should be recognised before anything pays
+      to think about it. What it actually decides is what "the same URL" means,
+      which is a question with no right answer, only a right answer per site.
+      Treating <code>?utm_source=x</code> as noise is right nearly everywhere
+      and wrong on a site that reads it; treating <code>/a/</code> and
+      <code>/a</code> as one page is right nearly everywhere and wrong on the
+      servers that do not. So a job that knows its site says so, and one that
+      does not gets only the transformations that cannot change what a server
+      returns.</p>
+
+      <h2>Scope and budget are not plugins</h2>
+
+      <p><code>domains</code>, <code>included</code>, <code>excluded</code>,
+      <code>max_depth</code> and <code>max_pages</code> are all attributes, and
+      an attribute's enforcement cannot be optional: a plugin that could be
+      turned off is a boundary that can be crossed by deleting a line. The
+      scheduler checks them itself, on the way into the frontier and outside the
+      chain, the same way robots.txt sits outside the downloader's.</p>
+
+      <p><code>offsite</code> stays in the spider's and the downloader's tables,
+      and there it really is optional. Those two are catching work that did not
+      come through this scheduler, which on a single node is pure redundancy and
+      across a cluster with a spider somebody else wrote is not.</p>
 
       <div class="note">
         <span class="tag">Two implementations, one contract</span>

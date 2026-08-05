@@ -1,0 +1,307 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// Package scheduler decides what gets fetched, and in what order.
+//
+// It owns the frontier, and it is the one stage a job may not hand to somebody
+// else: two schedulers handing out the same host cannot honour a crawl delay
+// between them, so politeness forces exactly one decision point per host.
+//
+// # The chain runs on the way in
+//
+// A request passes through the middleware on its way into the frontier, so low
+// order is nearest the spider that discovered it and high order is nearest the
+// queue. `dupefilter` at 100 decides what counts as already seen before
+// anything else pays to think about it; `offsite` at 200 drops what is out of
+// bounds; a scorer nearer the queue says how much the rest of it is worth.
+//
+// Every link may change the request, which is the difference from the other
+// chains: what comes out is what gets queued. A link that returns [chain.ErrDrop]
+// refuses the URL, which is the ordinary outcome for most of what a crawl finds.
+//
+// # What is not in the chain
+//
+// The budget. `max_depth` and `max_pages` are `scheduler` attributes, and an
+// attribute's enforcement cannot be optional: a plugin that could be turned off
+// is a budget that can be exceeded by deleting a line, which is not what
+// anybody writing a budget means. So they are checked outside the chain, the
+// same way robots.txt is in the downloader and for the same reason.
+package scheduler
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/hashicorp/hcl/v2"
+
+	"github.com/rangertaha/scour/internal/chain"
+	"github.com/rangertaha/scour/internal/engine"
+	"github.com/rangertaha/scour/internal/frontier"
+	"github.com/rangertaha/scour/internal/plugin"
+	"github.com/rangertaha/scour/internal/scope"
+	"github.com/rangertaha/scour/internal/urls"
+)
+
+// Errors a scheduler produces for a URL it will not queue. All of them wrap
+// [chain.ErrDrop], because refusing most of what a crawl discovers is what a
+// focused crawl is, and none of it is a failure.
+var (
+	// ErrTooDeep reports a URL past the job's max_depth.
+	ErrTooDeep = fmt.Errorf("deeper than the job crawls: %w", chain.ErrDrop)
+
+	// ErrBudgetSpent reports a job that has fetched as many pages as it may.
+	ErrBudgetSpent = fmt.Errorf("the job's page budget is spent: %w", chain.ErrDrop)
+
+	// ErrOutOfScope reports a URL outside the job's domains, included or
+	// excluded.
+	ErrOutOfScope = fmt.Errorf("outside the job's scope: %w", chain.ErrDrop)
+)
+
+// The chain this stage runs. A link is given a request on its way to the
+// frontier and returns the request to queue, or a drop.
+type (
+	// Request is what is queued. The frontier's own type, because a scheduler
+	// that had a type of its own would be converting on both sides of itself.
+	Request = frontier.Request
+
+	// Handler queues a request, or refuses it.
+	Handler = chain.Handler[*Request, *Request]
+
+	// Wrapper is what a middleware returns.
+	Wrapper = chain.Wrapper[*Request, *Request]
+
+	// Middleware builds one wrapper from its configuration.
+	Middleware = plugin.Factory[*Request, *Request]
+
+	// HandlerFunc adapts an ordinary function to [Handler].
+	HandlerFunc = chain.Func[*Request, *Request]
+)
+
+// reg holds this stage's middleware.
+var reg = plugin.NewRegistry[*Request, *Request](engine.StageScheduler)
+
+// Register adds a middleware, from an init function in its own package.
+func Register(name string, m Middleware) { reg.Register(name, m) }
+
+// Registered lists what this build has, sorted.
+func Registered() []string { return reg.Names() }
+
+// Has reports whether a middleware is registered.
+func Has(name string) bool { return reg.Has(name) }
+
+// Stage is a job's scheduler.
+type Stage struct {
+	job   string
+	queue frontier.Frontier
+	own   bool // whether Close should close the frontier
+
+	handler Handler
+	chain   *plugin.Chain[*Request, *Request]
+
+	scope    *scope.Scope
+	maxDepth int
+	maxPages int
+	canon    urls.Options
+}
+
+// Options are what a caller supplies that the job document cannot.
+type Options struct {
+	// Frontier is where requests are queued. Nil opens one under Dir, which is
+	// what a server does; a test passes its own.
+	Frontier frontier.Frontier
+
+	// Dir is where a frontier of our own keeps its database.
+	Dir string
+
+	// Eval resolves `secret()` in plugin configuration.
+	Eval *hcl.EvalContext
+
+	// Canon is how URLs are made comparable. The `dupefilter` plugin normally
+	// sets this per job; a caller with no plugins can set it directly.
+	Canon urls.Options
+}
+
+// New builds the scheduler a job configured.
+func New(ctx context.Context, job *engine.Job, opts Options, open func(frontier.Config) (frontier.Frontier, error)) (*Stage, error) {
+	if job == nil {
+		return nil, errors.New("scheduler: no job")
+	}
+
+	bounds, err := scope.New(job.Domains, job.Included, job.Excluded)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: job %q: %w", job.Name, err)
+	}
+
+	rate, err := job.Scheduler.RateDuration()
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: job %q: %w", job.Name, err)
+	}
+
+	queue, own := opts.Frontier, false
+	if queue == nil {
+		if open == nil {
+			return nil, errors.New("scheduler: no frontier, and no way to open one")
+		}
+		queue, err = open(frontier.Config{
+			Policy: job.Scheduler.OrderPolicy(),
+			Rate:   rate,
+			Dir:    opts.Dir,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("scheduler: job %q: %w", job.Name, err)
+		}
+		own = true
+	}
+
+	built, err := plugin.Build(ctx, reg, job, engine.StageScheduler, opts.Eval)
+	if err != nil {
+		if own {
+			queue.Close()
+		}
+		return nil, err
+	}
+
+	s := &Stage{
+		job:      job.Name,
+		queue:    queue,
+		own:      own,
+		chain:    built,
+		scope:    bounds,
+		maxDepth: job.Scheduler.Depth(),
+		maxPages: job.Scheduler.Pages(),
+		canon:    opts.Canon,
+	}
+	s.handler = built.Handler(HandlerFunc(s.enqueue))
+	return s, nil
+}
+
+// Submit offers URLs to the frontier and reports how many were new.
+//
+// Each goes through the chain on its own, so one refusal does not take the rest
+// of a page's links with it. A drop is not an error and is not counted.
+func (s *Stage) Submit(ctx context.Context, reqs ...*Request) (int, error) {
+	var (
+		added    int
+		problems []error
+	)
+
+	for _, req := range reqs {
+		if req == nil {
+			continue
+		}
+		queued, err := s.handler.Handle(ctx, req)
+		switch {
+		case chain.Dropped(err):
+			continue
+		case err != nil:
+			problems = append(problems, err)
+			continue
+		case queued == nil:
+			// Already known, which is the most ordinary thing a crawl finds.
+			continue
+		}
+		added++
+	}
+	return added, errors.Join(problems...)
+}
+
+// enqueue is the core the chain wraps: what a request means once every link has
+// had its say.
+//
+// The budget is checked here rather than in a link, because max_depth and
+// max_pages are attributes and an attribute's enforcement cannot be something a
+// job turns off by deleting a plugin.
+func (s *Stage) enqueue(ctx context.Context, req *Request) (*Request, error) {
+	if err := s.prepare(req); err != nil {
+		return nil, err
+	}
+
+	if s.maxDepth > 0 && req.Depth > s.maxDepth {
+		return nil, fmt.Errorf("%s: %w (depth %d)", req.URL, ErrTooDeep, req.Depth)
+	}
+	if !s.scope.Allows(req.URL) {
+		return nil, fmt.Errorf("%s: %w", req.URL, ErrOutOfScope)
+	}
+	if s.maxPages > 0 {
+		waiting, err := s.queue.Len(ctx, s.job)
+		if err != nil {
+			return nil, err
+		}
+		if waiting >= s.maxPages {
+			return nil, fmt.Errorf("%s: %w (%d queued)", req.URL, ErrBudgetSpent, waiting)
+		}
+	}
+
+	added, err := s.queue.Add(ctx, s.job, *req)
+	if err != nil {
+		return nil, err
+	}
+	if added == 0 {
+		// Already known. Not a drop and not an error: re-discovering a URL is
+		// the most ordinary thing a crawl does.
+		return nil, nil
+	}
+	return req, nil
+}
+
+// prepare fills in what a caller left out, so that a request built by hand and
+// one discovered by a spider reach the frontier in the same shape.
+func (s *Stage) prepare(req *Request) error {
+	normalised, err := urls.Normalise(req.URL, s.canon)
+	if err != nil {
+		return fmt.Errorf("%w: %w", err, chain.ErrDrop)
+	}
+	req.URL = normalised
+
+	if req.Hash == "" {
+		req.Hash = urls.Hash(normalised)
+	}
+	if req.Host == "" {
+		req.Host = urls.Host(normalised)
+	}
+	if req.Discovered.IsZero() {
+		req.Discovered = time.Now().UTC()
+	}
+	return nil
+}
+
+// Next hands out the best request whose host is not cooling.
+//
+// It returns [frontier.ErrEmpty] when nothing is due, which covers both an
+// exhausted crawl and one waiting on politeness. [Stage.Waiting] tells them
+// apart.
+func (s *Stage) Next(ctx context.Context, now time.Time, hold time.Duration) (*Request, error) {
+	return s.queue.Lease(ctx, s.job, now, hold)
+}
+
+// Done reports a request as fetched.
+func (s *Stage) Done(ctx context.Context, hash string) error {
+	return s.queue.Done(ctx, s.job, hash)
+}
+
+// Fail reports a request as failed, so it is tried again until it has been
+// tried too often.
+func (s *Stage) Fail(ctx context.Context, hash string) error {
+	return s.queue.Fail(ctx, s.job, hash)
+}
+
+// Waiting is how many requests are still to be fetched.
+func (s *Stage) Waiting(ctx context.Context) (int, error) {
+	return s.queue.Len(ctx, s.job)
+}
+
+// Middleware lists the chain in the order it runs, which is what a log line at
+// the start of a run should say.
+func (s *Stage) Middleware() []string { return s.chain.Names() }
+
+// Close releases the chain, and the frontier if this opened it.
+func (s *Stage) Close() error {
+	err := s.chain.Close()
+	if s.own {
+		if closeErr := s.queue.Close(); closeErr != nil {
+			return errors.Join(err, closeErr)
+		}
+	}
+	return err
+}

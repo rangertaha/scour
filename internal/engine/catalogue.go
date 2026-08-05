@@ -81,11 +81,14 @@ var Placements = map[Stage][]Placement{
 	// it, and the ordering policy at 500 sits against the queue, because
 	// deciding what comes out next is the last thing that happens on the way
 	// in and the first on the way out.
+	// offsite and budget are not here. The job's scope and its budget are
+	// written as attributes, and an attribute's enforcement cannot be optional:
+	// a plugin that could be turned off is a boundary that can be crossed by
+	// deleting a line. Both are checked by the scheduler itself, on the way
+	// into the frontier.
 	StageScheduler: {
 		{"dupefilter", 100, "Decides what counts as already seen"},
-		{"offsite", 200, "Drops URLs outside domains, included and excluded"},
 		{"cron", 300, "Defers a URL until it is due again"},
-		{"budget", 400, "Refuses a URL the job can no longer pay for"},
 		{"topic", 450, "Scores a URL against a topic, before the policy orders it"},
 		{"priority", 500, "Best first, by score. The default"},
 		{"breadth", 500, "Level by level, for an archival crawl"},
