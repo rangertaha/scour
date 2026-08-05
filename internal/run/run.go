@@ -57,7 +57,27 @@ import (
 // Long enough that a slow page does not get fetched twice, short enough that a
 // worker which died holding one does not take the URL with it for the rest of
 // the run.
+//
+// A floor rather than the whole answer: a job may set a request timeout longer
+// than this, and the hold a run actually takes is computed against it. See the
+// hold in [Run.Do].
 const Lease = 5 * time.Minute
+
+// Hold is how long a worker holds a request, given how long one fetch may take.
+//
+// [Lease] is a floor, not the answer. A job may set a request timeout longer
+// than it, and then the lease expired while the page was still downloading: a
+// second worker leased the same URL and fetched it alongside the first, two
+// requests to one host at once, defeating the rate the job asked for. The first
+// worker's report was then correctly discarded by the lease fence, which is
+// what a fence is for and why nothing counted it or logged it. The crawl looked
+// healthy and was hitting the site twice.
+//
+// A minute of margin over the fetch, because a request that has just timed out
+// still has to be reported before the hold is worth releasing.
+func Hold(fetch time.Duration) time.Duration {
+	return max(Lease, fetch+time.Minute)
+}
 
 // Idle is how long the loop waits when the frontier has nothing due but is not
 // empty, which is what politeness looks like from here.
@@ -362,6 +382,22 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 		return "", fmt.Errorf("run: job %q: %w", r.job.Name, err)
 	}
 
+	// The hold has to outlast one fetch, and a job may set a request timeout
+	// longer than [Lease]. With `timeout = "10m"` the lease expired while the
+	// page was still downloading, so a second worker leased the same URL and
+	// fetched it alongside the first, defeating the per-host rate the job asked
+	// for. The first worker's report was then correctly discarded by the fence,
+	// which is what a fence is for and why nothing counted it or logged it: the
+	// crawl looked healthy and was hitting the site twice.
+	//
+	// Computed here beside the stall bound, because both are the same question:
+	// how long a thing that is working can legitimately take.
+	fetch, err := r.job.Downloader.RequestTimeout()
+	if err != nil {
+		return "", fmt.Errorf("run: job %q: %w", r.job.Name, err)
+	}
+	hold := Hold(fetch)
+
 	stall := r.opts.Stall
 	if stall <= 0 {
 		stall = Stall + rate
@@ -390,7 +426,7 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 					return
 				}
 
-				req, err := r.sched.Next(ctx, r.now(), Lease)
+				req, err := r.sched.Next(ctx, r.now(), hold)
 				switch {
 				case errors.Is(err, frontier.ErrEmpty):
 					// Nothing due. Either the crawl is over or a host is

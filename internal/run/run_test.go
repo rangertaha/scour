@@ -692,3 +692,52 @@ func TestAJobWhoseStageIsElsewhereIsRefusedRatherThanRunLocally(t *testing.T) {
 	}
 	r.Close()
 }
+
+// TestTheHoldOutlastsOneFetch.
+//
+// The hold was the constant run.Lease, and a job may set a request timeout
+// longer than it. With `timeout = "10m"` the lease expired while the page was
+// still downloading, so a second worker leased the same URL and fetched it
+// alongside the first: two requests to one host at once, defeating the rate the
+// job asked for. The first worker's report was then correctly discarded by the
+// lease fence, which is what a fence is for and why nothing counted it or
+// logged it. The crawl looked healthy and was hitting the site twice.
+//
+// The arithmetic is asserted directly, because what a hold has to be is a
+// statement about two durations and observing it through a crawl would mean
+// waiting one out.
+func TestTheHoldOutlastsOneFetch(t *testing.T) {
+	for _, fetch := range []time.Duration{
+		30 * time.Second,
+		5 * time.Minute,
+		10 * time.Minute,
+		time.Hour,
+	} {
+		hold := run.Hold(fetch)
+		if hold <= fetch {
+			t.Errorf("Hold(%s) = %s, and the lease expires while the fetch is still running", fetch, hold)
+		}
+		if hold < run.Lease {
+			t.Errorf("Hold(%s) = %s, below the floor of %s", fetch, hold, run.Lease)
+		}
+	}
+
+	// And the job's own timeout is what it is computed from, so a document
+	// asking for a long fetch gets a hold that covers it.
+	server, _ := site(t)
+	j := document(t, server, `
+  downloader {
+    timeout = "10m"
+  }
+`)
+	fetch, err := j.Downloader.RequestTimeout()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetch != 10*time.Minute {
+		t.Fatalf("the job's timeout read as %s", fetch)
+	}
+	if got := run.Hold(fetch); got <= 10*time.Minute {
+		t.Errorf("Hold = %s for a ten minute fetch", got)
+	}
+}
