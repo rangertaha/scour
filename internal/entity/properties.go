@@ -96,7 +96,7 @@ type RelationKind struct {
 //
 // An entity subject is written against its canonical id, so describing either
 // spelling of a merged pair describes the pair.
-func (s *Store) Describe(ctx context.Context, subject, name, value string, position int, said Provenance) error {
+func (s *graph) Describe(ctx context.Context, subject, name, value string, position int, said Provenance) error {
 	if subject == "" || name == "" {
 		return errors.New("entity: a property needs a subject and a name")
 	}
@@ -159,7 +159,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`,
 // popularity contest; by name and value after it so that two properties
 // declared at the same position, which is what two jobs disagreeing produces,
 // still come back in the same order on every run.
-func (s *Store) Properties(ctx context.Context, subject string) ([]Property, error) {
+func (s *graph) Properties(ctx context.Context, subject string) ([]Property, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT p.name, p.value, MIN(p.position), SUM(p.assertions), MIN(p.first_seen), MAX(p.last_seen)
   FROM properties p
@@ -217,7 +217,7 @@ func subjectOf(ctx context.Context, tx *sql.Tx, subject string) (string, error) 
 // did this publisher publish is the far end, and what does this edge say is the
 // edge, and the second is only askable now that an edge has an id and can carry
 // properties of its own.
-func (s *Store) Relations(ctx context.Context, id string) ([]Relation, error) {
+func (s *graph) Relations(ctx context.Context, id string) ([]Relation, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT r.id, r.from_id, r.to_id, r.kind, r.topic, r.position,
        r.assertions, r.first_seen, r.last_seen
@@ -252,7 +252,7 @@ SELECT r.id, r.from_id, r.to_id, r.kind, r.topic, r.position,
 //
 // The other half of [Store.Kinds]: edges are typed the way nodes are, and a
 // graph you did not build is not readable until you can see both.
-func (s *Store) RelationKinds(ctx context.Context) ([]RelationKind, error) {
+func (s *graph) RelationKinds(ctx context.Context) ([]RelationKind, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT r.kind, COUNT(DISTINCT rf.canonical || ':' || rt.canonical)
   FROM relations r
@@ -284,7 +284,7 @@ SELECT r.kind, COUNT(DISTINCT rf.canonical || ':' || rt.canonical)
 // The way in for somebody who has a graph and does not yet know what is in it,
 // which until now was nobody, because nothing could read this store but the
 // step that filled it.
-func (s *Store) Kinds(ctx context.Context) ([]Kind, error) {
+func (s *graph) Kinds(ctx context.Context) ([]Kind, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT e.kind, COUNT(DISTINCT r.canonical)
   FROM entities e

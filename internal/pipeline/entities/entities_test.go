@@ -84,7 +84,7 @@ func rec(url, title, author string) *record.Record {
 
 // crawl runs the pipeline once, the way a run does, and gives back what came
 // out of it alongside the store it wrote to.
-func crawl(t *testing.T, dir string, steps string, records ...*record.Record) ([]*record.Record, *entity.Store) {
+func crawl(t *testing.T, dir string, steps string, records ...*record.Record) ([]*record.Record, entity.Store) {
 	t.Helper()
 
 	p, err := pipeline.New(context.Background(), job(t, steps))

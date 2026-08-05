@@ -63,11 +63,24 @@ func init() {
 
 // Config is what an entities step's block may set.
 type Config struct {
+	// Backend names which implementation to open. Empty means the default,
+	// which is the file-backed one.
+	//
+	// A job says which kind of store it wants and never how to build one: the
+	// registry is what turns a name into an implementation, so a backend
+	// somebody adds later is reachable from a document without this package
+	// knowing it exists.
+	Backend string `hcl:"backend,optional"`
+
 	// Dir is where the store lives. Empty opens the in-memory one, which is
 	// what a test wants and what nothing else should use: the value of this
 	// store is that it accumulates across jobs and across runs, so a job that
 	// wants that has to say where.
 	Dir string `hcl:"dir,optional"`
+
+	// DSN is how a backend that talks to a server is reached. Ignored by the
+	// ones that do not.
+	DSN string `hcl:"dsn,optional"`
 
 	// Merge applies the merges the store proposes. Off by default.
 	//
@@ -85,11 +98,11 @@ type Config struct {
 type step struct {
 	cfg   pipeline.Config
 	item  *engine.Item
-	store *entity.Store
+	store entity.Store
 	merge bool
 }
 
-func newStep(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+func newStep(ctx context.Context, cfg pipeline.Config) (pipeline.Step, error) {
 	var c Config
 	if err := cfg.Body.Decode(&c); err != nil {
 		return nil, err
@@ -104,7 +117,7 @@ func newStep(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
 			`is not named for an item, as in step "entities" "article", so there is no shape saying what to assert`)
 	}
 
-	store, err := entity.Open(c.Dir)
+	store, err := entity.New(ctx, entity.Config{Backend: c.Backend, Dir: c.Dir, DSN: c.DSN})
 	if err != nil {
 		return nil, err
 	}

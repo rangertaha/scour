@@ -80,7 +80,7 @@ func runService(ctx context.Context, a *App, path, join string) error {
 	}()
 
 	if c := doc.Entity; c != nil {
-		store, err := entity.Open(c.Dir)
+		store, err := entity.New(ctx, entity.Config{Dir: c.Dir})
 		if err != nil {
 			return Failedf("%v", err)
 		}

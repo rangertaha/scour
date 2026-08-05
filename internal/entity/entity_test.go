@@ -16,7 +16,7 @@ import (
 
 var seen = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 
-func open(t *testing.T) *entity.Store {
+func open(t *testing.T) entity.Store {
 	t.Helper()
 
 	s, err := entity.Open(t.TempDir())
@@ -341,7 +341,7 @@ func TestTwoInMemoryStoresAreTwoStores(t *testing.T) {
 	// And the two can be written at the same time, which is what a wave does.
 	var wg sync.WaitGroup
 	problems := make([]error, 2)
-	for i, s := range []*entity.Store{first, second} {
+	for i, s := range []entity.Store{first, second} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -594,4 +594,48 @@ func TestContract(t *testing.T) {
 		t.Cleanup(func() { s.Close() })
 		return s
 	})
+}
+
+// TestEveryRegisteredBackendKeepsTheContract.
+//
+// The registry only says a name maps to a constructor. What makes two backends
+// interchangeable is that both keep the same promises, and this is what stops
+// a backend being added that compiles and then quietly answers differently.
+//
+// It walks what this build has registered rather than naming them, so a backend
+// somebody adds later is held to the contract by existing, which is the only
+// version of this that keeps working when nobody remembers it is here.
+func TestEveryRegisteredBackendKeepsTheContract(t *testing.T) {
+	backends := entity.Backends()
+	if len(backends) == 0 {
+		t.Fatal("no backend is registered, so this asserts nothing")
+	}
+
+	for _, name := range backends {
+		t.Run(name, func(t *testing.T) {
+			entitytest.Run(t, func(t *testing.T) entitytest.Graph {
+				s, err := entity.New(context.Background(), entity.Config{Backend: name})
+				if err != nil {
+					t.Fatalf("open %s: %v", name, err)
+				}
+				t.Cleanup(func() { s.Close() })
+				return s
+			})
+		})
+	}
+}
+
+// TestAnUnknownBackendIsRefusedByName, rather than falling back to a default
+// and putting a job's entities somewhere it did not ask for.
+func TestAnUnknownBackendIsRefusedByName(t *testing.T) {
+	_, err := entity.New(context.Background(), entity.Config{Backend: "nosuchdb"})
+	if err == nil {
+		t.Fatal("a backend nobody registered was opened")
+	}
+	if !strings.Contains(err.Error(), "nosuchdb") {
+		t.Errorf("the refusal does not name what was asked for: %v", err)
+	}
+	if !strings.Contains(err.Error(), entity.Backend) {
+		t.Errorf("the refusal does not say what there is: %v", err)
+	}
 }

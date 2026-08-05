@@ -130,12 +130,12 @@ type Provenance struct {
 	At time.Time
 }
 
-// Store is the entity graph.
+// graph is the SQLite implementation of [Store].
 //
 // Shared between jobs, which is the whole of its value: two jobs crawling
 // different sites should agree about who Acme is. That is also why it is behind
 // a service in a cluster rather than a file each node opens.
-type Store struct {
+type graph struct {
 	db *sql.DB
 
 	// sql is the little that differs between one database and another. The
@@ -160,7 +160,7 @@ func memoryName() string {
 	return "entities-" + strconv.FormatUint(anonymous.Add(1), 10)
 }
 
-func Open(dir string) (*Store, error) {
+func Open(dir string) (Store, error) {
 	if dir != "" {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, fmt.Errorf("entity: %w", err)
@@ -200,7 +200,7 @@ func Open(dir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db, sql: storage.SQLite{}}, nil
+	return &graph{db: db, sql: storage.SQLite{}}, nil
 }
 
 func schema(db *sql.DB) error {
@@ -367,7 +367,7 @@ func normalise(name string) string {
 }
 
 // Assert records that something exists, and returns its ID.
-func (s *Store) Assert(ctx context.Context, kind, name string, from Provenance) (string, error) {
+func (s *graph) Assert(ctx context.Context, kind, name string, from Provenance) (string, error) {
 	if strings.TrimSpace(kind) == "" || strings.TrimSpace(name) == "" {
 		return "", errors.New("entity: an entity needs a kind and a name")
 	}
@@ -408,7 +408,7 @@ ON CONFLICT (id) DO UPDATE SET
 }
 
 // Relate records an edge between two entities.
-func (s *Store) Relate(ctx context.Context, from, to, kind, topic string, position int, said Provenance) (string, error) {
+func (s *graph) Relate(ctx context.Context, from, to, kind, topic string, position int, said Provenance) (string, error) {
 	if from == "" || to == "" || strings.TrimSpace(kind) == "" {
 		return "", errors.New("entity: a relation needs two entities and a kind")
 	}
@@ -480,7 +480,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 // mention again. The counts are summed over the family: after "A. Doe" is
 // merged into "Alex Doe", how many times something said this person exists is
 // how many times something said either.
-func (s *Store) Get(ctx context.Context, id string) (*Entity, error) {
+func (s *graph) Get(ctx context.Context, id string) (*Entity, error) {
 	var (
 		out         Entity
 		first, last int64
@@ -511,7 +511,7 @@ SELECT c.id, c.kind, c.name, MIN(e.first_seen), MAX(e.last_seen), SUM(e.assertio
 // a crawl reading "A. Doe" off a page gets Alex Doe once somebody has said they
 // are the same. Not finding anything is an ordinary answer and never an
 // obstacle: see [Store.Candidates] for why nothing here gates on it.
-func (s *Store) Find(ctx context.Context, kind, name string) (*Entity, error) {
+func (s *graph) Find(ctx context.Context, kind, name string) (*Entity, error) {
 	return s.Get(ctx, ID(kind, name))
 }
 
@@ -524,7 +524,7 @@ func (s *Store) Find(ctx context.Context, kind, name string) (*Entity, error) {
 // has since been merged away counts towards the person it was merged into. An
 // author who appeared under two bylines is one author here with one count,
 // which is the whole reason to merge anything.
-func (s *Store) Related(ctx context.Context, id, kind, topic string) ([]*Entity, error) {
+func (s *graph) Related(ctx context.Context, id, kind, topic string) ([]*Entity, error) {
 	query := `
 SELECT c.id, c.kind, c.name, c.first_seen, c.last_seen, SUM(r.assertions)
   FROM relations r
@@ -569,7 +569,7 @@ SELECT c.id, c.kind, c.name, c.first_seen, c.last_seen, SUM(r.assertions)
 // One row per person rather than one per spelling, because a merged name is no
 // longer somebody the store can be asked about separately. A caller that wants
 // the spellings back asks [Store.Aliases].
-func (s *Store) Kind(ctx context.Context, kind string) ([]*Entity, error) {
+func (s *graph) Kind(ctx context.Context, kind string) ([]*Entity, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT c.id, c.kind, c.name, MIN(e.first_seen), MAX(e.last_seen), SUM(e.assertions)
   FROM entities e
@@ -603,7 +603,7 @@ SELECT c.id, c.kind, c.name, MIN(e.first_seen), MAX(e.last_seen), SUM(e.assertio
 // Over every spelling merged into it, because a merge keeps both trails rather
 // than replacing one with the other. That is what somebody checking a merge
 // needs: the evidence for each side, still attributed to whoever produced it.
-func (s *Store) Provenances(ctx context.Context, id string) ([]Provenance, error) {
+func (s *graph) Provenances(ctx context.Context, id string) ([]Provenance, error) {
 	rows, err := s.db.QueryContext(ctx, `
 WITH family AS (
 	SELECT id FROM resolved
@@ -646,7 +646,7 @@ SELECT job, url, spec, said_at FROM assertions
 // against a spelling this job was the only asserter of is deleted by the
 // foreign key rather than by a sweep, since there is no longer anything at one
 // end of it.
-func (s *Store) Retract(ctx context.Context, job string) (int64, error) {
+func (s *graph) Retract(ctx context.Context, job string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("entity: %w", err)
@@ -702,4 +702,4 @@ func (s *Store) Retract(ctx context.Context, job string) (int64, error) {
 }
 
 // Close releases the database.
-func (s *Store) Close() error { return s.db.Close() }
+func (s *graph) Close() error { return s.db.Close() }

@@ -112,7 +112,7 @@ type Candidate struct {
 // their absence as evidence of anything would be inventing information.
 //
 // Nothing here is fuzzy. See the note at the top of this file.
-func (s *Store) Candidates(ctx context.Context, kind, name string) ([]Candidate, error) {
+func (s *graph) Candidates(ctx context.Context, kind, name string) ([]Candidate, error) {
 	asked, ok := parseName(name)
 	if !ok {
 		return nil, nil
@@ -232,7 +232,7 @@ func unambiguous(ctx context.Context, tx *sql.Tx, kind, loser, keeper string) (b
 	return fulls == 1, nil
 }
 
-func (s *Store) Merge(ctx context.Context, from, to, rule string, said Provenance) error {
+func (s *graph) Merge(ctx context.Context, from, to, rule string, said Provenance) error {
 	if from == "" || to == "" {
 		return errors.New("entity: a merge needs two entities")
 	}
@@ -328,7 +328,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`,
 // intact, because neither was ever moved. What does not come back is the shape
 // of a chain: a family that was re-pointed when this merge was made stays with
 // the entity it was re-pointed to, since flattening happened on write.
-func (s *Store) Unmerge(ctx context.Context, alias string) error {
+func (s *graph) Unmerge(ctx context.Context, alias string) error {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM aliases WHERE alias = ?`, alias)
 	if err != nil {
 		return fmt.Errorf("entity: unmerge: %w", err)
@@ -359,7 +359,7 @@ type Alias struct {
 // What somebody reviewing a merge reads, and what makes [Store.Unmerge]
 // callable: the ids to undo are here rather than in whatever log the merging
 // process happened to write.
-func (s *Store) Aliases(ctx context.Context, id string) ([]Alias, error) {
+func (s *graph) Aliases(ctx context.Context, id string) ([]Alias, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT a.alias, e.name, a.canonical, a.rule, a.job, a.url, a.spec, a.said_at
   FROM aliases a JOIN entities e ON e.id = a.alias
@@ -387,7 +387,7 @@ SELECT a.alias, e.name, a.canonical, a.rule, a.job, a.url, a.spec, a.said_at
 }
 
 // Canonical is what an id is read as, which is itself unless it was merged.
-func (s *Store) Canonical(ctx context.Context, id string) (string, error) {
+func (s *graph) Canonical(ctx context.Context, id string) (string, error) {
 	var out string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT canonical FROM resolved WHERE id = ?`, id).Scan(&out)
