@@ -25,7 +25,9 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
+	"github.com/hashicorp/hcl/v2"
 	"github.com/nats-io/nats.go"
 
 	"github.com/rangertaha/scour/internal/bus"
@@ -60,6 +62,11 @@ type Options struct {
 
 	// Log is where a node says what it picked up.
 	Log *slog.Logger
+
+	// Eval resolves `secret()` in plugin configuration. Nil means a job whose
+	// plugins reference a secret is refused here, naming the secret, which is
+	// the right answer on a node with no way to read one.
+	Eval *hcl.EvalContext
 }
 
 // Node is a member of a cluster.
@@ -79,6 +86,66 @@ type served struct {
 	revision uint64
 	subs     []*nats.Subscription
 	closers  []func() error
+
+	// stop ends the context the handlers run on, and done is closed when the
+	// last of them has returned. They are separate from the context that says
+	// when to stop serving, for the reason in [served.close].
+	stop context.CancelFunc
+	work *inFlight
+}
+
+// inFlight counts the handlers that have started and not finished.
+//
+// A NATS subscription's Drain is asynchronous: it marks the subscription and
+// returns, and the pending messages are handled on another goroutine. Closing
+// the stages straight after it therefore closed a cache and a chain out from
+// under handlers that were still using them, which is a use after close: an
+// error at best and a panic inside a callback goroutine at worst, taking the
+// node with it.
+type inFlight struct {
+	mu    sync.Mutex
+	count int
+	idle  chan struct{}
+}
+
+func newInFlight() *inFlight {
+	f := &inFlight{idle: make(chan struct{})}
+	close(f.idle)
+	return f
+}
+
+func (f *inFlight) enter() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.count == 0 {
+		f.idle = make(chan struct{})
+	}
+	f.count++
+}
+
+func (f *inFlight) leave() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.count--
+	if f.count == 0 {
+		close(f.idle)
+	}
+}
+
+// wait blocks until nothing is in flight, or until it has waited long enough
+// that something is plainly stuck. A node that hung forever on shutdown would
+// be worse than one that gave up on a request.
+func (f *inFlight) wait(limit time.Duration) {
+	f.mu.Lock()
+	idle := f.idle
+	f.mu.Unlock()
+
+	select {
+	case <-idle:
+	case <-time.After(limit):
+	}
 }
 
 // Join connects a node to a cluster and registers it.
@@ -197,17 +264,23 @@ func (n *Node) serve(ctx context.Context, change bus.Change) error {
 	// one revision and half from another is a thing nobody can debug.
 	n.stop(change.Name)
 
-	running := &served{revision: change.Revision}
+	// The handlers run on a context of this job's own, not on the one that
+	// says when to stop serving. Sharing them meant a SIGTERM aborted the
+	// fetch a handler was in the middle of and it answered "context
+	// canceled", so the drain that was supposed to guarantee an answer
+	// guaranteed a failure instead.
+	work, stop := context.WithCancel(context.WithoutCancel(ctx))
+	running := &served{revision: change.Revision, stop: stop, work: newInFlight()}
 
 	for _, stage := range n.opts.Serve {
 		switch stage {
 		case StageDownload:
-			built, err := downloader.New(ctx, job, downloader.Options{})
+			built, err := downloader.New(ctx, job, downloader.Options{Eval: n.opts.Eval})
 			if err != nil {
 				running.close()
 				return err
 			}
-			sub, err := n.conn.ServeDownloader(ctx, job.Name, built, n.opts.Bodies)
+			sub, err := n.conn.ServeDownloader(work, job.Name, counted{built, running.work}, n.opts.Bodies)
 			if err != nil {
 				built.Close()
 				running.close()
@@ -217,12 +290,12 @@ func (n *Node) serve(ctx context.Context, change bus.Change) error {
 			running.closers = append(running.closers, built.Close)
 
 		case StageRead:
-			built, err := spider.New(ctx, job, spider.Options{})
+			built, err := spider.New(ctx, job, spider.Options{Eval: n.opts.Eval})
 			if err != nil {
 				running.close()
 				return err
 			}
-			sub, err := n.conn.ServeSpider(ctx, job.Name, built, n.opts.Bodies)
+			sub, err := n.conn.ServeSpider(work, job.Name, read{built, running.work}, n.opts.Bodies)
 			if err != nil {
 				built.Close()
 				running.close()
@@ -297,14 +370,55 @@ func (n *Node) Close() error {
 	return nil
 }
 
-// close drains the subscriptions before closing the stages, so a request this
-// node had already taken is answered rather than dropped.
+// Drain is how long a node waits for the requests it had already taken.
+const Drain = 30 * time.Second
+
+// close stops taking work, waits for what is in flight, and only then releases
+// what the stages hold.
+//
+// Three steps and all three are needed. Draining a subscription is
+// asynchronous, so closing straight after it closed a cache and a chain out
+// from under handlers still using them. Waiting is what makes the promise in
+// the package documentation true rather than aspirational. And the handlers'
+// own context is cancelled last, so a request that was in flight is answered
+// rather than aborted with "context canceled".
 func (s *served) close() {
 	for _, sub := range s.subs {
 		_ = sub.Drain()
+	}
+	if s.work != nil {
+		s.work.wait(Drain)
+	}
+	if s.stop != nil {
+		s.stop()
 	}
 	for _, closer := range s.closers {
 		_ = closer()
 	}
 	s.subs, s.closers = nil, nil
+}
+
+// counted and read wrap a stage so the node knows when a handler is running.
+// Two types rather than one because the two stages carry different things, and
+// a generic wrapper would need a type parameter for no benefit.
+type counted struct {
+	inner downloader.Handler
+	work  *inFlight
+}
+
+func (c counted) Handle(ctx context.Context, req *downloader.Request) (*downloader.Response, error) {
+	c.work.enter()
+	defer c.work.leave()
+	return c.inner.Handle(ctx, req)
+}
+
+type read struct {
+	inner spider.Handler
+	work  *inFlight
+}
+
+func (r read) Handle(ctx context.Context, resp *downloader.Response) (*spider.Output, error) {
+	r.work.enter()
+	defer r.work.leave()
+	return r.inner.Handle(ctx, resp)
 }

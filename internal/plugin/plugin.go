@@ -35,6 +35,8 @@ import (
 	"sync"
 
 	"github.com/hashicorp/hcl/v2"
+	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/function"
 
 	"github.com/rangertaha/scour/internal/chain"
 	"github.com/rangertaha/scour/internal/engine"
@@ -91,10 +93,41 @@ func (c Config) Decode(into any) error {
 	if c.Body == nil {
 		return nil
 	}
-	if diags := decode(c.Body, c.Eval, into); diags.HasErrors() {
+
+	eval := c.Eval
+	if eval == nil {
+		// Not nil. A nil context makes HCL refuse any function call with
+		// "Functions may not be called here", which tells somebody whose job
+		// used secret() nothing about what went wrong or what to do. This one
+		// refuses by name, and says what is missing.
+		eval = NoSecrets
+	}
+
+	if diags := decode(c.Body, eval, into); diags.HasErrors() {
 		return diags
 	}
 	return nil
+}
+
+// NoSecrets is the evaluation context a plugin is decoded against on a node
+// that has no secret store.
+//
+// It knows `secret` exists and refuses to answer it, which is the difference
+// between "this node cannot read secrets, and you asked for acme-s3-key" and
+// HCL's own "Functions may not be called here". The second is what a nil
+// context produces, and it is what every binary produced before anything built
+// a real one.
+var NoSecrets = &hcl.EvalContext{
+	Functions: map[string]function.Function{
+		"secret": function.New(&function.Spec{
+			Params: []function.Parameter{{Name: "name", Type: cty.String}},
+			Type:   function.StaticReturnType(cty.String),
+			Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
+				return cty.NilVal, fmt.Errorf(
+					"this node has no secrets, and %q was asked for", args[0].AsString())
+			},
+		}),
+	},
 }
 
 // Registry is what a stage keeps its middleware in.

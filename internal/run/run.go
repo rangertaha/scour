@@ -131,6 +131,10 @@ type Stats struct {
 	Items atomic.Int64
 	// Queued is URLs added to the frontier.
 	Queued atomic.Int64
+	// Lost is URLs a page found that could not be queued, because the store
+	// refused them. Not the same as dropped: a drop is a decision and this is
+	// a failure.
+	Lost atomic.Int64
 	// Exported is records written out.
 	Exported atomic.Int64
 }
@@ -304,6 +308,13 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 					}
 					select {
 					case <-ctx.Done():
+						// Recorded here as well as at the top of the loop. A
+						// worker parked on the politeness backoff returns from
+						// this branch and never reaches that check, so an
+						// interrupted crawl with URLs still queued reported
+						// itself finished: the exact confusion Ending exists
+						// to prevent.
+						ending.Store(Stopped)
 						return
 					case <-time.After(Idle):
 					}
@@ -336,6 +347,13 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 		return ending.Load().(Ending), err
 	}
 
+	// A crawl that could not queue what it discovered has not finished the
+	// site, whatever the frontier's emptiness suggests. Reporting success
+	// here would exit zero on a run that threw its work away.
+	if lost := r.stats.Lost.Load(); lost > 0 {
+		return ending.Load().(Ending), fmt.Errorf(
+			"run: job %q: %d discovered urls could not be queued", r.job.Name, lost)
+	}
 	return ending.Load().(Ending), nil
 }
 
@@ -384,6 +402,11 @@ func (r *Run) one(ctx context.Context, req *scheduler.Request) {
 	}
 
 	if added, err := r.sched.Submit(ctx, out.Links...); err != nil {
+		// Counted, not merely logged. A store that has stopped accepting work
+		// is not a quiet crawl: every link found from here on is thrown away,
+		// the frontier drains, and the run reports that it finished the site.
+		// The count is what [Run.Do] turns into a failure at the end.
+		r.stats.Lost.Add(int64(len(out.Links)))
 		r.log.WarnContext(ctx, "could not queue what a page found", "url", req.URL, "error", err)
 	} else {
 		r.stats.Queued.Add(int64(added))

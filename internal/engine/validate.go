@@ -93,6 +93,9 @@ func (j *Job) validate() []error {
 	for _, err := range j.Spider.validate() {
 		problems = append(problems, prefix(err))
 	}
+	for _, err := range j.Pipeline.validate() {
+		problems = append(problems, prefix(err))
+	}
 
 	for _, err := range j.Monitoring.validate() {
 		problems = append(problems, prefix(err))

@@ -12,11 +12,13 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/hashicorp/hcl/v2"
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/bus"
 	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/node"
+	"github.com/rangertaha/scour/internal/secret"
 )
 
 // Serve runs a node.
@@ -101,11 +103,24 @@ func serveNode(ctx context.Context, a *App, join, name, dir, stages string, quie
 	}
 	defer bodies.Close()
 
+	// A node with a sealing key can resolve the secrets a job's plugins ask
+	// for. One without still serves: most jobs use none, and a job that does
+	// is refused here by name rather than failing later with a message about
+	// authentication.
+	var eval *hcl.EvalContext
+	if key, err := secret.Key(""); err == nil {
+		if store, err := secret.Open(ctx, conn, key); err == nil {
+			eval = secret.Eval(ctx, store)
+			a.Printf("%s can resolve secrets\n", name)
+		}
+	}
+
 	joined, err := node.Join(ctx, conn, node.Options{
 		Name:   name,
 		Serve:  serving(stages),
 		Bodies: bodies,
 		Log:    log,
+		Eval:   eval,
 	})
 	if err != nil {
 		return Failedf("%v", err)

@@ -81,9 +81,16 @@ func runCrawl(ctx context.Context, a *App, path, jobName, dir string, verbose, f
 	}
 	log := slog.New(slog.NewTextHandler(a.Err, &slog.HandlerOptions{Level: level}))
 
+	// A local crawl reaches the cluster's secret store if there is one and
+	// this machine has the key. Without either, a job asking for a secret is
+	// refused by name when its plugins are built.
+	eval, closeSecrets, _ := Resolver(ctx, "", "")
+	defer closeSecrets()
+
 	crawl, err := run.New(ctx, job, run.Options{
 		Dir:  dir,
 		Log:  log,
+		Eval: eval,
 		Open: func(cfg frontier.Config) (frontier.Frontier, error) { return sqlite.Open(cfg) },
 	})
 	if err != nil {

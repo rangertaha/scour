@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/hashicorp/hcl/v2"
+
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/bus"
@@ -173,6 +175,33 @@ func secrets(ctx context.Context, join, keyFile string) (*secret.Store, func(), 
 		return nil, nil, Failedf("%v", err)
 	}
 	return store, func() { conn.Close() }, nil
+}
+
+// Resolver opens the cluster's secret store, if this node can.
+//
+// A node with no sealing key is not an error: most jobs use no secrets, and a
+// node that refused to start without a key would make the feature compulsory.
+// What it returns instead is nil, and [plugin.Config.Decode] turns that into a
+// refusal that names the secret a job asked for.
+//
+// The caller closes what comes back.
+func Resolver(ctx context.Context, join, keyFile string) (*hcl.EvalContext, func(), bool) {
+	key, err := secret.Key(keyFile)
+	if err != nil {
+		return nil, func() {}, false
+	}
+
+	conn, err := bus.Connect(bus.Options{URL: server(join), Name: "scour"})
+	if err != nil {
+		return nil, func() {}, false
+	}
+
+	store, err := secret.Open(ctx, conn, key)
+	if err != nil {
+		conn.Close()
+		return nil, func() {}, false
+	}
+	return secret.Eval(ctx, store), func() { conn.Close() }, true
 }
 
 // server is where a client points: the flag, then the environment, then the

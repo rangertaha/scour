@@ -710,3 +710,41 @@ func TestANilChainCloses(t *testing.T) {
 		t.Errorf("close: %v", err)
 	}
 }
+
+// TestANodeWithNoSecretsRefusesByName.
+//
+// A nil evaluation context makes HCL refuse any function call with "Functions
+// may not be called here", which tells somebody whose job used secret() nothing
+// about what went wrong or what to do about it. Every binary produced exactly
+// that message, because nothing ever built a real context: the secret store was
+// written, tested and unreachable.
+func TestANodeWithNoSecretsRefusesByName(t *testing.T) {
+	reg := plugin.NewRegistry[string, string](engine.StageDownloader)
+	reg.Register("cache", func(_ context.Context, cfg plugin.Config) (wrapper, error) {
+		var into struct {
+			Key string `hcl:"key,optional"`
+		}
+		if err := cfg.Decode(&into); err != nil {
+			return nil, err
+		}
+		return noting("cache", nil), nil
+	})
+
+	// No Eval at all, which is what a node without a secret store passes.
+	_, err := plugin.Build(context.Background(), reg, job(t, `
+  downloader {
+    plugin "cache" {
+      key = secret("acme-s3-key")
+    }
+  }
+`), engine.StageDownloader, nil)
+	if err == nil {
+		t.Fatal("a node with no secrets resolved one")
+	}
+	if !strings.Contains(err.Error(), "acme-s3-key") {
+		t.Errorf("the error does not name the secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no secrets") {
+		t.Errorf("the error does not say what this node is missing: %v", err)
+	}
+}

@@ -272,9 +272,12 @@ func (n *Nodes) Announce(ctx context.Context, name string, what []byte) error {
 				_ = n.kv.Delete(context.WithoutCancel(ctx), name)
 				return
 			case <-ticker.C:
-				if _, err := n.kv.Put(ctx, name, what); err != nil {
-					return
-				}
+				// A failure is not the end of the loop. The broker restarting
+				// or a client reconnecting makes one Put fail, and returning
+				// meant the node went on serving work while its entry expired
+				// and was never rewritten: `scour nodes` showed an empty
+				// cluster that was busy, and nothing said so anywhere.
+				_, _ = n.kv.Put(ctx, name, what)
 			}
 		}
 	}()

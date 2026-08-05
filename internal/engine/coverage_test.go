@@ -1458,3 +1458,17 @@ func TestEventShapeReachesTheSpider(t *testing.T) {
 		t.Error("the event shape did not survive the round trip")
 	}
 }
+
+// TestThePipelineBlockIsValidatedToo.
+//
+// It was not. `external_timeout = "eventually"` in a pipeline validated clean,
+// where the same mistake in a downloader or a spider was refused with a named
+// field, and Resolved() then swallowed the parse error so `scour show` printed
+// a pipeline with no timeout and the stored job lost the setting. A validator
+// that reports every problem at once reported none for this one.
+func TestThePipelineBlockIsValidatedToo(t *testing.T) {
+	refuses(t, "\n  pipeline {\n    external         = true\n    external_timeout = \"eventually\"\n  }\n",
+		"pipeline.external_timeout")
+	refuses(t, "\n  pipeline {\n    external         = true\n    external_timeout = \"-10m\"\n  }\n",
+		"negative")
+}

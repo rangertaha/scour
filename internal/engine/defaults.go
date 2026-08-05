@@ -333,6 +333,28 @@ func (s *Spider) validate() []error {
 // IsExternal reports whether somebody else runs this stage.
 func (p *Pipeline) IsExternal() bool { return p != nil && p.External }
 
+// validate checks the pipeline block's own attributes.
+//
+// Only the external timeout, because a step's configuration is the step's to
+// decode. It exists because the block was being skipped entirely:
+// `external_timeout = "eventually"` in a pipeline validated clean, where the
+// same mistake in a downloader or a spider was refused with a named field.
+// Resolved() then swallowed the parse error, so `scour show` printed a pipeline
+// with no timeout and the stored job quietly lost the setting.
+func (p *Pipeline) validate() []error {
+	if p == nil {
+		return nil
+	}
+
+	var problems []error
+	if v, err := p.ExternalWait(); err != nil {
+		problems = append(problems, err)
+	} else if v < 0 {
+		problems = append(problems, fmt.Errorf("pipeline.external_timeout: %s is negative", v))
+	}
+	return problems
+}
+
 // ExternalWait is how long an external pipeline has to answer.
 func (p *Pipeline) ExternalWait() (time.Duration, error) {
 	if p == nil {

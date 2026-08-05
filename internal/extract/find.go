@@ -4,6 +4,7 @@ package extract
 
 import (
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -76,19 +77,24 @@ func (p *propPlan) find(page *page, within *html.Node) *Value {
 // publisher telling machines what the page is; microdata is the same; an
 // element carrying the name as a class is a guess about somebody's stylesheet.
 func (p *propPlan) semantic(page *page, within *html.Node) *Value {
-	for name, content := range page.meta {
+	// Sorted, because these are maps and a page that says the same thing under
+	// two names would otherwise be read differently between runs: the value
+	// could change, and the provenance certainly did. Two runs over one corpus
+	// producing different records is the property every other part of this
+	// crawler is careful to keep.
+	for _, name := range sorted(page.meta) {
 		if p.answersTo(name) {
-			return p.value(page, content, "<meta "+name+">", BySemantics, nil)
+			return p.value(page, page.meta[name], "<meta "+name+">", BySemantics, nil)
 		}
 	}
-	for name, content := range page.linked {
+	for _, name := range sorted(page.linked) {
 		if p.answersTo(name) {
-			return p.value(page, content, "json-ld "+name, BySemantics, nil)
+			return p.value(page, page.linked[name], "json-ld "+name, BySemantics, nil)
 		}
 	}
-	for name, content := range page.micro {
+	for _, name := range sorted(page.micro) {
 		if p.answersTo(name) {
-			return p.value(page, content, "<itemprop "+name+">", BySemantics, nil)
+			return p.value(page, page.micro[name], "<itemprop "+name+">", BySemantics, nil)
 		}
 	}
 
@@ -172,6 +178,16 @@ func (p *propPlan) byClassOrID(within *html.Node) *html.Node {
 	}
 	walk(within)
 	return found
+}
+
+// sorted lists a map's keys in a fixed order.
+func sorted(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for name := range m {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func firstElement(within *html.Node, tag string) *html.Node {
