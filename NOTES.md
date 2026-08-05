@@ -412,24 +412,97 @@ events.markets.price.<company>       one subject per company
 Which is what lets a consumer subscribe to one company rather than filter the
 firehose, and what makes the latest value a fetch rather than a scan.
 
-### Backed up in Parquet
+### An exporter does both
 
-The archive is a subscriber, not the source of truth, and it writes Parquet.
+There is no archive component. Saving to storage and streaming to a stream are
+both deliveries, so both are exporters, and they were both in the list already:
 
-Columnar suits this exactly: tags are low cardinality by construction, so they
-dictionary-encode to almost nothing, and the fields are the values anybody
-queries. It also means correlation over price series and counting distinct
-values per property are the same kind of query, run offline, against files.
+```hcl
+job "markets" {
+  start = ["https://example.com/quotes"]
 
-**The same storage backend the page cache uses.** Local, S3 and GCS are already
-written and tested, so where the archive lives is a config line rather than a
-component.
+  item "price" {
+    of   = "company"
+    time = "observed"
 
-**And no server.** DuckDB reads Parquet where it lies, so analytics is pointing
-something at the files rather than importing into a database that then has to be
-kept in step. That keeps the columnar decision from being a bet: if files are
-enough, nothing changes; if they are not, one subscriber is swapped and the hot
-path never notices.
+    property "value" {
+      type = float
+    }
+
+    property "observed" {
+      type = date
+    }
+  }
+
+  exporter "parquet" "price" {
+    backend = "s3"
+    bucket  = "archive"
+  }
+
+  exporter "nats" "price" {
+    stream = "MARKETS"
+  }
+}
+```
+
+Same item, two deliveries, neither privileged. Real-time is what the second one
+does, not a property the design has to be built around: the pipeline emits an
+item and a streaming exporter publishes it as it goes.
+
+That also leaves the source of truth where it was. The pipeline owns its records
+database, because `stale_records = "discard"` has to know what to delete,
+re-extraction has to know what it is replacing, and a mark has to attach to
+something. Exporters are copies, which is the whole of their job, and a copy in
+Parquet is no more the truth than a copy in CSV.
+
+**Parquet suits the measurement shape exactly.** Tags are low cardinality by
+construction, so they dictionary-encode to almost nothing, and the fields are
+what anybody queries. Correlating price series and counting distinct values per
+property become the same kind of scan over the same files.
+
+**On the storage backend the page cache already uses**, so local, S3 and GCS
+need nothing new, and where an export lands is a config line.
+
+**And nothing has to be running.** DuckDB reads Parquet where it lies, so
+analytics is pointing something at files rather than importing into a database
+that then has to be kept in step.
+
+### An event exporter takes a different shape
+
+They do differ, and in the shape they consume rather than where they put it.
+
+A record is a document: properties, some of them nested, as somebody asked for
+them. A measurement is flat: a name, tags, fields and a time. `json` and
+`sqlite` want the first. `parquet`, `nats` and `influx` want the second.
+
+So there are two interfaces, and an exporter says which it is by implementing
+one:
+
+```go
+// Exporter writes records.
+type Exporter interface {
+	Write(ctx context.Context, rec *Record) error
+}
+
+// EventExporter writes measurements. An exporter implementing this is handed
+// the event form instead, converted once by the pipeline rather than by each
+// exporter working it out again.
+type EventExporter interface {
+	WriteEvent(ctx context.Context, ev *Event) error
+}
+```
+
+The conversion happens once per item, in the pipeline, using the split the item
+already declares. An exporter never has to know that `of` is a tag or that
+`time` names the timestamp, and two exporters cannot disagree about it.
+
+It is the same shape as [http.Flusher]: one interface for the common case, a
+second that an implementation opts into, and a type assertion where they meet.
+
+The other difference is batching. A streaming exporter sends as it goes; a file
+exporter cannot write a Parquet file per row, so rolling by time or by size is
+its own business, in its own block, like everything else a plugin decides for
+itself.
 
 ## Entities
 
