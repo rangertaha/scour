@@ -45,6 +45,7 @@ func root(a *cli.App) *ucli.Command {
 			cli.Defaults(a),
 			cli.Serve(a),
 			cli.Service(a),
+			cli.Topic(a),
 			cli.Secret(a),
 		},
 		// Reached when nothing matched. An unknown command is a usage error

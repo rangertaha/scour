@@ -556,6 +556,76 @@ frontier cannot be shared: two schedulers handing out the same host cannot
 honour a crawl delay between them. Every other node serves stages. That
 asymmetry is the politeness rule rather than a limitation to be lifted.
 
+### Teaching it a subject
+
+```
+scour topic ls                      What has been trained
+scour topic propose <labels.hcl>    Label the cached corpus from seed terms
+scour topic train <labels.hcl>      Learn from the labels, writing the next version
+scour topic show <name@version>     What it learned
+scour topic rm <name@version>
+```
+
+#### `scour topic`
+
+A topic is a trained classifier a job refers to by name and version, as
+`climate@7`. The scheduler scores every URL against it and puts the promising
+ones at the front of the frontier; the spider scores every page and can drop the
+ones that are not the subject. That is what makes a focused crawl focused.
+
+| Flag | Effect |
+| --- | --- |
+| `--dir <path>` | Where the trained topics live. Default `.scour/topics` |
+| `--corpus <path>` | Where the cached pages are. Default `.scour/cache` |
+| `--pages <n>` | How many cached pages to look at |
+| `--write` | `propose` only: edit the document instead of printing what would change |
+
+**A topic is learned from a labels document**, which is a file you own:
+
+```hcl
+topic "climate" {
+  terms = ["emissions", "decarbonisation", "carbon budget"]
+
+  about = [
+    "https://example.com/story/1",
+  ]
+
+  not = [
+    "https://example.com/sport/2",
+  ]
+}
+```
+
+The loop is propose, correct, train:
+
+```
+$ scour topic propose labels.hcl --write
+read 412 cached pages
+  climate              38 proposed as the subject, 374 as not
+wrote 412 proposals into labels.hcl. Correct them, then `scour topic train labels.hcl`
+
+$ scour topic train labels.hcl
+climate@1 trained on 412 examples
+  strongest emissions, decarbonisation, climate, carbon, warming, targets, fuels, coal
+  use it with: subject = "climate@1"
+```
+
+**The seed terms are a bootstrap, not the classifier.** A page holding enough of
+them is proposed as an example, which is a worse classifier than the one being
+trained and is meant to be: it is a first pass somebody corrects, and what they
+correct is what wins. A model that only ever learned what it was already told
+would have been a term list all along.
+
+**The labels are a file for the same reason locators are.** A classifier trained
+from state inside the tool says a page is about climate and there is nowhere to
+go and look at why. `propose` never overwrites a decision somebody already made,
+so a correction stays corrected across runs.
+
+**Training writes the next version and never replaces one.** A job pins
+`climate@7` precisely so that somebody else retraining cannot change what it
+does, which is why the version is required in a job and why `rm` takes one
+version rather than a subject.
+
 ### Running the shared stores
 
 ```
