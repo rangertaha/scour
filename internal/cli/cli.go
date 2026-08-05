@@ -107,7 +107,36 @@ func CodeOf(err error) int {
 	if errors.As(err, &coded) {
 		return coded.Code
 	}
+
+	// A flag the parser did not recognise is a wrong command line, not a
+	// broken scour. urfave/cli returns a plain error for it, so without this
+	// `scour validate --nope job.hcl` exited 3, and a build script that
+	// retries on 3 and gives up on 2 would retry a typo forever. That is
+	// exactly the conflation the exit codes are documented to prevent.
+	if usage(err) {
+		return ExitUsage
+	}
 	return ExitFailed
+}
+
+// usage recognises the command line's own complaints.
+//
+// By message, which is unpleasant and is what the library gives us: the errors
+// from parseFlags are plain fmt.Errorf values implementing no interface worth
+// matching. Kept narrow, and to phrases the library builds itself, so that a
+// command's own error text cannot be mistaken for one.
+func usage(err error) bool {
+	for _, phrase := range []string{
+		"flag provided but not defined",
+		"flag needs an argument",
+		"invalid value",
+		"invalid boolean value",
+	} {
+		if strings.Contains(err.Error(), phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // Load reads and parses a job document, without validating it.

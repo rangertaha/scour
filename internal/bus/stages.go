@@ -34,6 +34,14 @@ type fetchRequest struct {
 	Header http.Header `json:"header,omitempty"`
 	Job    string      `json:"job"`
 	Depth  int         `json:"depth"`
+
+	// Body is what to send, for the requests that send anything. It travels,
+	// unlike a response body: this one is small by construction, and leaving
+	// it out meant a middleware that rewrote a request to a POST got the body
+	// wired directly and an empty one over the bus. The same job producing
+	// different records depending on the wiring is the one thing the bus must
+	// not do.
+	Body []byte `json:"body,omitempty"`
 }
 
 // fetchReply is what comes back. There is no body in it, and that is the point:
@@ -98,6 +106,7 @@ func (c *Conn) ServeDownloader(ctx context.Context, job string, stage downloader
 				URL:    req.URL,
 				Method: req.Method,
 				Header: req.Header,
+				Body:   req.Body,
 				Job:    req.Job,
 				Depth:  req.Depth,
 			})
@@ -155,6 +164,7 @@ func (d *Downloader) Handle(ctx context.Context, req *downloader.Request) (*down
 		URL:    req.URL,
 		Method: req.Method,
 		Header: req.Header,
+		Body:   req.Body,
 		Job:    req.Job,
 		Depth:  req.Depth,
 	})

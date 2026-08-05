@@ -243,6 +243,18 @@ func Hash(normalised string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
+// WithoutPort strips a trailing port, and leaves an IPv6 literal alone.
+//
+// The last colon in `[::1]` is inside the brackets, so an unguarded cut turns
+// the host into `[:` and every URL on that origin falls out of scope. Shared
+// because two places were doing it and only one of them had the guard.
+func WithoutPort(host string) string {
+	if i := strings.LastIndex(host, ":"); i >= 0 && !strings.Contains(host[i:], "]") {
+		return host[:i]
+	}
+	return host
+}
+
 // Host is what politeness is paced against: the host and port, lowercased,
 // without the userinfo.
 func Host(normalised string) string {
@@ -261,9 +273,7 @@ func Host(normalised string) string {
 // `domains`, where a job says what it means anyway.
 func Domain(host string) string {
 	host = strings.ToLower(host)
-	if i := strings.LastIndex(host, ":"); i >= 0 {
-		host = host[:i]
-	}
+	host = WithoutPort(host)
 	labels := strings.Split(host, ".")
 	if len(labels) < 2 {
 		return host

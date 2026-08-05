@@ -187,7 +187,6 @@ type table struct {
 	writer  *csv.Writer
 	path    string
 	columns []string
-	header  bool
 }
 
 func newCSV(_ context.Context, cfg exporter.Config) (exporter.Exporter, error) {
@@ -196,12 +195,28 @@ func newCSV(_ context.Context, cfg exporter.Config) (exporter.Exporter, error) {
 		return nil, err
 	}
 
-	return &table{
+	t := &table{
 		out:     out,
 		writer:  csv.NewWriter(out),
 		path:    path,
 		columns: columns(cfg),
-	}, nil
+	}
+
+	// The header goes in at construction, not on the first row. A job whose
+	// pipeline dropped everything left a zero-byte file, where the header is
+	// the one thing still knowable: it comes from the shape, and the shape is
+	// what makes "no rows" different from "wrong file". The json exporter
+	// already writes its opening bracket here for the same reason.
+	if err := t.writer.Write(t.columns); err != nil {
+		out.Close()
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	t.writer.Flush()
+	if err := t.writer.Error(); err != nil {
+		out.Close()
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return t, nil
 }
 
 // columns are the header, from the shape the job declared.
@@ -238,13 +253,6 @@ func columns(cfg exporter.Config) []string {
 func (t *table) Write(_ context.Context, records ...*record.Record) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	if !t.header {
-		if err := t.writer.Write(t.columns); err != nil {
-			return fmt.Errorf("%s: %w", t.path, err)
-		}
-		t.header = true
-	}
 
 	for _, r := range records {
 		row := make([]string, 0, len(t.columns))

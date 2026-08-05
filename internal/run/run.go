@@ -62,6 +62,20 @@ const Lease = 5 * time.Minute
 // empty, which is what politeness looks like from here.
 const Idle = 50 * time.Millisecond
 
+// Stall is how long a run waits with nothing progressing before it gives up.
+//
+// A crawl legitimately idles: politeness holds every host, and the loop waits
+// for one to cool. What it must not do is idle forever, and it could. A
+// frontier that cannot record a page as finished leaves every URL leased, so
+// nothing is ever due, nothing is in flight, and the loop waits for leases
+// that will never be resolved. Writing a test for a store that refuses writes
+// is how that was found: the test ran until it timed out.
+//
+// Measured from the last thing that happened rather than from the start, so a
+// slow polite crawl is not mistaken for a stalled one, and longer than [Lease]
+// so that waiting for a lease to expire is not mistaken for one either.
+const Stall = Lease + time.Minute
+
 // Options are what a caller supplies that the job document cannot.
 type Options struct {
 	// Dir is where the frontier and, failing a cache plugin, the bodies go.
@@ -82,6 +96,15 @@ type Options struct {
 	// Now is the clock. Nil is time.Now; a test passes its own so that
 	// politeness can be proved without waiting for it.
 	Now func() time.Time
+
+	// Stall overrides how long a run waits with nothing progressing before it
+	// gives up. Zero means [Stall].
+	//
+	// A knob only a test turns, and it exists because the obvious way to test
+	// the bound does not work: winding a fake clock forward far enough to
+	// reach it also expires every lease, so the URLs come back, the loop makes
+	// progress, and the thing under test never happens.
+	Stall time.Duration
 
 	// Fetch and Read replace the local stages with ones that are somewhere
 	// else. That is the whole of what running on a bus changes here: the loop
@@ -135,6 +158,10 @@ type Stats struct {
 	// refused them. Not the same as dropped: a drop is a decision and this is
 	// a failure.
 	Lost atomic.Int64
+	// Store is how many times the frontier refused a bookkeeping write, which
+	// is recoverable and not free: a page whose completion could not be
+	// recorded is fetched again when its lease expires.
+	Store atomic.Int64
 	// Exported is records written out.
 	Exported atomic.Int64
 }
@@ -153,6 +180,10 @@ const (
 	TimeUp Ending = "time up"
 	// Stopped means the caller's context ended it.
 	Stopped Ending = "stopped"
+	// Stalled means nothing progressed for long enough that nothing was going
+	// to. A frontier that cannot record a page as finished produces exactly
+	// this: every URL stays leased, so nothing is ever due again.
+	Stalled Ending = "stalled"
 )
 
 // New builds every stage a job needs.
@@ -275,6 +306,19 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 		return ""
 	}
 
+	// A store that has stopped accepting bookkeeping is a loop, not a slow
+	// crawl: the same page comes back every time its lease expires. Stopping
+	// is the only outcome that ends.
+	// The last time anything happened, which is what tells a slow polite crawl
+	// apart from a stalled one.
+	var progress atomic.Int64
+	progress.Store(r.now().UnixNano())
+
+	stall := r.opts.Stall
+	if stall <= 0 {
+		stall = Stall
+	}
+
 	for range workers {
 		wg.Add(1)
 		go func() {
@@ -287,6 +331,14 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 				}
 				if why := spent(); why != "" {
 					ending.Store(why)
+					return
+				}
+				// Nothing has progressed for long enough that nothing is
+				// going to. A frontier that cannot record a page as finished
+				// leaves every URL leased, so nothing is ever due again and
+				// the loop below waits forever.
+				if r.now().Sub(time.Unix(0, progress.Load())) > stall {
+					ending.Store(Stalled)
 					return
 				}
 
@@ -328,6 +380,7 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 				inFlight.Add(1)
 				r.one(ctx, req)
 				inFlight.Add(-1)
+				progress.Store(r.now().UnixNano())
 			}
 		}()
 	}
@@ -354,6 +407,11 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 		return ending.Load().(Ending), fmt.Errorf(
 			"run: job %q: %d discovered urls could not be queued", r.job.Name, lost)
 	}
+	if ending.Load().(Ending) == Stalled {
+		return Stalled, fmt.Errorf(
+			"run: job %q: nothing progressed for %s, with %d frontier writes refused",
+			r.job.Name, stall, r.stats.Store.Load())
+	}
 	return ending.Load().(Ending), nil
 }
 
@@ -377,9 +435,7 @@ func (r *Run) one(ctx context.Context, req *scheduler.Request) {
 	case err != nil:
 		r.stats.Failed.Add(1)
 		r.log.WarnContext(ctx, "fetch failed", "url", req.URL, "error", err)
-		if err := r.sched.Fail(ctx, req.Hash); err != nil {
-			r.log.WarnContext(ctx, "could not report a failure", "url", req.URL, "error", err)
-		}
+		r.bookkeeping(ctx, "report a failure", req.URL, r.sched.Fail(ctx, req.Hash))
 		return
 	}
 
@@ -421,9 +477,23 @@ func (r *Run) one(ctx context.Context, req *scheduler.Request) {
 }
 
 func (r *Run) done(ctx context.Context, req *scheduler.Request) {
-	if err := r.sched.Done(ctx, req.Hash); err != nil {
-		r.log.WarnContext(ctx, "could not report a page finished", "url", req.URL, "error", err)
+	r.bookkeeping(ctx, "report a page finished", req.URL, r.sched.Done(ctx, req.Hash))
+}
+
+// bookkeeping records a frontier write that failed.
+//
+// One place, because there were three and each of them logged and moved on. A
+// crawl whose store has started refusing writes is not a quiet crawl: pages
+// whose completion could not be recorded are fetched again when their leases
+// expire, and the operator sees a run that took twice as long for no stated
+// reason. These are recoverable, so they do not fail the run the way a lost
+// URL does; they are counted, and the summary says so.
+func (r *Run) bookkeeping(ctx context.Context, what, url string, err error) {
+	if err == nil {
+		return
 	}
+	r.stats.Store.Add(1)
+	r.log.WarnContext(ctx, "could not "+what, "url", url, "error", err)
 }
 
 func (r *Run) keep(records []*record.Record) {

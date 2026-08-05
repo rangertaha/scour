@@ -345,3 +345,27 @@ func TestAFieldTheExporterDoesNotKnowIsRefused(t *testing.T) {
 		t.Errorf("the error has no position: %v", err)
 	}
 }
+
+// TestAnEmptyCSVStillHasItsHeader.
+//
+// A job whose pipeline drops everything left a zero-byte file, and the header
+// is the one thing still knowable when there are no rows: it comes from the
+// shape rather than from the data. Without it a consumer cannot tell "no rows"
+// from "wrong file", and pandas raises EmptyDataError on the difference.
+func TestAnEmptyCSVStillHasItsHeader(t *testing.T) {
+	out := &sink{}
+	write(t, `
+  exporter "csv" "article" {}
+`, map[string]io.WriteCloser{"csv.article": out})
+
+	rows, err := csv.NewReader(strings.NewReader(out.String())).ReadAll()
+	if err != nil {
+		t.Fatalf("an empty export is not CSV: %v\n%q", err, out.String())
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %v, want the header alone", rows)
+	}
+	if got := strings.Join(rows[0], ","); got != "url,fetched,author.name,title" {
+		t.Errorf("header = %q", got)
+	}
+}

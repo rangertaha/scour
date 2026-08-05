@@ -56,10 +56,7 @@ func New(domains, included, excluded []string) (*Scope, error) {
 		// the site. Stripping it here is what makes the comparison symmetric:
 		// the URL's host has its port taken off too, and a domain that kept one
 		// would match nothing at all.
-		if i := strings.LastIndex(d, ":"); i >= 0 && !strings.Contains(d[i:], "]") {
-			d = d[:i]
-		}
-		s.domains = append(s.domains, d)
+		s.domains = append(s.domains, urls.WithoutPort(d))
 	}
 	for _, list := range []struct {
 		name string
@@ -119,10 +116,7 @@ func (s *Scope) Allows(normalised string) bool {
 
 // host reports whether a host is one of the job's domains or below one.
 func (s *Scope) host(host string) bool {
-	host = strings.ToLower(host)
-	if i := strings.LastIndex(host, ":"); i >= 0 {
-		host = host[:i]
-	}
+	host = urls.WithoutPort(strings.ToLower(host))
 
 	for _, domain := range s.domains {
 		if host == domain || strings.HasSuffix(host, "."+domain) {

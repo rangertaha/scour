@@ -365,3 +365,43 @@ func TestInitDefaultsToTheBasicTemplate(t *testing.T) {
 		t.Error("init with no template is not the basic template")
 	}
 }
+
+// TestAWrongCommandLineExitsTwoWhoeverNoticed.
+//
+// A wrong flag is a wrong command line, not a broken scour, and urfave/cli
+// returns a plain error for one. Without recognising it the process exited 3,
+// and a build script that retries on 3 and gives up on 2 retries a typo
+// forever: the conflation the exit codes exist to prevent.
+func TestAWrongCommandLineExitsTwoWhoeverNoticed(t *testing.T) {
+	path := write(t, "job.hcl", `
+job "news" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+}
+`)
+
+	for name, args := range map[string][]string{
+		"a flag that does not exist": {"validate", "--nope", path},
+		"a flag with no value":       {"spec", "--job"},
+		"too many arguments":         {"validate", path, path},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, errOut, code := run(t, args...)
+			if code != cli.ExitUsage {
+				t.Errorf("exit %d, want %d\n%s%s", code, cli.ExitUsage, out, errOut)
+			}
+		})
+	}
+
+	// And a document that is merely wrong is still 1, so the fix did not turn
+	// every failure into a usage error.
+	bad := write(t, "bad.hcl", "job \"news\" {}\n")
+	if _, _, code := run(t, "validate", bad); code != cli.ExitInvalid {
+		t.Errorf("a refused document exited %d, want %d", code, cli.ExitInvalid)
+	}
+}

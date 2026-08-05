@@ -5,6 +5,7 @@ package run_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/frontier"
@@ -507,4 +509,82 @@ func TestARunNeedsAJob(t *testing.T) {
 	if _, err := run.New(context.Background(), nil, run.Options{}); err == nil {
 		t.Error("built a run for no job")
 	}
+}
+
+// TestAStoreThatRefusesBookkeepingStopsRatherThanSpinning.
+//
+// Three call sites each logged a failed frontier write and moved on. Writing
+// this test found something worse than the silence: a frontier that cannot
+// record a page as finished hands the same page out every time its lease
+// expires, so the crawl neither progresses nor ends. It ran until the test
+// timed out.
+//
+// One refused write is recoverable and is only counted. Refused consistently,
+// the run stops and says so, because stopping is the only outcome that ends.
+func TestAStoreThatRefusesBookkeepingIsCountedRatherThanIgnored(t *testing.T) {
+	server, _ := site(t)
+
+	r, ending := crawl(t, document(t, server, ""), "")
+	if ending != run.Finished {
+		t.Fatalf("ending = %q", ending)
+	}
+	if got := r.Stats().Store.Load(); got != 0 {
+		t.Errorf("a healthy crawl counted %d refused writes", got)
+	}
+
+	// And a store that refuses them is counted rather than lost.
+	// The bound is shortened rather than the clock wound forward. Winding it
+	// forward far enough to reach the bound also expires every lease, so the
+	// URLs come back, the loop makes progress, and the stall under test never
+	// happens: the first version of this test hung for that reason.
+	refusing := &refusingFrontier{Frontier: mustOpen(t)}
+	broken, err := run.New(context.Background(), document(t, server, ""),
+		run.Options{Frontier: refusing, Stall: 200 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broken.Close()
+
+	if _, err := broken.Seed(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	refusing.refuse.Store(true)
+
+	ending, err = broken.Do(context.Background())
+	if err == nil {
+		t.Fatal("a frontier refusing every write produced a successful run")
+	}
+	if ending != run.Stalled {
+		t.Errorf("ending = %q, want the run to say it stalled", ending)
+	}
+	if got := broken.Stats().Store.Load(); got == 0 {
+		t.Error("a frontier refusing every bookkeeping write was counted zero times")
+	}
+	if !strings.Contains(err.Error(), "refused") {
+		t.Errorf("the error does not say what happened: %v", err)
+	}
+}
+
+// refusingFrontier accepts everything until told to refuse the bookkeeping.
+type refusingFrontier struct {
+	frontier.Frontier
+	refuse atomic.Bool
+}
+
+func (f *refusingFrontier) Done(ctx context.Context, job, hash string) error {
+	if f.refuse.Load() {
+		return errors.New("database is locked")
+	}
+	return f.Frontier.Done(ctx, job, hash)
+}
+
+func mustOpen(t *testing.T) frontier.Frontier {
+	t.Helper()
+
+	f, err := sqlite.Open(frontier.Config{Dir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { f.Close() })
+	return f
 }

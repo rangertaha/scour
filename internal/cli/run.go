@@ -138,6 +138,9 @@ func runCrawl(ctx context.Context, a *App, path, jobName, dir string, verbose, f
 	a.Printf("  fetched   %d (%d from the cache)\n", stats.Fetched.Load(), stats.Cached.Load())
 	a.Printf("  dropped   %d\n", stats.Dropped.Load())
 	a.Printf("  failed    %d\n", stats.Failed.Load())
+	if store := stats.Store.Load(); store > 0 {
+		a.Printf("  store     %d writes the frontier refused, so some pages will be fetched again\n", store)
+	}
 	a.Printf("  items     %d\n", stats.Items.Load())
 	a.Printf("  exported  %d\n", stats.Exported.Load())
 	if left > 0 {
