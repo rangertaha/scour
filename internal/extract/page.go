@@ -4,6 +4,7 @@ package extract
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -104,6 +105,20 @@ func (p *page) walk(n *html.Node) {
 // "the headline", and every shape a publisher writes puts it under that name
 // somewhere. Arrays and nested objects are descended into; the first value for
 // a name wins, because the outermost object is the page's own.
+//
+// # Why the traversal is level by level, with the names sorted
+//
+// Because the sentence above was not true of the code. It descended depth
+// first, over Go map iteration, so a nested `name` was reached before a
+// sibling at the top level and which of two colliding names won was random per
+// run. An ordinary schema.org article has `publisher.name` and `author.name`,
+// and a job asking for the author got the publisher on some runs and the author
+// on others, from the same cached page, which is the one thing a cached corpus
+// is supposed to make impossible.
+//
+// Sorting alone would have made it repeatable and still wrong. Level by level
+// is what makes the outermost object win, which is what the rule says and what
+// a publisher's own headline being at the top of their JSON-LD means.
 func (p *page) readLinkedData(body string) {
 	var parsed any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(body)), &parsed); err != nil {
@@ -115,25 +130,53 @@ func (p *page) readLinkedData(body string) {
 }
 
 func (p *page) flatten(prefix string, value any) {
-	switch v := value.(type) {
-	case map[string]any:
-		for name, inner := range v {
-			p.flatten(name, inner)
+	type named struct {
+		name  string
+		value any
+	}
+
+	// push adds one value to the next level, expanding an array in place so
+	// that its elements stay at the depth the array was at: a list of authors
+	// is not further from the top of the document than a single author.
+	push := func(into []named, name string, value any) []named {
+		list, ok := value.([]any)
+		if !ok {
+			return append(into, named{name, value})
 		}
-	case []any:
-		for _, inner := range v {
-			p.flatten(prefix, inner)
+		for _, inner := range list {
+			into = append(into, named{name, inner})
 		}
-	case string:
-		p.remember(prefix, v)
-	case float64:
-		p.remember(prefix, trimFloat(v))
-	case bool:
-		if v {
-			p.remember(prefix, "true")
-		} else {
-			p.remember(prefix, "false")
+		return into
+	}
+
+	level := push(nil, prefix, value)
+	for len(level) > 0 {
+		var next []named
+
+		for _, it := range level {
+			switch v := it.value.(type) {
+			case map[string]any:
+				names := make([]string, 0, len(v))
+				for name := range v {
+					names = append(names, name)
+				}
+				sort.Strings(names)
+				for _, name := range names {
+					next = push(next, name, v[name])
+				}
+			case string:
+				p.remember(it.name, v)
+			case float64:
+				p.remember(it.name, trimFloat(v))
+			case bool:
+				if v {
+					p.remember(it.name, "true")
+				} else {
+					p.remember(it.name, "false")
+				}
+			}
 		}
+		level = next
 	}
 }
 

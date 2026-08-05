@@ -700,3 +700,51 @@ func TestAnObjectFoundInMetadataStillFillsItsFields(t *testing.T) {
 		t.Errorf("from = %q, want it to say where it was not found", author.Nested["name"].From)
 	}
 }
+
+// TestJSONLDPrefersTheOutermostNameAndPicksItTheSameWayEveryTime.
+//
+// An ordinary schema.org article puts `name` under both `publisher` and
+// `author`, and often a third at the top level. The flattening descended depth
+// first over Go's map iteration, so which one landed in the page's linked data
+// was random per run: a job asking for the author got the publisher on some
+// runs and the author on others, from the same cached page. That is the one
+// thing a cached corpus is supposed to make impossible, and it is why the fill
+// rates are measured against one.
+//
+// Sorting alone would have made it repeatable and still wrong, so this asserts
+// the documented rule as well: the outermost object is the page's own.
+//
+// Run repeatedly because map order is random and a single run agrees by luck.
+func TestJSONLDPrefersTheOutermostNameAndPicksItTheSameWayEveryTime(t *testing.T) {
+	const body = `<!doctype html><html><head>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "NewsArticle",
+  "name": "The Article Itself",
+  "headline": "Ministers delay the plan",
+  "publisher": {"@type": "Organization", "name": "The Chronicle"},
+  "author": {"@type": "Person", "name": "Alex Doe"}
+}
+</script>
+</head><body><article>Words.</article></body></html>`
+
+	for attempt := range 40 {
+		result := run(t, `
+  item "article" {
+    property "name" {
+      type = str
+    }
+  }
+`, body)
+
+		item, ok := result.Item("article")
+		if !ok {
+			t.Fatal("nothing extracted")
+		}
+		got := item.Values["name"].Text
+		if got != "The Article Itself" {
+			t.Fatalf("attempt %d: name = %q, want the outermost one and the same one every time", attempt, got)
+		}
+	}
+}
