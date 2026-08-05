@@ -571,11 +571,11 @@ type refusingFrontier struct {
 	refuse atomic.Bool
 }
 
-func (f *refusingFrontier) Done(ctx context.Context, job, hash string) error {
+func (f *refusingFrontier) Done(ctx context.Context, job, hash string, attempt int) error {
 	if f.refuse.Load() {
 		return errors.New("database is locked")
 	}
-	return f.Frontier.Done(ctx, job, hash)
+	return f.Frontier.Done(ctx, job, hash, attempt)
 }
 
 func mustOpen(t *testing.T) frontier.Frontier {

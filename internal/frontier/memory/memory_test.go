@@ -115,7 +115,7 @@ func TestConcurrentLeasesAreExclusive(t *testing.T) {
 				mu.Lock()
 				handed[req.Hash]++
 				mu.Unlock()
-				if err := f.Done(ctx, "test", req.Hash); err != nil {
+				if err := f.Done(ctx, "test", req.Hash, req.Attempt); err != nil {
 					t.Error(err)
 					return
 				}

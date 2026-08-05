@@ -287,8 +287,12 @@ func (f *Frontier) Lease(ctx context.Context, job string, now time.Time, hold ti
 	// Politeness is in the WHERE clause rather than in the ordering, and it is
 	// not negotiable by the policy: a policy that could override it could
 	// hammer one server by choosing badly.
+	// attempts is selected because the count of handouts is what identifies the
+	// hold about to be taken, and Done and Fail will only act on a report that
+	// still names it. Reading it here costs nothing: the row is being fetched
+	// for its URL anyway.
 	query := `
-SELECT u.hash, u.url, u.host, u.depth, u.score, u.parent, u.discovered
+SELECT u.hash, u.url, u.host, u.depth, u.score, u.parent, u.discovered, u.attempts
   FROM urls u LEFT JOIN hosts h ON h.host = u.host
  WHERE u.job = ? AND u.status = '` + waiting + `'
    AND u.ready_at <= ?
@@ -301,9 +305,10 @@ SELECT u.hash, u.url, u.host, u.depth, u.score, u.parent, u.discovered
 	var (
 		req        frontier.Request
 		discovered int64
+		attempts   int
 	)
 	err = tx.QueryRowContext(ctx, query, job, stamp, stamp).Scan(
-		&req.Hash, &req.URL, &req.Host, &req.Depth, &req.Score, &req.Parent, &discovered)
+		&req.Hash, &req.URL, &req.Host, &req.Depth, &req.Score, &req.Parent, &discovered, &attempts)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, frontier.ErrEmpty
@@ -311,13 +316,20 @@ SELECT u.hash, u.url, u.host, u.depth, u.score, u.parent, u.discovered
 		return nil, fmt.Errorf("frontier/sqlite: lease: %w", err)
 	}
 	req.Discovered = time.Unix(0, discovered).UTC()
+	req.Attempt = attempts + 1
 
 	// Held rather than moved to a status of its own: a lease is a row that is
 	// waiting and not ready yet.
+	//
+	// attempts is written as a number rather than as attempts + 1, so that what
+	// the caller was handed and what the row says are the same value by
+	// construction and not by two expressions agreeing. The transaction took
+	// the write lock when it opened, so nothing has changed the row since it
+	// was read.
 	if _, err := tx.ExecContext(ctx, `
-UPDATE urls SET ready_at = ?, attempts = attempts + 1
+UPDATE urls SET ready_at = ?, attempts = ?
  WHERE job = ? AND hash = ?`,
-		now.Add(hold).UnixNano(), job, req.Hash); err != nil {
+		now.Add(hold).UnixNano(), req.Attempt, job, req.Hash); err != nil {
 		return nil, fmt.Errorf("frontier/sqlite: lease: %w", err)
 	}
 
@@ -337,9 +349,14 @@ ON CONFLICT (host) DO UPDATE SET next_at = excluded.next_at`,
 }
 
 // Done implements [frontier.Frontier].
-func (f *Frontier) Done(ctx context.Context, job, hash string) error {
+//
+// The attempt is in the WHERE clause rather than checked first in Go, so the
+// match and the write are one statement and no other connection can slip a
+// lease between them.
+func (f *Frontier) Done(ctx context.Context, job, hash string, attempt int) error {
 	_, err := f.db.ExecContext(ctx,
-		`UPDATE urls SET status = '`+finished+`' WHERE job = ? AND hash = ?`, job, hash)
+		`UPDATE urls SET status = '`+finished+`'
+		  WHERE job = ? AND hash = ? AND attempts = ?`, job, hash, attempt)
 	if err != nil {
 		return fmt.Errorf("frontier/sqlite: done: %w", err)
 	}
@@ -350,13 +367,21 @@ func (f *Frontier) Done(ctx context.Context, job, hash string) error {
 //
 // One statement rather than a read and a write, so two workers reporting the
 // same request cannot both read "two attempts" and both put it back.
-func (f *Frontier) Fail(ctx context.Context, job, hash string) error {
+//
+// The attempt in the WHERE clause is what stops a late report freeing a URL
+// somebody else is fetching. Without it this statement clears ready_at for
+// whoever asks, so a worker that stalled past its hold could put back a URL
+// that had since been leased again, and the attempt count it drives would be
+// coming from a worker that is no longer the holder. No row matching is the
+// ordinary outcome for a late report and not an error: the holder is still
+// working, and will report for itself.
+func (f *Frontier) Fail(ctx context.Context, job, hash string, attempt int) error {
 	_, err := f.db.ExecContext(ctx, `
 UPDATE urls
    SET status   = CASE WHEN attempts >= ? THEN '`+abandoned+`' ELSE status END,
        ready_at = 0
- WHERE job = ? AND hash = ?`,
-		frontier.MaxAttempts, job, hash)
+ WHERE job = ? AND hash = ? AND attempts = ?`,
+		frontier.MaxAttempts, job, hash, attempt)
 	if err != nil {
 		return fmt.Errorf("frontier/sqlite: fail: %w", err)
 	}

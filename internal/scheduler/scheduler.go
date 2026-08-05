@@ -267,15 +267,17 @@ func (s *Stage) Next(ctx context.Context, now time.Time, hold time.Duration) (*R
 	return s.queue.Lease(ctx, s.job, now, hold)
 }
 
-// Done reports a request as fetched.
-func (s *Stage) Done(ctx context.Context, hash string) error {
-	return s.queue.Done(ctx, s.job, hash)
+// Done reports a request as fetched. The attempt is the one [Stage.Next]
+// returned, and a report that no longer holds the lease is ignored.
+func (s *Stage) Done(ctx context.Context, hash string, attempt int) error {
+	return s.queue.Done(ctx, s.job, hash, attempt)
 }
 
 // Fail reports a request as failed, so it is tried again until it has been
-// tried too often.
-func (s *Stage) Fail(ctx context.Context, hash string) error {
-	return s.queue.Fail(ctx, s.job, hash)
+// tried too often. The attempt is the one [Stage.Next] returned, and a report
+// that no longer holds the lease is ignored.
+func (s *Stage) Fail(ctx context.Context, hash string, attempt int) error {
+	return s.queue.Fail(ctx, s.job, hash, attempt)
 }
 
 // Waiting is how many requests are still to be fetched.

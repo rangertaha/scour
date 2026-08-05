@@ -36,8 +36,10 @@ type queue struct {
 }
 
 type entry struct {
-	req      frontier.Request
-	leased   time.Time
+	req    frontier.Request
+	leased time.Time
+	// attempts is both the retry budget and the identity of the current hold,
+	// the same as the column of that name in the durable implementation.
 	attempts int
 	done     bool
 }
@@ -124,17 +126,20 @@ func (f *Frontier) Lease(_ context.Context, job string, now time.Time, hold time
 		f.hosts[best.req.Host] = now.Add(f.rate)
 	}
 
+	// The copy carries the attempt and the stored request does not, because the
+	// attempt belongs to this hold rather than to the URL.
 	req := best.req
+	req.Attempt = best.attempts
 	return &req, nil
 }
 
 // Done implements [frontier.Frontier].
-func (f *Frontier) Done(_ context.Context, job, hash string) error {
+func (f *Frontier) Done(_ context.Context, job, hash string, attempt int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	if q := f.jobs[job]; q != nil {
-		if e := q.byID[hash]; e != nil {
+		if e := q.byID[hash]; e != nil && e.attempts == attempt {
 			e.done = true
 		}
 	}
@@ -142,7 +147,7 @@ func (f *Frontier) Done(_ context.Context, job, hash string) error {
 }
 
 // Fail implements [frontier.Frontier].
-func (f *Frontier) Fail(_ context.Context, job, hash string) error {
+func (f *Frontier) Fail(_ context.Context, job, hash string, attempt int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -151,7 +156,11 @@ func (f *Frontier) Fail(_ context.Context, job, hash string) error {
 		return nil
 	}
 	e := q.byID[hash]
-	if e == nil {
+	if e == nil || e.attempts != attempt {
+		// A report from a hold that is over. The URL went out again when this
+		// one expired, so freeing it here would hand it to a third worker while
+		// the second is still fetching it. Silence is the answer: the holder
+		// will report for itself.
 		return nil
 	}
 

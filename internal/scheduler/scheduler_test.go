@@ -99,7 +99,7 @@ func TestSubmitAndTakeBack(t *testing.T) {
 		t.Errorf("the scheduler handed back %+v", req)
 	}
 
-	if err := s.Done(ctx, req.Hash); err != nil {
+	if err := s.Done(ctx, req.Hash, req.Attempt); err != nil {
 		t.Fatalf("done: %v", err)
 	}
 	if n, _ := s.Waiting(ctx); n != 1 {
@@ -383,7 +383,7 @@ func TestFailPutsItBackUntilItHasBeenTriedEnough(t *testing.T) {
 			t.Fatalf("next: %v", err)
 		}
 		handed++
-		if err := s.Fail(ctx, req.Hash); err != nil {
+		if err := s.Fail(ctx, req.Hash, req.Attempt); err != nil {
 			t.Fatalf("fail: %v", err)
 		}
 	}
@@ -549,7 +549,7 @@ func (b *brokenFrontier) Lease(context.Context, string, time.Time, time.Duration
 	return nil, b.err
 }
 
-func (b *brokenFrontier) Done(context.Context, string, string) error { return b.err }
-func (b *brokenFrontier) Fail(context.Context, string, string) error { return b.err }
-func (b *brokenFrontier) Len(context.Context, string) (int, error)   { return 0, b.err }
-func (b *brokenFrontier) Close() error                               { return b.closeErr }
+func (b *brokenFrontier) Done(context.Context, string, string, int) error { return b.err }
+func (b *brokenFrontier) Fail(context.Context, string, string, int) error { return b.err }
+func (b *brokenFrontier) Len(context.Context, string) (int, error)        { return 0, b.err }
+func (b *brokenFrontier) Close() error                                    { return b.closeErr }

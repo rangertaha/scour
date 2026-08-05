@@ -72,7 +72,7 @@ func TestItSurvivesARestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lease: %v", err)
 	}
-	if err := first.Done(ctx, "news", best.Hash); err != nil {
+	if err := first.Done(ctx, "news", best.Hash, best.Attempt); err != nil {
 		t.Fatalf("done: %v", err)
 	}
 	if _, err := first.Lease(ctx, "news", now, time.Minute); err != nil {

@@ -435,7 +435,7 @@ func (r *Run) one(ctx context.Context, req *scheduler.Request) {
 	case err != nil:
 		r.stats.Failed.Add(1)
 		r.log.WarnContext(ctx, "fetch failed", "url", req.URL, "error", err)
-		r.bookkeeping(ctx, "report a failure", req.URL, r.sched.Fail(ctx, req.Hash))
+		r.bookkeeping(ctx, "report a failure", req.URL, r.sched.Fail(ctx, req.Hash, req.Attempt))
 		return
 	}
 
@@ -477,7 +477,7 @@ func (r *Run) one(ctx context.Context, req *scheduler.Request) {
 }
 
 func (r *Run) done(ctx context.Context, req *scheduler.Request) {
-	r.bookkeeping(ctx, "report a page finished", req.URL, r.sched.Done(ctx, req.Hash))
+	r.bookkeeping(ctx, "report a page finished", req.URL, r.sched.Done(ctx, req.Hash, req.Attempt))
 }
 
 // bookkeeping records a frontier write that failed.

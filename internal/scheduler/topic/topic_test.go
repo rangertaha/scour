@@ -154,7 +154,7 @@ func TestTheOnTopicURLIsFetchedFirst(t *testing.T) {
 	if first.URL != onTopic {
 		t.Errorf("the frontier handed out %s first; the topic score did not order it", first.URL)
 	}
-	if err := s.Done(ctx, first.Hash); err != nil {
+	if err := s.Done(ctx, first.Hash, first.Attempt); err != nil {
 		t.Fatalf("done: %v", err)
 	}
 

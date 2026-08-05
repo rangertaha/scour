@@ -55,6 +55,7 @@ func Run(t *testing.T, open Open) {
 	t.Run("EmptyIsNotAnError", func(t *testing.T) { testEmpty(t, open) })
 	t.Run("LeaseIsExclusive", func(t *testing.T) { testExclusive(t, open) })
 	t.Run("LeaseExpires", func(t *testing.T) { testLeaseExpires(t, open) })
+	t.Run("AStaleReportDoesNotFreeALiveLease", func(t *testing.T) { testStaleReport(t, open) })
 	t.Run("DoneIsFinal", func(t *testing.T) { testDone(t, open) })
 	t.Run("FailRetriesThenAbandons", func(t *testing.T) { testFail(t, open) })
 	t.Run("PolitenessPacesAHost", func(t *testing.T) { testPoliteness(t, open) })
@@ -96,7 +97,7 @@ func order(t testing.TB, f frontier.Frontier) []string {
 			break
 		}
 		out = append(out, req.URL)
-		if err := f.Done(context.Background(), job, req.Hash); err != nil {
+		if err := f.Done(context.Background(), job, req.Hash, req.Attempt); err != nil {
 			t.Fatalf("done: %v", err)
 		}
 	}
@@ -178,12 +179,67 @@ func testLeaseExpires(t *testing.T, open Open) {
 	}
 }
 
+// testStaleReport: a worker whose hold has already been taken off it must not
+// be able to free the URL somebody else is fetching.
+//
+// This is the exclusivity invariant the whole stage exists for, and no lease
+// here has expired unnoticed: the second hold is legitimate, and the first
+// worker is merely late. If a report acts on the URL alone then a fetch that
+// fails six minutes into a five minute hold clears the hold of a worker that is
+// still working, and the next lease hands the same page to a third.
+func testStaleReport(t *testing.T, open Open) {
+	f := open(t, frontier.Config{})
+	ctx := context.Background()
+	add(t, f, Req("/a", "example.com", 0, 1, 0))
+
+	// One worker takes it and then stalls past its hold.
+	first := lease(t, f, 0)
+	if first == nil {
+		t.Fatal("nothing leased")
+	}
+
+	// A second worker takes it over, which is what an expiry is for.
+	second := lease(t, f, 2*time.Minute)
+	if second == nil {
+		t.Fatal("an expired lease was never handed out again")
+	}
+	if second.Attempt == first.Attempt {
+		t.Fatalf("two holds on one URL cannot be told apart: both are attempt %d", first.Attempt)
+	}
+
+	// The first worker's fetch finally fails, and it says so.
+	if err := f.Fail(ctx, job, first.Hash, first.Attempt); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+	if req := lease(t, f, 2*time.Minute+time.Second); req != nil {
+		t.Errorf("a stale failure freed a live lease: %s went to a third worker while the second held it", req.URL)
+	}
+
+	// And a stale success is no better: it would finish a page still being
+	// fetched, and lose whatever that fetch returns.
+	if err := f.Done(ctx, job, first.Hash, first.Attempt); err != nil {
+		t.Fatalf("done: %v", err)
+	}
+	if n, _ := f.Len(ctx, job); n != 1 {
+		t.Errorf("a stale completion finished a request another worker holds: len %d, want 1", n)
+	}
+
+	// The holder's own report is still heard, or the fence would have replaced
+	// one bug with a frontier that never drains.
+	if err := f.Done(ctx, job, second.Hash, second.Attempt); err != nil {
+		t.Fatalf("done: %v", err)
+	}
+	if n, _ := f.Len(ctx, job); n != 0 {
+		t.Errorf("the holder's own report was ignored as well: len %d, want 0", n)
+	}
+}
+
 func testDone(t *testing.T, open Open) {
 	f := open(t, frontier.Config{})
 	add(t, f, Req("/a", "example.com", 0, 1, 0))
 
 	req := lease(t, f, 0)
-	if err := f.Done(context.Background(), job, req.Hash); err != nil {
+	if err := f.Done(context.Background(), job, req.Hash, req.Attempt); err != nil {
 		t.Fatalf("done: %v", err)
 	}
 	if req := lease(t, f, time.Hour); req != nil {
@@ -208,7 +264,7 @@ func testFail(t *testing.T, open Open) {
 			break
 		}
 		handed++
-		if err := f.Fail(ctx, job, req.Hash); err != nil {
+		if err := f.Fail(ctx, job, req.Hash, req.Attempt); err != nil {
 			t.Fatalf("fail: %v", err)
 		}
 	}
@@ -397,7 +453,7 @@ func benchLease(b *testing.B, open Open, size int) {
 		if err != nil {
 			b.Fatalf("lease: %v", err)
 		}
-		if err := f.Done(ctx, job, req.Hash); err != nil {
+		if err := f.Done(ctx, job, req.Hash, req.Attempt); err != nil {
 			b.Fatalf("done: %v", err)
 		}
 	}
@@ -464,7 +520,7 @@ func benchPolicy(b *testing.B, open Open, policy string) {
 		if err != nil {
 			b.Fatalf("lease: %v", err)
 		}
-		_ = f.Done(ctx, job, req.Hash)
+		_ = f.Done(ctx, job, req.Hash, req.Attempt)
 	}
 }
 
@@ -489,6 +545,6 @@ func benchHosts(b *testing.B, open Open) {
 		if err != nil {
 			b.Fatalf("lease: %v", err)
 		}
-		_ = f.Done(ctx, job, req.Hash)
+		_ = f.Done(ctx, job, req.Hash, req.Attempt)
 	}
 }

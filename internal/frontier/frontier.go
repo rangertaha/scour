@@ -49,6 +49,22 @@ type Request struct {
 	// Discovered is when it was first seen. Ties in every policy break on it,
 	// so the same document always produces the same crawl.
 	Discovered time.Time
+
+	// Attempt is which handout this is: 1 the first time the URL goes out, 2
+	// the next. It identifies the lease, and [Frontier.Done] and [Frontier.Fail]
+	// act only on a report whose attempt still matches the stored one.
+	//
+	// The handout count is the identity rather than a token minted per lease
+	// because a frontier already has to keep it: a URL is abandoned after
+	// [MaxAttempts], so the number is stored and incremented on every lease
+	// whatever else happens. An epoch column of its own would be a second thing
+	// to write on the one query that caps how fast a crawl can go, to say what
+	// the first already says.
+	//
+	// Only [Frontier.Lease] sets it. [Frontier.Add] ignores it, because how
+	// often a URL has been handed out is not something the spider that found it
+	// can know.
+	Attempt int
 }
 
 // Frontier holds a job's waiting URLs.
@@ -61,7 +77,8 @@ type Frontier interface {
 	// anything.
 	Add(ctx context.Context, job string, reqs ...Request) (int, error)
 
-	// Lease hands out the next request and holds it for the given duration.
+	// Lease hands out the next request and holds it for the given duration,
+	// with [Request.Attempt] set to the identity of that hold.
 	//
 	// The best request whose host is not cooling, by whichever policy this
 	// frontier was built with. It returns [ErrEmpty] when nothing is due,
@@ -69,13 +86,25 @@ type Frontier interface {
 	Lease(ctx context.Context, job string, now time.Time, hold time.Duration) (*Request, error)
 
 	// Done reports a leased request as finished, so it is never handed out
-	// again.
-	Done(ctx context.Context, job, hash string) error
+	// again. The attempt is the one [Frontier.Lease] returned.
+	//
+	// A report whose attempt no longer matches does nothing, and that is the
+	// right answer rather than a tolerated one. A worker that stalled past its
+	// hold has already had the URL taken off it and given to somebody else, so
+	// what it is describing is a fetch nobody is waiting on, and the worker
+	// holding the URL now is still working. Being late is not an error, so
+	// neither is reporting late.
+	Done(ctx context.Context, job, hash string, attempt int) error
 
 	// Fail reports a leased request as failed. It becomes available again
 	// until it has been tried too often, because a URL nothing will ever
 	// report on must not cycle for the length of the crawl.
-	Fail(ctx context.Context, job, hash string) error
+	//
+	// The attempt fences it the same way [Frontier.Done] is fenced, and here it
+	// is the exclusivity invariant itself at stake: an unfenced failure clears
+	// the hold, so a report from a worker that lost the URL an hour ago hands
+	// that URL to a third worker while the second is still fetching it.
+	Fail(ctx context.Context, job, hash string, attempt int) error
 
 	// Len is how many requests are still waiting, leased or not.
 	Len(ctx context.Context, job string) (int, error)
