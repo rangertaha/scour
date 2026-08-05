@@ -43,6 +43,7 @@ import (
 	_ "github.com/rangertaha/scour/internal/spider/topic"
 
 	// Pipeline step kinds.
+	_ "github.com/rangertaha/scour/internal/pipeline/entities"
 	_ "github.com/rangertaha/scour/internal/pipeline/steps"
 
 	// Exporters.

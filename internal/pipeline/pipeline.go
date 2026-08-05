@@ -28,6 +28,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -239,6 +240,26 @@ func (p *Pipeline) runOne(ctx context.Context, declared *engine.Step, records []
 		return nil, fmt.Errorf("pipeline: job %q: %s: %w", p.job, declared.Address(), err)
 	}
 	return out, nil
+}
+
+// Close releases the steps that hold something.
+//
+// Most hold nothing, so most are not closers and nothing here has to know which
+// are. The ones that do exist because a step is allowed to write somewhere other
+// than the records it returns: `entities` writes the graph, and a database
+// handle nobody gives back is a file lock a second run cannot take.
+func (p *Pipeline) Close() error {
+	var problems []error
+	for _, step := range p.steps {
+		closer, ok := step.(io.Closer)
+		if !ok {
+			continue
+		}
+		if err := closer.Close(); err != nil {
+			problems = append(problems, err)
+		}
+	}
+	return errors.Join(problems...)
 }
 
 // Width is how many steps can run at once, which is what a run reports and what

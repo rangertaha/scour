@@ -575,6 +575,12 @@ func (r *Run) close() error {
 			return nil
 		},
 		func() error {
+			if r.graph != nil {
+				return r.graph.Close()
+			}
+			return nil
+		},
+		func() error {
 			if r.closeRead != nil {
 				return r.closeRead()
 			}

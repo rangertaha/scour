@@ -661,9 +661,27 @@ a shared store with no way to tell which values came from where. With provenance
 it is `where job = ?`, and the store is clean.
 
 **A merge is an assertion too.** When identity resolution decides two entities
-are one, recording `same_as` beats rewriting rows: it is reversible, it keeps
-both provenance trails, and it does not destroy the fact that they were once
-thought distinct, which is the thing you need when the merge was wrong.
+are one, recording it beats rewriting rows: it is reversible, it keeps both
+provenance trails, and it does not destroy the fact that they were once thought
+distinct, which is the thing you need when the merge was wrong. So a merge is
+one alias row pointing at a canonical id, carrying its own provenance and the
+rule that proposed it, and every read joins through it. Retracting the job that
+merged takes the merge back with the rest of what that job said.
+
+### Merging wrongly is worse than not merging
+
+The two failures are not symmetric. Two people wrongly collapsed into one look
+exactly like a store working: the rows are there, the counts go up, and every
+later answer is confident and wrong. Two spellings left apart are visible, and
+somebody says so.
+
+So nothing merges by itself. Proposing a merge and making one are two calls,
+and the automatic rule is one: an initial and a surname against **exactly one**
+full name. Two candidates means "A. Doe" is Alex or Anna, the evidence cannot
+say which, and taking the more asserted one would be a popularity contest
+dressed as evidence. There is no edit distance anywhere, because a threshold
+that merges "Jon Smith" with "Jan Smith" is one character from a threshold that
+does not, and nobody can say which side a given pair should fall on.
 
 ### A relation is not a record field
 
@@ -758,8 +776,11 @@ looking exactly like rising accuracy the whole time.
 
 The guard is the one topics needed: **known entities raise confidence, they
 never gate extraction.** A novel author must come out as easily as a familiar
-one, so the store makes the crawl surer rather than able. That wants a test: a
-byline belonging to nobody in the store still extracts.
+one, so the store makes the crawl surer rather than able. That is a test rather
+than an intention: a byline belonging to nobody in the store extracts as easily
+as a familiar one, in `internal/pipeline/entities`. The step that feeds the
+store returns every record exactly as it was handed them, so there is nowhere
+for a byline to be dropped, held back or scored differently for being new.
 
 ### Named entity recognition is a plugin
 
@@ -770,9 +791,12 @@ middleware contract exactly, the same as a classifier, and for the same reasons.
 Open: **staging.** The property-to-entity reference and a store of typed
 entities with typed relations is contained and useful alone, since it answers
 "which authors has this publisher published" for nothing. Identity resolution is
-the middle piece. Recognition and linking is the large one, and the feedback
-into extraction needs all three. Building them as one thing is how this becomes
-a year of work that never ships.
+the middle piece, and it is built in the only shape that does not put the first
+one at risk: nothing merges by itself, a merge is a row pointing at a canonical
+id rather than a rewrite, and the one automatic rule refuses to guess when two
+candidates could be meant. Recognition and linking is the large one, and the
+feedback into extraction needs all three. Building them as one thing is how this
+becomes a year of work that never ships.
 
 ## Topics are optional
 
@@ -1021,6 +1045,7 @@ and ordered by `requires` rather than by a number.
 | `validate` | Enforces `required` and types |
 | `dedupe` | Drops items already seen |
 | `rank` | Scores and orders |
+| `entities` | Asserts what the records refer to, into the entity store |
 | `python`, `rhai`, `nodejs`, `bash` | Runs a script, inline or from a file |
 
 ### Exporters
@@ -1484,6 +1509,7 @@ four stages is the genuinely new distributed-systems problem here.
 | The `httperror` middleware | Built, tested |
 | `internal/record`: the flat form, and the measurement rendering | Built, tested |
 | The pipeline: waves, concurrency, clean, validate, dedupe, rank | Built, tested |
+| The `entities` step: a crawl feeding the entity store | Built, tested |
 | Exporters: the registry, json, jsonlines, csv, parquet, nats, sqlite | Built, tested |
 | `internal/run`: the whole crawl, four stages wired directly | Built, tested |
 | `scour try` and `scour run` | Built, tested |
@@ -1508,7 +1534,8 @@ four stages is the genuinely new distributed-systems problem here.
 | Secrets in a sealed KV bucket, resolved at plugin build | Built, tested |
 | S3 and GCS taking an explicit credential from one | Built, tested |
 | Entity store: typed entities, relations, assertions with provenance | Built, tested |
-| Entity identity resolution, and recognition | Designed, not started |
+| Entity identity resolution: aliases, one conservative rule | Built, tested |
+| Entity recognition and linking | Designed, not started |
 | Events as items: tags, fields, time. Parquet archive | Designed. Schema built |
 | Plugin implementations, all of them | Not started |
 | Jobs and nodes in NATS KV, watched | Built, tested |

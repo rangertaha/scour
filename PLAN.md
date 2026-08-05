@@ -253,9 +253,14 @@ one, and the feedback into extraction needs all three.
 familiar one, because known entities must raise confidence and never gate
 extraction; and one job's assertions being removable with a single delete.
 
-*Where it is:* the first stage is built and tested, including the single delete.
-Identity resolution and recognition are not, and nothing feeds the store from a
-crawl yet, so the first proof cannot be made.
+*Where it is:* both proofs are made. The `entities` pipeline step asserts each
+entity-typed property and each declared relation from the records a crawl
+produced, and the step returns them untouched, which is what makes the byline
+claim testable rather than aspirational. Identity resolution is built as
+recorded merges: an alias row pointing at a canonical id, one automatic rule
+(an initial and a surname against exactly one full name), and nothing fuzzy.
+Recognition and linking is not built, and the store is still opened directly
+rather than behind a service.
 
 **Phase 6. The bus.** Stages talking over NATS instead of calling each other,
 in one process against an embedded server.
@@ -371,6 +376,6 @@ has numbers to compare against the ones on `main`.
 | 4.75. Topic classification, optional | Designed, not started |
 | 5. Pipelines and exporters | Not started |
 | 5.5. Secrets | Designed, not started |
-| 5.75. Entity store, assertions with provenance | Designed. Reference built |
+| 5.75. Entity store, assertions with provenance | Built, tested. No service yet |
 | 6. The bus | Not started |
 | 7. The cluster | Not started |

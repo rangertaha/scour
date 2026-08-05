@@ -25,11 +25,16 @@
 // nothing.
 //
 // Identity resolution, deciding that "A. Doe" and "Alex Doe" are one person, is
-// the middle piece and is not here: names are matched exactly, after
-// normalisation, and two spellings are two entities until something merges
-// them. Recognition and linking is the large piece and is not here either.
-// Built as one thing this is a year that never ships, so it is staged, and
-// saying which stage this is matters more than the stage being large.
+// the middle piece and is here in the only shape that does not put the rest at
+// risk: nothing merges by itself. [Store.Assert] still keys on the name exactly
+// as it was written, so two spellings are two rows until somebody calls
+// [Store.Merge], and what a merge writes is one alias row rather than a rewrite
+// of the ones already there. See resolve.go for the argument.
+//
+// Recognition and linking, deciding that a span of text is a name at all, is
+// the large piece and is not here. Built as one thing this is a year that never
+// ships, so it is staged, and saying which stage this is matters more than the
+// stage being large.
 package entity
 
 import (
@@ -200,6 +205,34 @@ CREATE TABLE IF NOT EXISTS assertions (
 
 CREATE INDEX IF NOT EXISTS assertions_job ON assertions (job);
 CREATE INDEX IF NOT EXISTS assertions_subject ON assertions (subject);
+
+-- A merge is an assertion too, so it is a row here rather than a rewrite of
+-- the rows above. Both entities keep their assertions and their provenance,
+-- and undoing a merge made on bad evidence is deleting one row.
+--
+-- The foreign keys are what keep this honest without a sweeper: retracting the
+-- job that asserted a spelling deletes the entity, and the merge that spelling
+-- was part of goes with it.
+CREATE TABLE IF NOT EXISTS aliases (
+	alias      TEXT PRIMARY KEY REFERENCES entities (id) ON DELETE CASCADE,
+	canonical  TEXT    NOT NULL REFERENCES entities (id) ON DELETE CASCADE,
+	rule       TEXT    NOT NULL DEFAULT '',
+	job        TEXT    NOT NULL,
+	url        TEXT    NOT NULL,
+	spec       TEXT    NOT NULL DEFAULT '',
+	said_at    INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS aliases_canonical ON aliases (canonical);
+CREATE INDEX IF NOT EXISTS aliases_job ON aliases (job);
+
+-- What every read goes through, so that following a merge is a join rather
+-- than a recursive walk in each of five queries. An alias never points at
+-- another alias, which [Store.Merge] maintains on write precisely so that this
+-- can be one join deep and stay legible at three in the morning.
+CREATE VIEW IF NOT EXISTS resolved AS
+SELECT e.id AS id, COALESCE(a.canonical, e.id) AS canonical
+  FROM entities e LEFT JOIN aliases a ON a.alias = e.id;
 `
 	if _, err := db.Exec(ddl); err != nil {
 		return fmt.Errorf("entity: schema: %w", err)
@@ -212,7 +245,10 @@ CREATE INDEX IF NOT EXISTS assertions_subject ON assertions (subject);
 // Derived rather than allocated, so two jobs asserting the same person converge
 // on one row without coordinating and without either of them having to look
 // first. The cost is that identity is exactly name equality after
-// normalisation, which is the piece this stage does not do.
+// normalisation, and everything beyond that is a merge somebody made: see
+// [Store.Merge]. Deliberately not resolution-aware, because an ID that changed
+// when a merge happened would mean an assertion could no longer be found by the
+// spelling it was made under, and that is what [Store.Retract] needs.
 func ID(kind, name string) string {
 	sum := sha256.Sum256([]byte(strings.ToLower(kind) + "\x00" + normalise(name)))
 	return hex.EncodeToString(sum[:12])
@@ -314,13 +350,24 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 }
 
 // Get returns one entity.
+//
+// By what it has been merged into, so an id that was merged away answers with
+// the entity it is now part of rather than with a row nothing else will ever
+// mention again. The counts are summed over the family: after "A. Doe" is
+// merged into "Alex Doe", how many times something said this person exists is
+// how many times something said either.
 func (s *Store) Get(ctx context.Context, id string) (*Entity, error) {
 	var (
 		out         Entity
 		first, last int64
 	)
 	err := s.db.QueryRowContext(ctx, `
-SELECT id, kind, name, first_seen, last_seen, assertions FROM entities WHERE id = ?`, id).
+SELECT c.id, c.kind, c.name, MIN(e.first_seen), MAX(e.last_seen), SUM(e.assertions)
+  FROM entities e
+  JOIN resolved r ON r.id = e.id
+  JOIN entities c ON c.id = r.canonical
+ WHERE r.canonical = (SELECT canonical FROM resolved WHERE id = ?)
+ GROUP BY c.id`, id).
 		Scan(&out.ID, &out.Kind, &out.Name, &first, &last, &out.Assertions)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -335,6 +382,11 @@ SELECT id, kind, name, first_seen, last_seen, assertions FROM entities WHERE id 
 }
 
 // Find returns an entity by kind and name, which is what extraction has.
+//
+// A spelling that has been merged away finds the person it was merged into, so
+// a crawl reading "A. Doe" off a page gets Alex Doe once somebody has said they
+// are the same. Not finding anything is an ordinary answer and never an
+// obstacle: see [Store.Candidates] for why nothing here gates on it.
 func (s *Store) Find(ctx context.Context, kind, name string) (*Entity, error) {
 	return s.Get(ctx, ID(kind, name))
 }
@@ -343,18 +395,26 @@ func (s *Store) Find(ctx context.Context, kind, name string) (*Entity, error) {
 // other end of an edge of this kind, most asserted first.
 //
 // "Which authors has this publisher published, on this topic" is this call.
+//
+// Both ends go through the merges, so an edge asserted against a spelling that
+// has since been merged away counts towards the person it was merged into. An
+// author who appeared under two bylines is one author here with one count,
+// which is the whole reason to merge anything.
 func (s *Store) Related(ctx context.Context, id, kind, topic string) ([]*Entity, error) {
 	query := `
-SELECT e.id, e.kind, e.name, e.first_seen, e.last_seen, r.assertions
-  FROM relations r JOIN entities e ON e.id = r.to_id
- WHERE r.from_id = ? AND r.kind = ?`
+SELECT c.id, c.kind, c.name, c.first_seen, c.last_seen, SUM(r.assertions)
+  FROM relations r
+  JOIN resolved rf ON rf.id = r.from_id
+  JOIN resolved rt ON rt.id = r.to_id
+  JOIN entities c  ON c.id  = rt.canonical
+ WHERE rf.canonical = (SELECT canonical FROM resolved WHERE id = ?) AND r.kind = ?`
 	args := []any{id, strings.ToLower(kind)}
 
 	if topic != "" {
 		query += ` AND r.topic = ?`
 		args = append(args, topic)
 	}
-	query += ` ORDER BY r.assertions DESC, e.name ASC`
+	query += ` GROUP BY c.id ORDER BY SUM(r.assertions) DESC, c.name ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -378,10 +438,19 @@ SELECT e.id, e.kind, e.name, e.first_seen, e.last_seen, r.assertions
 }
 
 // Kind lists every entity of one kind, most asserted first.
+//
+// One row per person rather than one per spelling, because a merged name is no
+// longer somebody the store can be asked about separately. A caller that wants
+// the spellings back asks [Store.Aliases].
 func (s *Store) Kind(ctx context.Context, kind string) ([]*Entity, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, kind, name, first_seen, last_seen, assertions
-  FROM entities WHERE kind = ? ORDER BY assertions DESC, name ASC`, strings.ToLower(kind))
+SELECT c.id, c.kind, c.name, MIN(e.first_seen), MAX(e.last_seen), SUM(e.assertions)
+  FROM entities e
+  JOIN resolved r ON r.id = e.id
+  JOIN entities c ON c.id = r.canonical
+ WHERE e.kind = ?
+ GROUP BY c.id
+ ORDER BY SUM(e.assertions) DESC, c.name ASC`, strings.ToLower(kind))
 	if err != nil {
 		return nil, fmt.Errorf("entity: kind: %w", err)
 	}
@@ -403,10 +472,19 @@ SELECT id, kind, name, first_seen, last_seen, assertions
 }
 
 // Provenances lists what was said about an entity, and by whom.
+//
+// Over every spelling merged into it, because a merge keeps both trails rather
+// than replacing one with the other. That is what somebody checking a merge
+// needs: the evidence for each side, still attributed to whoever produced it.
 func (s *Store) Provenances(ctx context.Context, id string) ([]Provenance, error) {
 	rows, err := s.db.QueryContext(ctx, `
+WITH family AS (
+	SELECT id FROM resolved
+	 WHERE canonical = (SELECT canonical FROM resolved WHERE id = ?)
+)
 SELECT job, url, spec, said_at FROM assertions
- WHERE subject = ? OR object = ? ORDER BY said_at DESC`, id, id)
+ WHERE subject IN (SELECT id FROM family) OR object IN (SELECT id FROM family)
+ ORDER BY said_at DESC`, id)
 	if err != nil {
 		return nil, fmt.Errorf("entity: provenance: %w", err)
 	}
@@ -433,6 +511,14 @@ SELECT job, url, spec, said_at FROM assertions
 // wrong field for a week is one delete, and what other jobs said is untouched.
 // The counts are rebuilt from the assertions that remain, and an entity nobody
 // asserts any more goes with them.
+//
+// A merge that job made is one of the things it said, so its alias rows go too.
+// The alternative, leaving them, would keep two people collapsed into one on
+// the strength of evidence that has just been withdrawn, which is the failure
+// this whole call exists to make recoverable. A merge somebody else made
+// against a spelling this job was the only asserter of is deleted by the
+// foreign key rather than by a sweep, since there is no longer anything at one
+// end of it.
 func (s *Store) Retract(ctx context.Context, job string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -440,11 +526,18 @@ func (s *Store) Retract(ctx context.Context, job string) (int64, error) {
 	}
 	defer tx.Rollback()
 
-	result, err := tx.ExecContext(ctx, `DELETE FROM assertions WHERE job = ?`, job)
-	if err != nil {
-		return 0, fmt.Errorf("entity: retract %s: %w", job, err)
+	var removed int64
+	for _, statement := range []string{
+		`DELETE FROM assertions WHERE job = ?`,
+		`DELETE FROM aliases WHERE job = ?`,
+	} {
+		result, err := tx.ExecContext(ctx, statement, job)
+		if err != nil {
+			return 0, fmt.Errorf("entity: retract %s: %w", job, err)
+		}
+		count, _ := result.RowsAffected()
+		removed += count
 	}
-	removed, _ := result.RowsAffected()
 
 	for _, statement := range []string{
 		// Counts first, from what is left.
