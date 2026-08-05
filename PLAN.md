@@ -160,6 +160,20 @@ formats.
 *Proved by:* independent steps demonstrably running at once, and export output
 that round-trips.
 
+**Phase 5.5. Secrets.** `SCOUR_SECRETS` sealed with a cluster key, `secret()`
+resolved when a plugin is built, and the S3 and GCS backends taught to accept
+explicit credentials.
+
+Those two currently use gocloud's URL openers, which take a region, an endpoint
+and a profile but deliberately not raw keys. Accepting a secret means
+constructing the clients directly, `s3blob.OpenBucketV2` with a built client and
+`gcsblob.OpenBucket` with an HTTP client, roughly forty lines each. The ambient
+credential chain stays as the fallback, so a laptop is unaffected.
+
+*Proved by:* a job whose cache credentials come from a secret, running on a node
+with no cloud credentials in its environment; and the value appearing in neither
+the stored job, a plan, nor `scour show`.
+
 **Phase 6. The bus.** Stages talking over NATS instead of calling each other,
 in one process against an embedded server.
 
@@ -264,5 +278,6 @@ has numbers to compare against the ones on `main`.
 | 4.5. `scour train`, locators into the document | Not started |
 | 4.75. Topic classification, optional | Designed, not started |
 | 5. Pipelines and exporters | Not started |
+| 5.5. Secrets | Designed, not started |
 | 6. The bus | Not started |
 | 7. The cluster | Not started |

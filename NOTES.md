@@ -639,6 +639,7 @@ worth being able to read at once.
 | Page bodies | The cache: a directory, S3 or GCS | Large, immutable, and shared between machines |
 | Jobs, as desired state | NATS KV, `SCOUR_JOBS` | The only store every node already has |
 | Run state | NATS KV, `SCOUR_RUNS`, no history | Changes constantly and must not churn a job's revisions |
+| Secrets | NATS KV, `SCOUR_SECRETS`, sealed, no history | Per job, so the environment cannot carry them |
 | Nodes | NATS KV, `SCOUR_NODES`, with a TTL | Not durable state. A row outliving its process is a lie |
 | Frontier and hosts | SQLite, one shared database | Politeness is shared, so this cannot be partitioned |
 | Records and marks | SQLite, one database per job | Unbounded, unshared, and deleted by unlinking |
@@ -825,6 +826,112 @@ The one thing given up is querying. KV answers "this key" and "these keys", not
 "every job crawling example.com", which would mean listing and filtering. For
 tens or hundreds of jobs that is not a constraint worth designing around.
 
+### Secrets
+
+A per-job secret has to travel from whoever submitted the job to whichever node
+happens to run it. The environment cannot express that: there is one environment
+and many jobs, and a shared node running work for two owners needs two sets of
+credentials.
+
+So the document holds a reference and never a value:
+
+```hcl
+job "acme" {
+  start = ["https://acme.example/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+
+  downloader {
+    plugin "cache" {
+      backend    = "s3"
+      bucket     = "acme-pages"
+      access_key = secret("acme-s3-key")
+      secret_key = secret("acme-s3-secret")
+    }
+  }
+}
+```
+
+That is the strongest case for this, and it is stronger than site authentication:
+a cache bucket is per job, ambient cloud credentials are per node, and only a
+reference bridges the two. The ambient chain stays as the fallback when no
+secret is named, so a laptop still needs nothing configured.
+
+#### It is safe because plugin config is opaque
+
+`secret()` is an HCL function, so what matters is when it is evaluated. Plugin
+and exporter bodies are deliberately left undecoded and are decoded against the
+plugin's own schema when the plugin is built. That decision was made so somebody
+else could write a plugin without this package knowing its fields, and it gives
+secret-safety as a side effect:
+
+| | Sees |
+| --- | --- |
+| Parse | An unevaluated expression |
+| [Job.Resolved] into KV | The expression. KV never holds the value |
+| [Diff] | Raw source, so rotating a secret correctly reads as no change |
+| `scour show` | The reference as written, redacted by construction |
+| Plugin build, on the node | The value, resolved then and there |
+
+Nothing had to be added to any of them.
+
+**Which gives one rule: secrets live only in the opaque bodies.** Not in
+`scheduler.rate` or `downloader.user_agent`, which are decoded eagerly and would
+resolve into stored state. Those do not want secrets, so the rule costs nothing
+and can be enforced rather than remembered.
+
+#### The bucket has different rules from every other
+
+Kept in `SCOUR_SECRETS`, and three things make that real rather than a file on
+every node with extra steps.
+
+**Values are sealed before they go in.** JetStream writes to disk in plaintext,
+so a stream directory, a backup or a replica on a machine you would rather it
+were not on would otherwise all be readable. AES-GCM with a cluster key that
+comes from outside KV, an environment variable or a file, so the bucket holds
+ciphertext. One root secret living outside the system is unavoidable: every
+secret manager has one, and pretending otherwise only hides where it is.
+
+**History is one.** Every other bucket wants revisions, and jobs keep ten so a
+change can be seen. For secrets, history means retaining rotated credentials,
+which is the opposite of what rotating is for. This is the one bucket that
+breaks the rule, and it is written down here so nobody makes it consistent.
+
+**Subject permissions.** A bucket is a stream, and NATS can restrict who reads
+`$KV.SCOUR_SECRETS.>`. A node running only unauthenticated jobs with a local
+cache has no business reading it.
+
+#### Setting one, and not reading it back
+
+```
+scour secret set acme-s3-key      reads from stdin
+scour secret ls                   names and when they were set
+scour secret rm acme-s3-key
+```
+
+**There is no `get`.** You can set a secret and rotate it, and if you have lost
+it you rotate it. Read-back exists mostly to be misused: pasted into a terminal,
+kept in scrollback, attached to a ticket. `set` reads from stdin rather than an
+argument for the same reason, since an argument is in the shell history and in
+`ps` the moment it runs.
+
+**A missing secret fails at submission.** A job naming `secret("acme-s3-key")`
+when no such key exists should be refused when it is submitted, not three hours
+into a crawl. The server checks the key is there without reading it, which is
+one lookup and no decryption. Local `validate` cannot do this, which is the
+split [CLI.md](CLI.md) already draws between what needs a server and what never
+will.
+
+**Rotation is deliberately unlike a classifier version.** A job pins
+`climate@7` because retraining changes what the word means. A secret rotates
+under a stable name because rotating does not change what it is for. The watch
+drops the cached value, the next use resolves the new one, and no document
+changes.
+
 ### Only the server writes
 
 The command line is a client. It holds no frontier, no records and no idea what
@@ -878,6 +985,7 @@ four stages is the genuinely new distributed-systems problem here.
 | Defaults for every setting, in one file, with a resolved view | Built, tested |
 | Resubmission diff and mutation policy | Built, tested |
 | Classifiers: the contract, terms and bayes | Built, tested |
+| Secrets in a sealed KV bucket, resolved at plugin build | Designed, not started |
 | Plugin implementations, all of them | Not started |
 | The stages themselves | Not started |
 | Exporters, all formats | Not started |

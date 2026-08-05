@@ -49,6 +49,7 @@ cluster, and both work against the cache on disk.
 scour plan        scour apply         scour ls         scour status
 scour logs        scour pause         scour resume     scour stop
 scour rm          scour records       scour nodes
+scour secret
 ```
 
 ### Why the server does the thinking
@@ -469,6 +470,38 @@ scour records <job>                  The extracted records
 scour records <job> --item article   One shape
 scour records <job> --follow         As they arrive
 ```
+
+### Secrets
+
+```
+scour secret set <name>     Store one, read from stdin
+scour secret ls             Names, and when they were set
+scour secret rm <name>
+```
+
+A job holds a reference, never a value: `access_key = secret("acme-s3-key")`.
+The document stays safe to commit, diff and paste into an issue, and the value
+is resolved on the node that needs it, when it needs it.
+
+**There is no `scour secret get`.** You can set one and rotate it, and if you
+have lost it you rotate it. Read-back exists mostly to be misused: pasted into a
+terminal, left in scrollback, attached to a ticket.
+
+`set` reads from stdin rather than taking an argument, for the same reason. An
+argument is in the shell history and in `ps` output the moment it runs.
+
+```console
+$ pbpaste | scour secret set acme-s3-key
+stored acme-s3-key
+
+$ scour secret ls
+acme-s3-key       set 2026-08-04
+acme-s3-secret    set 2026-08-04
+```
+
+A job naming a secret that does not exist is refused when it is submitted rather
+than three hours into a crawl. That is a check `plan` can make and local
+`validate` cannot, which is the split above.
 
 ### The install
 
