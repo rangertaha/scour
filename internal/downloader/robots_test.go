@@ -370,3 +370,59 @@ func TestAURLThatWillNotParseIsTheFetchersProblem(t *testing.T) {
 		t.Errorf("a malformed URL was reported as a site refusing it: %v", err)
 	}
 }
+
+// TestRobotsFollowsARedirect. A site that moved, or that serves http and
+// redirects to https, or that keeps one robots.txt for several hostnames, is
+// entirely ordinary. Treating the redirect as an unreadable file refuses the
+// whole host, which is what this crawler did to blog.golang.org the first time
+// it was pointed at a real site.
+func TestRobotsFollowsARedirect(t *testing.T) {
+	rules := site(t, saying("User-agent: *\nDisallow: /private\n"))
+
+	moved := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.Redirect(w, r, rules.URL+"/robots.txt", http.StatusMovedPermanently)
+			return
+		}
+		fmt.Fprintf(w, "page %s", r.URL.Path)
+	}))
+	defer moved.Close()
+
+	s := stage(t, job(t, ""))
+
+	if got := string(get(t, s, moved.URL+"/public").Body); got != "page /public" {
+		t.Errorf("body = %q", got)
+	}
+	if _, err := s.Handle(context.Background(), &downloader.Request{URL: moved.URL + "/private"}); !chain.Dropped(err) {
+		t.Errorf("the rules at the other end of the redirect were not applied: %v", err)
+	}
+	if rules.robots.Load() != 1 {
+		t.Errorf("the redirect target was fetched %d times", rules.robots.Load())
+	}
+}
+
+// TestRobotsStopsFollowingEventually, or a site that redirects its robots.txt
+// in a circle would be a way to hang a crawler.
+func TestRobotsStopsFollowingEventually(t *testing.T) {
+	var asked atomic.Int32
+
+	loop := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "robots") {
+			asked.Add(1)
+			http.Redirect(w, r, "/robots.txt", http.StatusFound)
+			return
+		}
+		fmt.Fprint(w, "page")
+	}))
+	defer loop.Close()
+
+	s := stage(t, job(t, ""))
+
+	_, err := s.Handle(context.Background(), &downloader.Request{URL: loop.URL + "/page"})
+	if !errors.Is(err, downloader.ErrNoRobots) {
+		t.Errorf("err = %v, want the host refused", err)
+	}
+	if got := asked.Load(); got > 10 {
+		t.Errorf("robots.txt was fetched %d times before giving up", got)
+	}
+}

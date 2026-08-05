@@ -264,6 +264,7 @@ edit-run cycle is against bytes on disk, not against somebody's server.
 
 | Flag | Effect |
 | --- | --- |
+| `--job <name>` | Which job, if the document holds several |
 | `--url <url>` | The page, if not given positionally. Defaults to the job's first start URL |
 | `--refresh` | Fetch even if it is cached, and replace what is there |
 | `--item <name>` | Only this shape |

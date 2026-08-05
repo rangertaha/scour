@@ -126,6 +126,14 @@ func (g *guard) rules(ctx context.Context, origin string) (*robots.Rules, error)
 	return pending.rules, pending.err
 }
 
+// robotsRedirects is how many hops a robots.txt fetch follows.
+//
+// RFC 9309 §2.3.1.2 asks for at least five. It has to follow at all: a site
+// that moved, or that serves http and redirects to https, or that keeps one
+// robots.txt for several hostnames, is entirely ordinary, and treating the
+// redirect as an unreadable file would refuse the whole host.
+const robotsRedirects = 5
+
 // load fetches and reads one robots.txt.
 //
 // What each answer means is RFC 9309 §2.3.1: a 2xx is the rules, a 4xx is a
@@ -135,19 +143,31 @@ func (g *guard) load(ctx context.Context, origin string) (*robots.Rules, error) 
 	// Not the caller's context: this fetch is shared by every request to the
 	// host, and one requester giving up must not answer for the rest. The
 	// fetcher's own timeout still bounds it.
-	resp, err := g.fetch.Handle(context.WithoutCancel(ctx), &Request{URL: origin + "/robots.txt"})
-	if err != nil {
-		return nil, err
-	}
+	ctx = context.WithoutCancel(ctx)
 
-	switch {
-	case resp.OK():
-		return robots.Parse(resp.Body), nil
-	case resp.Status >= 400 && resp.Status < 500:
-		// Nothing to obey, which is the overwhelmingly common case: most
-		// sites have no robots.txt at all.
-		return &robots.Rules{}, nil
-	default:
-		return nil, fmt.Errorf("%s/robots.txt: status %d", origin, resp.Status)
+	target := origin + "/robots.txt"
+	for hop := 0; ; hop++ {
+		resp, err := g.fetch.Handle(ctx, &Request{URL: target})
+		if err != nil {
+			return nil, err
+		}
+
+		switch {
+		case resp.OK():
+			return robots.Parse(resp.Body), nil
+
+		case resp.Status >= 400 && resp.Status < 500:
+			// Nothing to obey, which is the overwhelmingly common case: most
+			// sites have no robots.txt at all.
+			return &robots.Rules{}, nil
+		}
+
+		// Followed here rather than by the client, which is told not to, and
+		// not by the redirect follower, which wraps this and would be a loop.
+		next, ok := redirected(resp)
+		if !ok || hop >= robotsRedirects {
+			return nil, fmt.Errorf("%s: status %d", target, resp.Status)
+		}
+		target = next.String()
 	}
 }
