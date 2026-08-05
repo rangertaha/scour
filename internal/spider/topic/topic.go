@@ -32,6 +32,7 @@ import (
 
 	"github.com/rangertaha/scour/internal/chain"
 	"github.com/rangertaha/scour/internal/classify"
+	"github.com/rangertaha/scour/internal/classify/source"
 	"github.com/rangertaha/scour/internal/classify/store"
 	"github.com/rangertaha/scour/internal/downloader"
 	"github.com/rangertaha/scour/internal/plugin"
@@ -62,8 +63,12 @@ type Config struct {
 	// before trusting it wants.
 	Least float64 `hcl:"least,optional"`
 
-	// Dir is where the trained classifiers are.
+	// Dir is where the trained classifiers are, when they are on this machine.
 	Dir string `hcl:"dir,optional"`
+
+	// URL is the bus to fetch the classifier from instead, as
+	// nats://host:port. See [source.Open].
+	URL string `hcl:"url,optional"`
 
 	// Record puts the score on every item as a property. On by default: a
 	// record that says what it scored can be filtered later by somebody who
@@ -91,18 +96,10 @@ func New(ctx context.Context, cfg plugin.Config) (spider.Wrapper, error) {
 		return nil, fmt.Errorf("topic: least = %v, and a score is between 0 and 1", c.Least)
 	}
 
-	dir := c.Dir
-	if dir == "" {
-		dir = DefaultDir
-	}
-	classifiers, err := store.Open(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	// Loaded when the chain is built, so a job naming a classifier nobody has
-	// trained is refused at the start of a run rather than on the first page.
-	scorer, err := classifiers.Get(ctx, ref)
+	// Loaded once, here, from wherever the job said the classifier lives. What
+	// comes back either way is a scorer this machine runs, so the rest of the
+	// chain cannot tell which it got.
+	scorer, err := source.Open(ctx, cfg, c.URL, c.Dir, ref)
 	if err != nil {
 		return nil, err
 	}

@@ -43,7 +43,7 @@ import (
 
 	"github.com/rangertaha/scour/internal/chain"
 	"github.com/rangertaha/scour/internal/classify"
-	"github.com/rangertaha/scour/internal/classify/store"
+	"github.com/rangertaha/scour/internal/classify/source"
 	"github.com/rangertaha/scour/internal/plugin"
 	"github.com/rangertaha/scour/internal/scheduler"
 )
@@ -77,8 +77,22 @@ type Config struct {
 	// which is a coherent thing to want while measuring a classifier.
 	Weight *float64 `hcl:"weight,optional"`
 
-	// Dir is where the trained classifiers are.
+	// Dir is where the trained classifiers are, when they are on this machine.
 	Dir string `hcl:"dir,optional"`
+
+	// URL is the bus to fetch the classifier from instead, as
+	// nats://host:port.
+	//
+	// A node that has joined a cluster has no trained classifiers on its disk,
+	// and copying model files to every node by hand is what a cluster is
+	// supposed to remove. Jobs already live in KV rather than being copied
+	// around for the same reason.
+	//
+	// The model is fetched once, when the chain is built, and every score after
+	// that is local. A request per page would put the network in the hottest
+	// loop in the crawl, which is the same reason a fetched body never crosses
+	// the bus and a cache key goes instead.
+	URL string `hcl:"url,optional"`
 }
 
 // New builds the middleware. It is [scheduler.Middleware].
@@ -104,18 +118,10 @@ func New(ctx context.Context, cfg plugin.Config) (scheduler.Wrapper, error) {
 		return nil, fmt.Errorf("topic: weight = %v, and a subject cannot count against itself", weight)
 	}
 
-	dir := c.Dir
-	if dir == "" {
-		dir = store.DefaultDir
-	}
-	classifiers, err := store.Open(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	// Loaded when the chain is built, so a job naming a classifier nobody has
-	// trained is refused at the start of a run rather than on the first URL.
-	scorer, err := classifiers.Get(ctx, ref)
+	// Loaded once, here, from wherever the job said the classifier lives. What
+	// comes back either way is a scorer this machine runs, so the rest of the
+	// chain cannot tell which it got.
+	scorer, err := source.Open(ctx, cfg, c.URL, c.Dir, ref)
 	if err != nil {
 		return nil, err
 	}

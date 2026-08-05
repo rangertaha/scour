@@ -212,9 +212,8 @@ func (c *Conn) ServeEntities(store Graph) (*Service, error) {
 			return store.Retract(ctx, a.Job)
 		})
 
-	if s.err != nil {
-		s.Close()
-		return nil, s.err
+	if err := s.ready(c); err != nil {
+		return nil, err
 	}
 	return s, nil
 }

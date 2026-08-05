@@ -678,6 +678,17 @@ listening on nats://127.0.0.1:41923
 ready. Interrupt to stop
 ```
 
+**A node fetches topics from here.** A job's `topic` middleware takes a `url`
+instead of a `dir`, and a node that has joined a cluster has no trained topics
+on its disk:
+
+```hcl
+plugin "topic" {
+  subject = "climate@7"
+  url     = "nats://127.0.0.1:4222"
+}
+```
+
 **A topic travels; a page does not.** A client fetches a trained topic once,
 when the chain is built, and scores locally from then on. The scheduler scores
 every URL it is offered and the spider every page it reads, so a request per

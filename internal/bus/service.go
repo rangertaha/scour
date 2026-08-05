@@ -142,6 +142,30 @@ func serving[Req, Res any](c *Conn, s *Service, subject, queue string, handle fu
 	s.subs = append(s.subs, sub)
 }
 
+// ready reports the service usable, once every subscription above is live on
+// the server.
+//
+// Subscribing is asynchronous: the call returns as soon as the client has
+// queued it, and until the server has processed it a request on that subject
+// finds nothing serving. A service that returned before flushing therefore
+// worked whenever the caller was slow and failed whenever it was not, which is
+// the shape that reads as an unreliable network rather than as a missing flush.
+// It surfaced as a test asking a topic service for a model microseconds after
+// starting it, under load.
+//
+// Called by every ServeX before it returns, so no service can be handed back
+// half-registered.
+func (s *Service) ready(c *Conn) error {
+	if s.err != nil {
+		return s.err
+	}
+	if err := c.Flush(); err != nil {
+		s.Close()
+		return fmt.Errorf("bus: %w", err)
+	}
+	return nil
+}
+
 // Close unsubscribes everything, reporting the first failure and still trying
 // the rest: a subscription left behind would keep taking work the store can no
 // longer do.

@@ -77,9 +77,8 @@ func (c *Conn) ServeEvents(store Log) (*Service, error) {
 			return store.Names(ctx)
 		})
 
-	if s.err != nil {
-		s.Close()
-		return nil, s.err
+	if err := s.ready(c); err != nil {
+		return nil, err
 	}
 	return s, nil
 }

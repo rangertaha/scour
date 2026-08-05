@@ -109,9 +109,8 @@ func (c *Conn) ServeTopics(topics Topics) (*Service, error) {
 			return none{}, topics.Delete(a.Ref)
 		})
 
-	if s.err != nil {
-		s.Close()
-		return nil, s.err
+	if err := s.ready(c); err != nil {
+		return nil, err
 	}
 	return s, nil
 }
