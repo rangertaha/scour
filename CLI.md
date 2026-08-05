@@ -508,13 +508,57 @@ scour records <job> --item article   One shape
 scour records <job> --follow         As they arrive
 ```
 
+### Running a node
+
+```
+scour serve                 Serve stages for whatever jobs the cluster has
+```
+
+#### `scour serve`
+
+A node joins a cluster, watches the jobs and serves the stages it offers for
+every job that appears. Nothing elects anything and nothing assigns anything:
+work is distributed by queue group, so adding a machine is a matter of starting
+one.
+
+With no `--join` it starts a broker in this process and prints the address the
+next node should join, which is what makes a single node need nothing installed.
+
+| Flag | Effect |
+| --- | --- |
+| `--join <url>` | A node to join, as `nats://host:port` |
+| `--name <name>` | What to call this node. Defaults to the hostname |
+| `--dir <path>` | Where to keep the cache and the cluster's state |
+| `--stages <list>` | Which stages to serve: `download`, `read`, or both |
+| `--quiet` | Say nothing but failures |
+
+```console
+$ scour serve
+node-a is serving, and is the broker
+join it with: scour serve --join nats://127.0.0.1:41923
+
+$ scour serve --join nats://127.0.0.1:41923 --name node-b
+node-b joined nats://127.0.0.1:41923
+```
+
+**One node per job still drives the crawl.** It owns the frontier, and the
+frontier cannot be shared: two schedulers handing out the same host cannot
+honour a crawl delay between them. Every other node serves stages. That
+asymmetry is the politeness rule rather than a limitation to be lifted.
+
 ### Secrets
 
 ```
+scour secret key            Print a new sealing key, once
 scour secret set <name>     Store one, read from stdin
-scour secret ls             Names, and when they were set
+scour secret ls             The names that have been set
 scour secret rm <name>
 ```
+
+| Flag | Effect |
+| --- | --- |
+| `--join <url>` | The cluster, as `nats://host:port` |
+| `--key-file <path>` | The sealing key, if it is not in `SCOUR_SECRET_KEY` |
 
 A job holds a reference, never a value: `access_key = secret("acme-s3-key")`.
 The document stays safe to commit, diff and paste into an issue, and the value

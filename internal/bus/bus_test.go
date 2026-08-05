@@ -391,3 +391,22 @@ func TestSubjectsAndQueues(t *testing.T) {
 		t.Errorf("queue = %q", got)
 	}
 }
+
+// TestAnAddressToJoinIsOneThatWorks. A server listening on every interface
+// reports 0.0.0.0, which is a thing to listen on and not a thing to connect to.
+// Printing it as the address to join prints an address that does not work.
+func TestAnAddressToJoinIsOneThatWorks(t *testing.T) {
+	conn := connect(t)
+
+	address := conn.Address()
+	if strings.Contains(address, "0.0.0.0") || strings.Contains(address, "[::]") {
+		t.Fatalf("address = %q, which nothing can connect to", address)
+	}
+
+	// And it does connect.
+	joined, err := bus.Connect(bus.Options{URL: address, Name: "joiner"})
+	if err != nil {
+		t.Fatalf("the printed address does not work: %v", err)
+	}
+	joined.Close()
+}

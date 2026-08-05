@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats-server/v2/server"
@@ -178,11 +179,24 @@ func Connect(opts Options) (*Conn, error) {
 
 // Address is where this connection points, which is what a node tells another
 // node to join.
+//
+// A server listening on every interface reports 0.0.0.0, which is a thing to
+// listen on and not a thing to connect to. Printing it as an address to join
+// would be printing an address that does not work, so it comes back as the
+// loopback: right on one machine, and honestly wrong on several, where an
+// operator has to say which interface anyway.
 func (c *Conn) Address() string {
-	if c.embedded != nil {
-		return c.embedded.ClientURL()
+	if c.embedded == nil {
+		return c.Conn.ConnectedUrl()
 	}
-	return c.Conn.ConnectedUrl()
+
+	address := c.embedded.ClientURL()
+	for _, listening := range []string{"//0.0.0.0:", "//[::]:"} {
+		if strings.Contains(address, listening) {
+			return strings.Replace(address, listening, "//127.0.0.1:", 1)
+		}
+	}
+	return address
 }
 
 // Embedded reports whether this process is also the server.
