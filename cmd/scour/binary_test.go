@@ -34,8 +34,25 @@ import (
 //
 // The binary is built once for the package and removed afterwards, so the cost
 // is one build rather than one per test.
+//
+// # Counting what these cover
+//
+// A child process is invisible to the test binary's coverage instrumentation,
+// so `go tool cover` reports 0% for everything only these tests reach: main,
+// runTrain, and the corpus reader under it all read as untouched. That number
+// is worse than no number, because somebody trimming dead code by coverage
+// would delete tested code.
+//
+// So the binary is built with -cover and each run writes into a shared
+// directory. Set SCOUR_COVERDIR to keep it, then:
+//
+//	SCOUR_COVERDIR=/tmp/e2e go test ./cmd/scour/
+//	go tool covdata percent -i=/tmp/e2e
 
-var binary string
+var (
+	binary   string
+	coverDir string
+)
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "scour-binary-test")
@@ -44,8 +61,19 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// Kept when the environment asks, so the counts can be read afterwards.
+	coverDir = os.Getenv("SCOUR_COVERDIR")
+	if coverDir == "" {
+		coverDir = filepath.Join(dir, "cover")
+	}
+	if err := os.MkdirAll(coverDir, 0o750); err != nil {
+		fmt.Fprintf(os.Stderr, "binary test: %v\n", err)
+		os.Exit(1)
+	}
+
 	binary = filepath.Join(dir, "scour")
-	build := exec.Command("go", "build", "-o", binary, ".")
+	build := exec.Command("go", "build",
+		"-cover", "-coverpkg=github.com/rangertaha/scour/...", "-o", binary, ".")
 	if out, err := build.CombinedOutput(); err != nil {
 		// A failure here is a real failure and not a reason to skip: a build
 		// that does not build is the first thing a test suite owes anybody.
@@ -72,6 +100,7 @@ func scour(t *testing.T, dir string, args ...string) outcome {
 
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOCOVERDIR="+coverDir)
 
 	var out, errs strings.Builder
 	cmd.Stdout = &out
@@ -250,6 +279,7 @@ job "news" {
 
 	cmd := exec.Command(binary, "run", path)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOCOVERDIR="+coverDir)
 
 	var out, errs strings.Builder
 	cmd.Stdout = &out
