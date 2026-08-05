@@ -444,6 +444,10 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 					if inFlight.Load() == 0 {
 						waiting, err := r.sched.Waiting(ctx)
 						if err != nil {
+							if ctx.Err() != nil {
+								ending.Store(Stopped)
+								return
+							}
 							problems <- err
 							return
 						}
@@ -466,6 +470,16 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 					continue
 
 				case err != nil:
+					// An interrupt that lands while the frontier is being
+					// asked comes back as a context error from the query, and
+					// that is the interrupt rather than a failure. Reported as
+					// one, the run exited non-zero and printed no summary at
+					// all: whether ctrl-c was a clean stop or a broken store
+					// depended on which microsecond it arrived in.
+					if ctx.Err() != nil {
+						ending.Store(Stopped)
+						return
+					}
 					problems <- err
 					return
 				}
@@ -511,7 +525,14 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 	// A crawl that could not queue what it discovered has not finished the
 	// site, whatever the frontier's emptiness suggests. Reporting success
 	// here would exit zero on a run that threw its work away.
-	if lost := r.stats.Lost.Load(); lost > 0 {
+	//
+	// Unless it was interrupted, in which case the links it could not queue
+	// were the ones in flight when the person pressed the key, and they are
+	// rediscovered by the resume that being interrupted is supposed to leave
+	// possible. Treating them as a failure made ctrl-c exit non-zero and print
+	// no summary, depending on whether a page happened to be mid-read: whether
+	// a clean stop looked clean came down to timing.
+	if lost := r.stats.Lost.Load(); lost > 0 && ending.Load().(Ending) != Stopped {
 		return ending.Load().(Ending), fmt.Errorf(
 			"run: job %q: %d discovered urls could not be queued", r.job.Name, lost)
 	}
