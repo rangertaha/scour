@@ -37,7 +37,7 @@
 
       <figure>
         <div class="well">
-          <svg viewBox="0 0 900 340" role="img" aria-label="Two tables. The urls table is per job and holds queued URLs with a score, a depth and a lease. The hosts table is shared across jobs and holds the earliest time each host may next be touched. A lease joins them, taking the highest-scoring queued URL whose host is not cooling.">
+          <svg viewBox="0 0 900 340" role="img" aria-label="Two tables. The urls table is per job and holds waiting URLs with a score, a depth and the time each becomes ready again. The hosts table is shared across jobs and holds the earliest time each host may next be touched. A lease joins them, taking the highest-scoring ready URL whose host is not cooling.">
             <defs>
               <marker id="f1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                 <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
@@ -51,11 +51,11 @@
             <text class="dl" x="40" y="70">urls</text>
             <text class="dl-sm" x="96" y="70">one row per URL, per job</text>
             <line class="ln" x1="40" y1="82" x2="368" y2="82"/>
-            <text class="dl-sm" x="40" y="102">hash   job   host   score   depth   status</text>
-            <text class="dl-sm" x="40" y="124">a1f3   news  a.com   0.91     1     queued</text>
-            <text class="dl-sm" x="40" y="142">b7c2   news  a.com   0.44     2     queued</text>
-            <text class="dl-sm" x="40" y="160">c091   news  b.com   0.88     1     leased</text>
-            <text class="dl-sm" x="40" y="192">keyed by a hash of the normalised URL, so rediscovery is an upsert</text>
+            <text class="dl-sm" x="40" y="102">hash  host    score  depth  status    ready_at</text>
+            <text class="dl-sm" x="40" y="124">a1f3  a.com    0.91     1   waiting          0</text>
+            <text class="dl-sm" x="40" y="142">b7c2  a.com    0.44     2   waiting          0</text>
+            <text class="dl-sm" x="40" y="160">c091  b.com    0.88     1   waiting  12:05:12</text>
+            <text class="dl-sm" x="40" y="192">a lease is a waiting row that is not ready yet, which is what keeps the index usable</text>
 
             <rect class="box-key" x="520" y="46" width="356" height="164"/>
             <text class="dl-key" x="536" y="70">hosts</text>
@@ -95,20 +95,61 @@
       entry whose host is not cooling, lease it with a timeout, and survive a
       restart with all of that intact.</p>
 
-      <pre><code>BEGIN
-SELECT u.* FROM urls u JOIN hosts h ON h.host = u.host
- WHERE u.job = ? AND u.status = 'queued'
-   AND (u.leased_until IS NULL OR u.leased_until &lt; now)
-   AND h.next_at &lt;= now
- ORDER BY u.score DESC
- LIMIT 1 FOR UPDATE</code></pre>
+      <pre><code>BEGIN IMMEDIATE
+SELECT u.hash, u.url, u.host, u.depth, u.score, u.parent, u.discovered
+  FROM urls u LEFT JOIN hosts h ON h.host = u.host
+ WHERE u.job = ? AND u.status = 'waiting'
+   AND u.ready_at &lt;= ?
+   AND (h.next_at IS NULL OR h.next_at &lt;= ?)
+ ORDER BY u.score DESC, u.discovered ASC, u.rowid ASC
+ LIMIT 1</code></pre>
 
-      <p>Hand-written SQL, no ORM. There are perhaps a dozen queries and every
-      one is shaped by an index; an ORM would hide the thing most worth looking
-      at. The <code>FOR UPDATE</code> is deliberate: SQLite ignores it because it
-      serialises writers anyway, and Postgres needs it. The day multi-writer is
-      genuinely required it is the same SQL against a different dialect rather
-      than a rewrite.</p>
+      <p>Hand-written SQL, no ORM. There are half a dozen queries and every one
+      is shaped by an index; an ORM would hide the thing most worth looking
+      at.</p>
+
+      <p>Selecting and claiming have to be one act, or two schedulers that both
+      chose before either claimed would fetch the same page twice. SQLite has no
+      <code>SELECT ... FOR UPDATE</code>; it rejects the syntax. What it has is
+      <code>BEGIN IMMEDIATE</code>, which takes the write lock when the
+      transaction opens rather than when it first writes. A port to Postgres
+      adds <code>FOR UPDATE SKIP LOCKED</code> there, because its readers are
+      concurrent and the row has to be locked rather than the database.</p>
+
+      <h2>The shape of the index is the whole performance story</h2>
+
+      <p>There is no <code>leased</code> status. A leased row is a waiting row
+      that is not ready yet, and it says so with <code>ready_at</code>. The
+      obvious schema, a second status, makes the lease ask for one status
+      <em>or</em> another, and an OR over the leading column of an index is an
+      index the query cannot use.</p>
+
+      <p>Each index is <code>(job, status)</code> equality and then the ordering
+      columns, and nothing else. Whether a row is ready and whether its host is
+      cooling are residuals, checked per row while SQLite walks the index in
+      policy order and stops at the first row that passes, which is nearly
+      always the first row it looks at. Putting <code>ready_at</code> into the
+      index ahead of the ordering columns would turn the walk back into a
+      sort.</p>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>Lease</th><th>1,000 URLs</th><th>100,000 URLs</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Memory, the floor</td><td class="num">43 µs</td><td class="num">4.7 ms</td></tr>
+            <tr><td>SQLite, sorting</td><td class="num">965 µs</td><td class="num">47.9 ms</td></tr>
+            <tr><td>SQLite, walking an index</td><td class="num">357 µs</td><td class="num">369 µs</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Flat is the property that matters. A crawl leases once per page, so
+      this query is the ceiling on how fast anything can go, which is why the
+      query plan is asserted in a test rather than left to a benchmark somebody
+      remembers to read. <code>random</code> is exempt and always sorts: a
+      shuffle of everything waiting is not something an index can express.</p>
 
       <h2>Politeness settles the layout</h2>
 
@@ -158,12 +199,12 @@ SELECT u.* FROM urls u JOIN hosts h ON h.host = u.host
       <code>robots</code> being outside the downloader's chain, one layer up.</p>
 
       <div class="note">
-        <span class="tag">A number worth keeping</span>
+        <span class="tag">Two implementations, one contract</span>
         <p>An in-memory frontier exists as the reference implementation and the
-        thing a contract suite is written against. Its lease is O(n): 45
-        microseconds at a thousand URLs, 4.3 milliseconds at a hundred thousand.
-        That is the bar the SQLite one has to beat, and it is why the lease
-        query above is the first thing to get right.</p>
+        thing the contract suite was written against. Both run the same suite
+        and the same benchmarks, which is what stops the contract from being a
+        description of whichever store happened to be written first, and what
+        made the comparison above possible at all.</p>
       </div>
     </section>
 

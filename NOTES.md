@@ -1099,11 +1099,39 @@ cross-compiles and installs with nothing.
 shaped by an index. An ORM would hide the thing most worth looking at, and the
 lease is a transaction with an ordering in it rather than a row fetched by id.
 
-The escape hatch is deliberate: the lease is written as `SELECT ... FOR UPDATE`,
-which SQLite ignores because it serialises writers anyway and Postgres needs.
-The day multi-writer is genuinely required, it is the same SQL against a
-different dialect rather than a rewrite. The old implementation had this shape
-and it held at 150,000 rows.
+**Correction, from building it.** The note here used to say the lease was
+written as `SELECT ... FOR UPDATE`, which SQLite ignores and Postgres needs.
+SQLite does not ignore it: it rejects the syntax outright. What it has instead
+is `BEGIN IMMEDIATE`, taking the write lock when the transaction opens rather
+than when it first writes, which is what the implementation uses. A port to
+Postgres adds `FOR UPDATE SKIP LOCKED` at that point, because there the readers
+are concurrent and the row has to be locked rather than the database. Still a
+line rather than a rewrite, but worth knowing which line.
+
+**There is no `leased` status,** and that is a performance decision rather than
+a modelling one. A leased row is a waiting row that is not ready yet, which it
+says with `ready_at`. The obvious schema, a second status, makes the lease ask
+for one status OR another, and an OR over the leading column of an index is an
+index the query cannot use. Measured: that shape scanned the whole frontier on
+every lease, 47 ms at a hundred thousand URLs against the memory
+implementation's 4.6.
+
+The working shape is `(job, status)` equality and then the ordering columns, and
+nothing else. Whether a row is ready, and whether its host is cooling, are
+residuals checked per row as SQLite walks the index in policy order and stops at
+the first row that passes, which is nearly always the first row it looks at.
+
+| Lease | 1,000 URLs | 100,000 URLs |
+| --- | --- | --- |
+| Memory, the floor | 43 µs | 4.7 ms |
+| SQLite, sorting | 965 µs | 47.9 ms |
+| SQLite, walking an index | 357 µs | 369 µs |
+
+Flat, which is the property that matters: a crawl leases once per page, so this
+query is the ceiling on how fast anything can go. `EXPLAIN QUERY PLAN` is
+asserted in a test rather than left to a benchmark somebody remembers to read.
+`random` is exempt and always sorts, because sampling without regard to score is
+a shuffle of everything waiting and no index can express one.
 
 What is given up, and it is worth being honest: ad-hoc analytics over records
 are not this store's job, and cross-machine writes to one job's frontier are not
@@ -1405,7 +1433,7 @@ four stages is the genuinely new distributed-systems problem here.
 | Exporters, all formats | Not started |
 | Cluster join, distributed jobs | Not started |
 | Jobs in a KV bucket, server-side writes | Decided, not started |
-| Frontier in SQLite, one shared database | Decided, reconsidered, kept |
+| Frontier in SQLite, one shared database | Built, tested, benchmarked |
 | Records in SQLite, one database per job | Decided. The piece most likely to move |
 | Run state and nodes in KV buckets of their own | Decided, not started |
 
