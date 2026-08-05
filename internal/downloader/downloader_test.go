@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/rangertaha/scour/internal/registry/registrytest"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -434,8 +435,8 @@ func TestATextlessResponseDecodesToNothing(t *testing.T) {
 func TestTheChainWrapsTheFetch(t *testing.T) {
 	var log []string
 
-	downloader.Register("test-outer", noting("test-outer", &log))
-	downloader.Register("test-inner", noting("test-inner", &log))
+	register(t, "test-outer", noting("test-outer", &log))
+	register(t, "test-inner", noting("test-inner", &log))
 
 	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		log = append(log, "fetch")
@@ -469,7 +470,7 @@ func TestTheChainWrapsTheFetch(t *testing.T) {
 func TestAMiddlewareMayAnswerWithoutFetching(t *testing.T) {
 	var fetched atomic.Int32
 
-	downloader.Register("test-answer", func(_ context.Context, cfg plugin.Config) (downloader.Wrapper, error) {
+	register(t, "test-answer", func(_ context.Context, cfg plugin.Config) (downloader.Wrapper, error) {
 		return func(next downloader.Handler) downloader.Handler {
 			return downloader.HandlerFunc(func(ctx context.Context, req *downloader.Request) (*downloader.Response, error) {
 				return &downloader.Response{Request: req, Status: 200, Body: []byte("from the plugin")}, nil
@@ -500,7 +501,7 @@ func TestAMiddlewareMayAnswerWithoutFetching(t *testing.T) {
 // TestAMiddlewareMayDrop, and a drop is not a failure: a crawl that obeys
 // robots.txt does it all day.
 func TestAMiddlewareMayDrop(t *testing.T) {
-	downloader.Register("test-drop", func(_ context.Context, cfg plugin.Config) (downloader.Wrapper, error) {
+	register(t, "test-drop", func(_ context.Context, cfg plugin.Config) (downloader.Wrapper, error) {
 		return func(next downloader.Handler) downloader.Handler {
 			return downloader.HandlerFunc(func(ctx context.Context, req *downloader.Request) (*downloader.Response, error) {
 				return nil, fmt.Errorf("test-drop: %s: %w", req.URL, chain.ErrDrop)
@@ -527,7 +528,7 @@ func TestAMiddlewareMayDrop(t *testing.T) {
 func TestTheStageSaysWhichJobARequestBelongsTo(t *testing.T) {
 	var seen atomic.Value
 
-	downloader.Register("test-job", func(_ context.Context, cfg plugin.Config) (downloader.Wrapper, error) {
+	register(t, "test-job", func(_ context.Context, cfg plugin.Config) (downloader.Wrapper, error) {
 		return func(next downloader.Handler) downloader.Handler {
 			return downloader.HandlerFunc(func(ctx context.Context, req *downloader.Request) (*downloader.Response, error) {
 				seen.Store(req.Job)
@@ -566,7 +567,7 @@ func TestTheStageSaysWhichJobARequestBelongsTo(t *testing.T) {
 func TestTheStageClosesWhatItsPluginsOpened(t *testing.T) {
 	var closed atomic.Int32
 
-	downloader.Register("test-closer", func(_ context.Context, cfg plugin.Config) (downloader.Wrapper, error) {
+	register(t, "test-closer", func(_ context.Context, cfg plugin.Config) (downloader.Wrapper, error) {
 		cfg.Defer(func() error {
 			closed.Add(1)
 			return nil
@@ -674,10 +675,26 @@ func TestACloneIsACopy(t *testing.T) {
 	}
 }
 
+// TestRegisteredListsWhatThisBuildHas.
+//
+// It asserts a name it registered itself. It used to assert "test-drop", which
+// is another test's name, and it passed only because that test leaked its
+// registration into the global table: a test whose result depended on a second
+// test having run first, and on that test having failed to clean up. Both
+// stopped being true at once when the registrations were scoped, which is how
+// this was found.
 func TestRegisteredListsWhatThisBuildHas(t *testing.T) {
+	if names := strings.Join(downloader.Registered(), " "); strings.Contains(names, "test-listed") {
+		t.Fatalf("the name was already there before this test registered it: %q", names)
+	}
+
+	register(t, "test-listed", func(context.Context, plugin.Config) (downloader.Wrapper, error) {
+		return func(next downloader.Handler) downloader.Handler { return next }, nil
+	})
+
 	names := strings.Join(downloader.Registered(), " ")
-	if !strings.Contains(names, "test-drop") {
-		t.Errorf("Registered() = %q", names)
+	if !strings.Contains(names, "test-listed") {
+		t.Errorf("Registered() = %q, and does not list what was just registered", names)
 	}
 }
 
@@ -693,3 +710,24 @@ func noting(name string, log *[]string) downloader.Middleware {
 		}, nil
 	}
 }
+
+// register puts a middleware in the global table for the length of one test.
+//
+// Every test that needs a middleware of its own goes through this rather than
+// calling [downloader.Register] directly, because the table is global and
+// registering the same name twice panics: a test that registered without
+// removing made this whole package impossible to run under `go test -count=2`
+// or, once shuffling reordered it, under `-shuffle=on` either. Running the
+// suite repeatedly is how a flaky test is found, so a package that cannot be is
+// a package whose flakiness nobody will see. The gate runs -count=2 for that
+// reason, which is what makes the next test that forgets fail the build rather
+// than ship.
+func register(t *testing.T, name string, m downloader.Middleware) {
+	t.Helper()
+	downloader.Register(name, m)
+	t.Cleanup(func() { downloader.Unregister(name) })
+}
+
+// TestMain fails the package if a test left a name in the global table. See
+// [registrytest].
+func TestMain(m *testing.M) { registrytest.Main(m, downloader.Registered) }

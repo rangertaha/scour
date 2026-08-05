@@ -242,6 +242,10 @@ var reg = registry.New[Config, Store]("cache backend").Default(DefaultBackend)
 // that never wanted S3 from carrying its SDK.
 func Register(name string, f Factory) { reg.Register(name, f) }
 
+// Unregister removes a backend, and exists for tests. See
+// [registry.Registry.Unregister].
+func Unregister(name string) { reg.Unregister(name) }
+
 // New builds the backend named by the config. An empty backend means
 // [DefaultBackend].
 func New(ctx context.Context, cfg Config) (Store, error) {

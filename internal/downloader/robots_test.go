@@ -279,7 +279,7 @@ Disallow: /private
 func TestRobotsIsCheckedOutsideEverything(t *testing.T) {
 	var reached atomic.Int32
 
-	downloader.Register("test-inside-robots", func(_ context.Context, cfg plugin.Config) (downloader.Wrapper, error) {
+	register(t, "test-inside-robots", func(_ context.Context, cfg plugin.Config) (downloader.Wrapper, error) {
 		return func(next downloader.Handler) downloader.Handler {
 			return downloader.HandlerFunc(func(ctx context.Context, req *downloader.Request) (*downloader.Response, error) {
 				reached.Add(1)

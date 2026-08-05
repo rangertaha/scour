@@ -92,6 +92,10 @@ var reg = registry.New[Config, Step]("pipeline step")
 // Register adds a kind.
 func Register(kind string, f Factory) { reg.Register(kind, f) }
 
+// Unregister removes a step kind, and exists for tests. See
+// [registry.Registry.Unregister].
+func Unregister(kind string) { reg.Unregister(kind) }
+
 // Registered lists what this build has, sorted.
 func Registered() []string { return reg.Names() }
 

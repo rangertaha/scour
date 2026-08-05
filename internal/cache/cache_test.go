@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/rangertaha/scour/internal/registry/registrytest"
 	"io"
 	"iter"
 	"strings"
@@ -152,7 +153,7 @@ func TestRegisterAndNew(t *testing.T) {
 	const name = "test-backend-registered"
 
 	built := false
-	cache.Register(name, func(context.Context, cache.Config) (cache.Store, error) {
+	register(t, name, func(context.Context, cache.Config) (cache.Store, error) {
 		built = true
 		return &stub{}, nil
 	})
@@ -257,3 +258,23 @@ func TestAConfigKnowsWhetherItCarriesACredential(t *testing.T) {
 		}
 	}
 }
+
+// register puts a cache backend in the global table for the length of one test.
+//
+// Every test that needs one of its own goes through this rather than calling
+// [cache.Register] directly, because the table is global and registering the
+// same name twice panics: a test that registered without removing made this
+// whole package impossible to run under `go test -count=2` or, once shuffling
+// reordered it, under `-shuffle=on` either. Running the suite repeatedly is how
+// a flaky test is found, so a package that cannot be is a package whose
+// flakiness nobody will see. The gate runs -count=2 for that reason, which is
+// what makes the next test that forgets fail the build rather than ship.
+func register(t *testing.T, name string, f cache.Factory) {
+	t.Helper()
+	cache.Register(name, f)
+	t.Cleanup(func() { cache.Unregister(name) })
+}
+
+// TestMain fails the package if a test left a name in the global table. See
+// [registrytest].
+func TestMain(m *testing.M) { registrytest.Main(m, cache.Backends) }

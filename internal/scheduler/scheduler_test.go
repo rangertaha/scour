@@ -5,6 +5,7 @@ package scheduler_test
 import (
 	"context"
 	"errors"
+	"github.com/rangertaha/scour/internal/registry/registrytest"
 	"strings"
 	"testing"
 	"time"
@@ -310,7 +311,7 @@ func TestTheDupefilterIsInTheChain(t *testing.T) {
 // TestAPluginMayScoreOnTheWayIn, which is how a focused crawl becomes focused:
 // the ordering is only as good as what put the numbers there.
 func TestAPluginMayScoreOnTheWayIn(t *testing.T) {
-	scheduler.Register("test-scorer", func(_ context.Context, cfg plugin.Config) (scheduler.Wrapper, error) {
+	register(t, "test-scorer", func(_ context.Context, cfg plugin.Config) (scheduler.Wrapper, error) {
 		return func(next scheduler.Handler) scheduler.Handler {
 			return scheduler.HandlerFunc(func(ctx context.Context, req *scheduler.Request) (*scheduler.Request, error) {
 				if strings.Contains(req.URL, "/news/") {
@@ -343,7 +344,7 @@ func TestAPluginMayScoreOnTheWayIn(t *testing.T) {
 
 // TestAPluginMayDrop, and the drop is not counted as queued.
 func TestAPluginMayDrop(t *testing.T) {
-	scheduler.Register("test-refuse", func(_ context.Context, cfg plugin.Config) (scheduler.Wrapper, error) {
+	register(t, "test-refuse", func(_ context.Context, cfg plugin.Config) (scheduler.Wrapper, error) {
 		return func(next scheduler.Handler) scheduler.Handler {
 			return scheduler.HandlerFunc(func(ctx context.Context, req *scheduler.Request) (*scheduler.Request, error) {
 				if strings.HasSuffix(req.URL, ".pdf") {
@@ -553,3 +554,24 @@ func (b *brokenFrontier) Done(context.Context, string, string, int) error { retu
 func (b *brokenFrontier) Fail(context.Context, string, string, int) error { return b.err }
 func (b *brokenFrontier) Len(context.Context, string) (int, error)        { return 0, b.err }
 func (b *brokenFrontier) Close() error                                    { return b.closeErr }
+
+// register puts a middleware in the global table for the length of one test.
+//
+// Every test that needs a middleware of its own goes through this rather than
+// calling [scheduler.Register] directly, because the table is global and
+// registering the same name twice panics: a test that registered without
+// removing made this whole package impossible to run under `go test -count=2`
+// or, once shuffling reordered it, under `-shuffle=on` either. Running the
+// suite repeatedly is how a flaky test is found, so a package that cannot be is
+// a package whose flakiness nobody will see. The gate runs -count=2 for that
+// reason, which is what makes the next test that forgets fail the build rather
+// than ship.
+func register(t *testing.T, name string, m scheduler.Middleware) {
+	t.Helper()
+	scheduler.Register(name, m)
+	t.Cleanup(func() { scheduler.Unregister(name) })
+}
+
+// TestMain fails the package if a test left a name in the global table. See
+// [registrytest].
+func TestMain(m *testing.M) { registrytest.Main(m, scheduler.Registered) }

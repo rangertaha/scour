@@ -167,6 +167,10 @@ var reg = plugin.NewRegistry[*Request, *Response](engine.StageDownloader)
 // is, which is what keeps a build that never wanted S3 from carrying its SDK.
 func Register(name string, m Middleware) { reg.Register(name, m) }
 
+// Unregister removes a middleware, and exists for tests. See
+// [registry.Registry.Unregister].
+func Unregister(name string) { reg.Unregister(name) }
+
 // Registered lists what this build has, sorted. It is what a job naming
 // something else is told about.
 func Registered() []string { return reg.Names() }

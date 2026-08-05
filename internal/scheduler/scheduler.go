@@ -81,6 +81,10 @@ var reg = plugin.NewRegistry[*Request, *Request](engine.StageScheduler)
 // Register adds a middleware, from an init function in its own package.
 func Register(name string, m Middleware) { reg.Register(name, m) }
 
+// Unregister removes a middleware, and exists for tests. See
+// [registry.Registry.Unregister].
+func Unregister(name string) { reg.Unregister(name) }
+
 // Registered lists what this build has, sorted.
 func Registered() []string { return reg.Names() }
 

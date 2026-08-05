@@ -178,7 +178,7 @@ func TestEveryHopIsCheckedAgainstItsOwnHost(t *testing.T) {
 func TestEveryHopGoesThroughTheChain(t *testing.T) {
 	var seen []string
 
-	downloader.Register("test-hops", func(_ context.Context, cfg plugin.Config) (downloader.Wrapper, error) {
+	register(t, "test-hops", func(_ context.Context, cfg plugin.Config) (downloader.Wrapper, error) {
 		return func(next downloader.Handler) downloader.Handler {
 			return downloader.HandlerFunc(func(ctx context.Context, req *downloader.Request) (*downloader.Response, error) {
 				seen = append(seen, req.URL)

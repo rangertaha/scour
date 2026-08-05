@@ -4,6 +4,7 @@ package spider_test
 
 import (
 	"context"
+	"github.com/rangertaha/scour/internal/registry/registrytest"
 	"net/http"
 	"strings"
 	"testing"
@@ -237,7 +238,7 @@ func TestWithoutThePluginEveryStatusIsRead(t *testing.T) {
 // TestAMiddlewareSeesTheResultOnTheWayBack, which is what makes filtering
 // discovered links possible at all.
 func TestAMiddlewareSeesTheResultOnTheWayBack(t *testing.T) {
-	spider.Register("test-trim", func(_ context.Context, cfg plugin.Config) (spider.Wrapper, error) {
+	register(t, "test-trim", func(_ context.Context, cfg plugin.Config) (spider.Wrapper, error) {
 		return func(next spider.Handler) spider.Handler {
 			return spider.HandlerFunc(func(ctx context.Context, resp *downloader.Response) (*spider.Output, error) {
 				out, err := next.Handle(ctx, resp)
@@ -443,3 +444,23 @@ func TestAnIncompleteItemSaysSo(t *testing.T) {
 		t.Error("an item missing a required property reported itself complete")
 	}
 }
+
+// register puts a spider middleware in the global table for the length of one test.
+//
+// Every test that needs one of its own goes through this rather than calling
+// [spider.Register] directly, because the table is global and registering the
+// same name twice panics: a test that registered without removing made this
+// whole package impossible to run under `go test -count=2` or, once shuffling
+// reordered it, under `-shuffle=on` either. Running the suite repeatedly is how
+// a flaky test is found, so a package that cannot be is a package whose
+// flakiness nobody will see. The gate runs -count=2 for that reason, which is
+// what makes the next test that forgets fail the build rather than ship.
+func register(t *testing.T, name string, f spider.Middleware) {
+	t.Helper()
+	spider.Register(name, f)
+	t.Cleanup(func() { spider.Unregister(name) })
+}
+
+// TestMain fails the package if a test left a name in the global table. See
+// [registrytest].
+func TestMain(m *testing.M) { registrytest.Main(m, spider.Registered) }

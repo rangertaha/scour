@@ -5,6 +5,7 @@ package pipeline_test
 import (
 	"context"
 	"errors"
+	"github.com/rangertaha/scour/internal/registry/registrytest"
 	"slices"
 	"strings"
 	"sync"
@@ -216,8 +217,8 @@ func TestIndependentStepsRunAtTheSameTime(t *testing.T) {
 			return records, nil
 		}), nil
 	}
-	pipeline.Register("test-watch-one", watcher)
-	pipeline.Register("test-watch-two", watcher)
+	register(t, "test-watch-one", watcher)
+	register(t, "test-watch-two", watcher)
 
 	j := job(t, `
   pipeline {
@@ -269,7 +270,7 @@ func TestIndependentStepsRunAtTheSameTime(t *testing.T) {
 // TestAStepWorksOnACopy, so the graph's order is not observable between steps
 // that are supposed to be independent.
 func TestAStepWorksOnACopy(t *testing.T) {
-	pipeline.Register("test-scribble", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+	register(t, "test-scribble", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
 		return pipeline.Func(func(_ context.Context, records []*record.Record) ([]*record.Record, error) {
 			for _, r := range records {
 				r.Values["title"] = "scribbled"
@@ -457,7 +458,7 @@ job "news" {
 // one to silently skip.
 func TestAStepThatFailsStopsTheRun(t *testing.T) {
 	boom := errors.New("the interpreter is not installed")
-	pipeline.Register("test-broken", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+	register(t, "test-broken", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
 		return pipeline.Func(func(context.Context, []*record.Record) ([]*record.Record, error) {
 			return nil, boom
 		}), nil
@@ -576,7 +577,7 @@ func TestAFilterAndATransformInOneWaveBothApply(t *testing.T) {
 // answer is not the scheduler's whim: a crawl that produced different output on
 // alternate runs would be impossible to debug.
 func TestTwoStepsEditingOneRecordResolveTheSameWayEveryRun(t *testing.T) {
-	pipeline.Register("test-shout", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+	register(t, "test-shout", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
 		return pipeline.Func(func(_ context.Context, records []*record.Record) ([]*record.Record, error) {
 			for _, r := range records {
 				if r.Item == "article" {
@@ -586,7 +587,7 @@ func TestTwoStepsEditingOneRecordResolveTheSameWayEveryRun(t *testing.T) {
 			return records, nil
 		}), nil
 	})
-	pipeline.Register("test-whisper", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+	register(t, "test-whisper", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
 		return pipeline.Func(func(_ context.Context, records []*record.Record) ([]*record.Record, error) {
 			for _, r := range records {
 				if r.Item == "article" {
@@ -666,7 +667,7 @@ func TestARedirectDuplicateIsCollapsedRatherThanFatal(t *testing.T) {
 // exporter two rows nobody can tell apart. Refusing beats guessing, which is the
 // lesson of the bug the merge was rewritten for.
 func TestAStepThatInventsADuplicateIsRefusedLoudly(t *testing.T) {
-	pipeline.Register("test-twin", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+	register(t, "test-twin", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
 		return pipeline.Func(func(_ context.Context, records []*record.Record) ([]*record.Record, error) {
 			out := make([]*record.Record, 0, len(records)*2)
 			for _, r := range records {
@@ -762,7 +763,7 @@ func TestRankKeepsItsOrderingWhenItSharesAWave(t *testing.T) {
 // seen it, so it was always dropped: the same step alone in its own wave kept
 // it, and nothing said why.
 func TestARecordAStepAddedSurvivesItsWave(t *testing.T) {
-	pipeline.Register("test-invent", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+	register(t, "test-invent", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
 		return pipeline.Func(func(_ context.Context, records []*record.Record) ([]*record.Record, error) {
 			extra := records[0].Clone()
 			extra.URL = "https://example.com/invented"
@@ -793,3 +794,23 @@ func TestARecordAStepAddedSurvivesItsWave(t *testing.T) {
 		t.Errorf("out[1].URL = %q, want the invented one", out[1].URL)
 	}
 }
+
+// register puts a step kind in the global table for the length of one test.
+//
+// Every test that needs a step of its own goes through this rather than calling
+// [pipeline.Register] directly, because the table is global and registering the
+// same name twice panics: a test that registered without removing made this
+// whole package impossible to run under `go test -count=2` or, once shuffling
+// reordered it, under `-shuffle=on` either. Running the suite repeatedly is how
+// a flaky test is found, so a package that cannot be is a package whose
+// flakiness nobody will see. The gate runs -count=2 for that reason, which is
+// what makes the next test that forgets fail the build rather than ship.
+func register(t *testing.T, kind string, f func(context.Context, pipeline.Config) (pipeline.Step, error)) {
+	t.Helper()
+	pipeline.Register(kind, f)
+	t.Cleanup(func() { pipeline.Unregister(kind) })
+}
+
+// TestMain fails the package if a test left a name in the global table. See
+// [registrytest].
+func TestMain(m *testing.M) { registrytest.Main(m, pipeline.Registered) }

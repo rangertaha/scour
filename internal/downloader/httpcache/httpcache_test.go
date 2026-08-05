@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rangertaha/scour/internal/registry/registrytest"
 	"io"
 	"iter"
 	"log/slog"
@@ -32,9 +33,12 @@ import (
 // TestMain quiets the middleware, which logs what it could not read or write.
 // That is right in a crawl and noise in a test; the two tests that care about
 // it install a logger of their own.
+// It also fails the package if a test left a name in the cache's global table.
+// See [registrytest].
 func TestMain(m *testing.M) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	os.Exit(m.Run())
+	done := registrytest.Watch(cache.Backends)
+	os.Exit(done(m.Run()))
 }
 
 // capture makes the default logger write somewhere this test can read, for as
@@ -716,7 +720,7 @@ func TestABodyThatCannotBeReadIsAMiss(t *testing.T) {
 func TestTheJobsBackendChoiceReachesTheCache(t *testing.T) {
 	var given cache.Config
 
-	cache.Register("test-recorder", func(ctx context.Context, cfg cache.Config) (cache.Store, error) {
+	register(t, "test-recorder", func(ctx context.Context, cfg cache.Config) (cache.Store, error) {
 		given = cfg
 		return memory{}, nil
 	})
@@ -800,7 +804,7 @@ func (m memory) Close() error { return nil }
 func TestACredentialTravelsAsACallAndArrivesAsAValue(t *testing.T) {
 	var given cache.Config
 
-	cache.Register("test-credentials", func(ctx context.Context, cfg cache.Config) (cache.Store, error) {
+	register(t, "test-credentials", func(ctx context.Context, cfg cache.Config) (cache.Store, error) {
 		given = cfg
 		return memory{}, nil
 	})
@@ -908,4 +912,20 @@ func (f fakeSecrets) Resolve(_ context.Context, name string) ([]byte, error) {
 		return nil, fmt.Errorf("no such secret %q", name)
 	}
 	return []byte(value), nil
+}
+
+// register puts a cache backend in the global table for the length of one test.
+//
+// Every test that needs one of its own goes through this rather than calling
+// [cache.Register] directly, because the table is global and registering the
+// same name twice panics: a test that registered without removing made this
+// whole package impossible to run under `go test -count=2` or, once shuffling
+// reordered it, under `-shuffle=on` either. Running the suite repeatedly is how
+// a flaky test is found, so a package that cannot be is a package whose
+// flakiness nobody will see. The gate runs -count=2 for that reason, which is
+// what makes the next test that forgets fail the build rather than ship.
+func register(t *testing.T, name string, f cache.Factory) {
+	t.Helper()
+	cache.Register(name, f)
+	t.Cleanup(func() { cache.Unregister(name) })
 }

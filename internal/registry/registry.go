@@ -109,6 +109,27 @@ func (r *Registry[C, T]) Register(name string, f Factory[C, T]) {
 	r.factories[name] = f
 }
 
+// Unregister removes a name, and exists for tests.
+//
+// A registry a test can only add to is a registry that makes its own package
+// impossible to run twice in one process: `go test -count=2` panics on the
+// second registration, and so does `-shuffle=on` when it reorders a package
+// that registers in more than one test. That matters more than it sounds,
+// because running the suite repeatedly is how a flaky test is found at all, and
+// three packages here could not be run that way.
+//
+// Tests pair it with t.Cleanup through a helper of their own rather than
+// calling it directly, so that no call site has to remember. Nothing in a
+// binary should call this: two implementations answering to one name is a
+// programming mistake, which is why [Registry.Register] panics rather than
+// replacing, and removing one at runtime would be the same mistake arriving
+// later.
+func (r *Registry[C, T]) Unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.factories, name)
+}
+
 // New builds a registered implementation. An empty name means the default.
 func (r *Registry[C, T]) New(ctx context.Context, name string, cfg C) (T, error) {
 	var zero T
