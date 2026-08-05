@@ -82,6 +82,13 @@ type Options struct {
 	// Now is the clock. Nil is time.Now; a test passes its own so that
 	// politeness can be proved without waiting for it.
 	Now func() time.Time
+
+	// Fetch and Read replace the local stages with ones that are somewhere
+	// else. That is the whole of what running on a bus changes here: the loop
+	// is told nothing about where its stages are, which is what makes the two
+	// arrangements comparable.
+	Fetch downloader.Handler
+	Read  spider.Handler
 }
 
 // Run is one job, ready to crawl.
@@ -93,13 +100,19 @@ type Run struct {
 	canon urls.Options
 
 	sched *scheduler.Stage
-	fetch *downloader.Stage
-	read  *spider.Stage
+	fetch downloader.Handler
+	read  spider.Handler
 	graph *pipeline.Pipeline
 	write *exporter.Set
 
-	mu      sync.Mutex
-	records []*record.Record
+	// Only a stage this built is a stage this closes. One that was handed in
+	// belongs to whoever handed it in.
+	closeFetch func() error
+	closeRead  func() error
+
+	mu       sync.Mutex
+	records  []*record.Record
+	exported []*record.Record
 
 	stats Stats
 }
@@ -167,14 +180,26 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Run, error) {
 		return nil, err
 	}
 
-	if r.fetch, err = downloader.New(ctx, job, downloader.Options{Eval: opts.Eval}); err != nil {
-		r.sched.Close()
-		return nil, err
+	if opts.Fetch != nil {
+		r.fetch = opts.Fetch
+	} else {
+		local, err := downloader.New(ctx, job, downloader.Options{Eval: opts.Eval})
+		if err != nil {
+			r.sched.Close()
+			return nil, err
+		}
+		r.fetch, r.closeFetch = local, local.Close
 	}
 
-	if r.read, err = spider.New(ctx, job, spider.Options{Eval: opts.Eval, Canon: r.canon}); err != nil {
-		r.close()
-		return nil, err
+	if opts.Read != nil {
+		r.read = opts.Read
+	} else {
+		local, err := spider.New(ctx, job, spider.Options{Eval: opts.Eval, Canon: r.canon})
+		if err != nil {
+			r.close()
+			return nil, err
+		}
+		r.read, r.closeRead = local, local.Close
 	}
 
 	if r.graph, err = pipeline.New(ctx, job); err != nil {
@@ -408,7 +433,22 @@ func (r *Run) flush(ctx context.Context) error {
 		return err
 	}
 	r.stats.Exported.Add(int64(len(out)))
+
+	// Kept so a caller can compare two runs. It is what makes the claim about
+	// the bus checkable: the same job, wired two ways, and the records held
+	// against each other.
+	r.mu.Lock()
+	r.exported = append(r.exported, out...)
+	r.mu.Unlock()
 	return nil
+}
+
+// Records is what the crawl exported, for a caller that wants to look at them
+// rather than read a file back.
+func (r *Run) Records() []*record.Record {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]*record.Record(nil), r.exported...)
 }
 
 // Stats is what the crawl did, for a caller that wants to report it.
@@ -430,14 +470,14 @@ func (r *Run) close() error {
 			return nil
 		},
 		func() error {
-			if r.read != nil {
-				return r.read.Close()
+			if r.closeRead != nil {
+				return r.closeRead()
 			}
 			return nil
 		},
 		func() error {
-			if r.fetch != nil {
-				return r.fetch.Close()
+			if r.closeFetch != nil {
+				return r.closeFetch()
 			}
 			return nil
 		},

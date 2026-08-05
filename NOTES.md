@@ -1429,6 +1429,8 @@ four stages is the genuinely new distributed-systems problem here.
 | Exporters: the registry, json, jsonlines, csv | Built, tested |
 | `internal/run`: the whole crawl, four stages wired directly | Built, tested |
 | `scour try` and `scour run` | Built, tested |
+| `internal/bus`: NATS, embedded or joined, downloader and spider as services | Built, tested |
+| The equivalence: same job, same records, either wiring | Held to a test |
 | `internal/downloader`: the core fetch, agent, timeout, body limit | Built, tested |
 | The `cache` middleware: hits, sidecar, ttl, statuses | Built, tested |
 | `internal/robots`: RFC 9309, written rather than imported | Built, tested |
@@ -1448,7 +1450,7 @@ four stages is the genuinely new distributed-systems problem here.
 | Events as items: tags, fields, time. Parquet archive | Designed. Schema built |
 | Plugin implementations, all of them | Not started |
 | Exporters: parquet, nats, sqlite | Not started |
-| Cluster join, distributed jobs | Not started |
+| Cluster join, distributed jobs | Queue groups work. `--join` not started |
 | Jobs in a KV bucket, server-side writes | Decided, not started |
 | Frontier in SQLite, one shared database | Built, tested, benchmarked |
 | Records in SQLite, one database per job | Decided. The piece most likely to move |
