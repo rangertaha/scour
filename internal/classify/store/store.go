@@ -43,6 +43,14 @@ import (
 // ErrNotTrained reports a classifier nobody has trained.
 var ErrNotTrained = errors.New("classify: not trained")
 
+// DefaultDir is where classifiers live when a job does not say.
+//
+// It lives here rather than in either `topic` middleware because both of them
+// need it and neither may import the other: borrowing the constant from the
+// spider's package would register the spider's middleware on a node that asked
+// only for the scheduler's. This is the package they already share.
+const DefaultDir = ".scour/topics"
+
 // Store is a directory of trained classifiers.
 type Store struct {
 	dir string

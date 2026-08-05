@@ -19,10 +19,6 @@ import (
 	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/extract"
 	"github.com/rangertaha/scour/internal/spider"
-
-	_ "github.com/rangertaha/scour/internal/cache/local"
-	_ "github.com/rangertaha/scour/internal/downloader/httpcache"
-	_ "github.com/rangertaha/scour/internal/spider/httperror"
 )
 
 // Try fetches one page and shows what came out of it.

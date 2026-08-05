@@ -14,8 +14,6 @@ import (
 	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/decode"
 	"github.com/rangertaha/scour/internal/train"
-
-	_ "github.com/rangertaha/scour/internal/cache/local"
 )
 
 // Train reads the cached pages, works out how to find each property, and writes

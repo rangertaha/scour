@@ -14,10 +14,6 @@ import (
 	"github.com/rangertaha/scour/internal/frontier"
 	"github.com/rangertaha/scour/internal/frontier/sqlite"
 	"github.com/rangertaha/scour/internal/run"
-
-	_ "github.com/rangertaha/scour/internal/exporter/files"
-	_ "github.com/rangertaha/scour/internal/pipeline/steps"
-	_ "github.com/rangertaha/scour/internal/scheduler/dupefilter"
 )
 
 // Run crawls a job here, without a server.

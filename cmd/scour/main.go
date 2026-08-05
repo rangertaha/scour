@@ -14,6 +14,11 @@ import (
 	"syscall"
 
 	"github.com/rangertaha/scour/internal/cli"
+
+	// What this build can do. Every plugin is registered by importing its
+	// package, and this is the one list of them: see internal/plugins for why
+	// it is one list and what fails when something is left off it.
+	_ "github.com/rangertaha/scour/internal/plugins"
 )
 
 func main() {

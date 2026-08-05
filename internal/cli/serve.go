@@ -17,10 +17,6 @@ import (
 	"github.com/rangertaha/scour/internal/bus"
 	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/node"
-
-	_ "github.com/rangertaha/scour/internal/cache/local"
-	_ "github.com/rangertaha/scour/internal/downloader/httpcache"
-	_ "github.com/rangertaha/scour/internal/spider/httperror"
 )
 
 // Serve runs a node.

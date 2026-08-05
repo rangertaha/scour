@@ -71,8 +71,10 @@ type Config struct {
 	Record *bool `hcl:"record,optional"`
 }
 
-// DefaultDir is where classifiers live when a job does not say.
-const DefaultDir = ".scour/topics"
+// DefaultDir is where classifiers live when a job does not say. It is
+// [store.DefaultDir], which is where the literal lives now that the scheduler's
+// half of this middleware needs the same default.
+const DefaultDir = store.DefaultDir
 
 // New builds the middleware. It is [spider.Middleware].
 func New(ctx context.Context, cfg plugin.Config) (spider.Wrapper, error) {
