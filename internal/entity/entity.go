@@ -80,6 +80,10 @@ type Entity struct {
 
 // Relation is an edge between two entities, or between an item and an entity.
 type Relation struct {
+	// ID identifies the edge, derived from its ends, its type and its topic by
+	// [RelationID], so that it can carry properties of its own.
+	ID string
+
 	// From and To are entity IDs.
 	From string
 	To   string
@@ -93,6 +97,10 @@ type Relation struct {
 	// Topic is the subject this edge was asserted under, if any, so that
 	// "which authors has this publisher published on climate" is answerable.
 	Topic string
+
+	// Position is where the job document declared this relation, and what
+	// [Store.Relations] and [Store.Related] order by.
+	Position int
 
 	// Assertions is how many times something said this edge exists.
 	Assertions int
@@ -202,15 +210,27 @@ CREATE TABLE IF NOT EXISTS entities (
 CREATE INDEX IF NOT EXISTS entities_kind ON entities (kind, name);
 
 CREATE TABLE IF NOT EXISTS relations (
+	-- id is derived from the four columns below, the way an entity's is
+	-- derived from its kind and name. An edge that can be described has to be
+	-- nameable, and a composite key is not something a caller can hold.
+	id         TEXT    NOT NULL,
 	from_id    TEXT    NOT NULL REFERENCES entities (id) ON DELETE CASCADE,
 	to_id      TEXT    NOT NULL REFERENCES entities (id) ON DELETE CASCADE,
 	kind       TEXT    NOT NULL,
 	topic      TEXT    NOT NULL DEFAULT '',
+	-- position is where the job document declared this relation. Ordering is
+	-- part of what a shape says: an author before a publisher is the author
+	-- reading first, and a graph that reordered by how often something was
+	-- asserted would answer a question about the shape with a popularity
+	-- contest.
+	position   INTEGER NOT NULL DEFAULT 0,
 	first_seen INTEGER NOT NULL,
 	last_seen  INTEGER NOT NULL,
 	assertions INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (from_id, to_id, kind, topic)
 );
+
+CREATE INDEX IF NOT EXISTS relations_id ON relations (id);
 
 CREATE INDEX IF NOT EXISTS relations_to ON relations (to_id, kind, topic);
 
@@ -223,13 +243,24 @@ CREATE INDEX IF NOT EXISTS relations_to ON relations (to_id, kind, topic);
 -- reason a merge is a row rather than a rewrite: deciding is what a person does
 -- with the counts in front of them.
 CREATE TABLE IF NOT EXISTS properties (
-	entity     TEXT    NOT NULL REFERENCES entities (id) ON DELETE CASCADE,
+	-- subject is an entity id or a relation id. One table for both, because a
+	-- property of an edge is the same kind of statement as a property of a
+	-- node: a name, a value, who said it, and how often. Two tables would be
+	-- two of every query and two places for the next rule to be forgotten.
+	--
+	-- No foreign key, because the subject is one of two things and SQLite
+	-- cannot say that. Retract deletes what has no subject left, which is the
+	-- same sweep it already does for relations and entities.
+	subject    TEXT    NOT NULL,
 	name       TEXT    NOT NULL,
 	value      TEXT    NOT NULL,
+	-- position is where the job document declared it, for the reason relations
+	-- carry one.
+	position   INTEGER NOT NULL DEFAULT 0,
 	first_seen INTEGER NOT NULL,
 	last_seen  INTEGER NOT NULL,
 	assertions INTEGER NOT NULL DEFAULT 0,
-	PRIMARY KEY (entity, name, value)
+	PRIMARY KEY (subject, name, value)
 );
 
 CREATE INDEX IF NOT EXISTS properties_name ON properties (name, value);
@@ -248,13 +279,13 @@ CREATE TABLE IF NOT EXISTS property_assertions (
 	url     TEXT    NOT NULL,
 	spec    TEXT    NOT NULL DEFAULT '',
 	said_at INTEGER NOT NULL,
-	entity  TEXT    NOT NULL,
+	subject TEXT    NOT NULL,
 	name    TEXT    NOT NULL,
 	value   TEXT    NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS property_assertions_job ON property_assertions (job);
-CREATE INDEX IF NOT EXISTS property_assertions_entity ON property_assertions (entity);
+CREATE INDEX IF NOT EXISTS property_assertions_subject ON property_assertions (subject);
 
 -- Every assertion, with who said it and on what evidence. This is the table
 -- that makes a wrong entity correctable: one job's contribution is one delete,
@@ -370,39 +401,58 @@ ON CONFLICT (id) DO UPDATE SET
 }
 
 // Relate records an edge between two entities.
-func (s *Store) Relate(ctx context.Context, from, to, kind, topic string, said Provenance) error {
+func (s *Store) Relate(ctx context.Context, from, to, kind, topic string, position int, said Provenance) (string, error) {
 	if from == "" || to == "" || strings.TrimSpace(kind) == "" {
-		return errors.New("entity: a relation needs two entities and a kind")
+		return "", errors.New("entity: a relation needs two entities and a kind")
 	}
 	if said.Job == "" || said.URL == "" {
-		return errors.New("entity: an assertion needs to say who said it and where")
+		return "", errors.New("entity: an assertion needs to say who said it and where")
 	}
 	if said.At.IsZero() {
 		said.At = time.Now().UTC()
 	}
 	at := said.At.UnixNano()
+	kind = strings.ToLower(kind)
+	id := RelationID(from, to, kind, topic)
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("entity: %w", err)
+		return "", fmt.Errorf("entity: %w", err)
 	}
 	defer tx.Rollback()
 
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO relations (from_id, to_id, kind, topic, first_seen, last_seen, assertions)
-VALUES (?, ?, ?, ?, ?, ?, 1)
+INSERT INTO relations (id, from_id, to_id, kind, topic, position, first_seen, last_seen, assertions)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
 ON CONFLICT (from_id, to_id, kind, topic) DO UPDATE SET
 	last_seen  = MAX(last_seen, excluded.last_seen),
 	first_seen = MIN(first_seen, excluded.first_seen),
+	position   = MIN(position, excluded.position),
 	assertions = assertions + 1`,
-		from, to, strings.ToLower(kind), topic, at, at); err != nil {
-		return fmt.Errorf("entity: relate: %w", err)
+		id, from, to, kind, topic, position, at, at); err != nil {
+		return "", fmt.Errorf("entity: relate: %w", err)
 	}
 
-	if err := record(ctx, tx, said, from, to, strings.ToLower(kind), topic); err != nil {
-		return err
+	if err := record(ctx, tx, said, from, to, kind, topic); err != nil {
+		return "", err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("entity: %w", err)
+	}
+	return id, nil
+}
+
+// RelationID is what an edge resolves to.
+//
+// Derived from its two ends, its type and its topic, the way an entity's id is
+// derived from its kind and its name, and for the same reason: two jobs
+// asserting the same edge have to converge on one row without coordinating. It
+// also gives an edge something a caller can hold, which a composite key is not,
+// and which is what lets a relation carry properties of its own.
+func RelationID(from, to, kind, topic string) string {
+	sum := sha256.Sum256([]byte(from + "\x00" + to + "\x00" +
+		strings.ToLower(kind) + "\x00" + topic))
+	return hex.EncodeToString(sum[:12])
 }
 
 func record(ctx context.Context, tx *sql.Tx, from Provenance, subject, object, kind, topic string) error {
@@ -481,7 +531,10 @@ SELECT c.id, c.kind, c.name, c.first_seen, c.last_seen, SUM(r.assertions)
 		query += ` AND r.topic = ?`
 		args = append(args, topic)
 	}
-	query += ` GROUP BY c.id ORDER BY SUM(r.assertions) DESC, c.name ASC`
+	// By the position the shape declared, then by name. Ordering is part of
+	// what a shape says, and returning the most-asserted edge first would
+	// answer a question about the shape with a popularity contest.
+	query += ` GROUP BY c.id ORDER BY MIN(r.position), c.name ASC`
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -617,11 +670,16 @@ func (s *Store) Retract(ctx context.Context, job string) (int64, error) {
 			    AND a.kind = relations.kind AND a.topic = relations.topic)`,
 		`UPDATE properties SET assertions =
 			(SELECT COUNT(*) FROM property_assertions p
-			  WHERE p.entity = properties.entity AND p.name = properties.name
+			  WHERE p.subject = properties.subject AND p.name = properties.name
 			    AND p.value = properties.value)`,
 		// Then what nobody asserts any more.
 		`DELETE FROM relations WHERE assertions = 0`,
 		`DELETE FROM properties WHERE assertions = 0`,
+		// And what has lost its subject. The subject is an entity or a
+		// relation and SQLite cannot express a foreign key to either, so the
+		// sweep is here rather than in a cascade.
+		`DELETE FROM properties WHERE subject NOT IN (
+			SELECT id FROM entities UNION SELECT id FROM relations)`,
 		`DELETE FROM entities WHERE assertions = 0
 		   AND id NOT IN (SELECT from_id FROM relations UNION SELECT to_id FROM relations)`,
 	} {

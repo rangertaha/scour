@@ -61,7 +61,7 @@ event {
 	if err != nil {
 		t.Fatalf("assert: %v", err)
 	}
-	if err := graph.Describe(ctx, id, "role", "correspondent", said); err != nil {
+	if err := graph.Describe(ctx, id, "role", "correspondent", 0, said); err != nil {
 		t.Fatalf("describe: %v", err)
 	}
 

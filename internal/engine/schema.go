@@ -408,6 +408,20 @@ type Relation struct {
 	// it was crawled, so forty articles give the edge a distribution rather
 	// than a number somebody typed once and never revisited.
 	Topic []string `hcl:"topic,optional" json:"topic,omitempty"`
+
+	// Properties are what this relation says about itself: a role, a date it
+	// started, whatever the page states about the connection rather than about
+	// either end.
+	//
+	// An edge is a thing with something to say, not just a line between two
+	// nodes. "Alex Doe wrote for The Chronicle" is the edge; "as a
+	// correspondent, from 2019" is the edge's own, and putting it on either end
+	// would attach it to every other edge that end has.
+	//
+	// Declared here, so the relation's type is what says which properties an
+	// edge of that type carries. They are read from the record under this
+	// relation's name, the way an entity property's nested fields are.
+	Properties []*Property `hcl:"property,block" json:"properties,omitempty"`
 }
 
 // Monitoring is what a job reports while it runs.

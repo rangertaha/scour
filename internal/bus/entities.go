@@ -34,13 +34,15 @@ func EntitySubject(op string) string { return "scour.entity." + op }
 // exists: the store is the thing, and this is one way of reaching it.
 type Graph interface {
 	Assert(ctx context.Context, kind, name string, said entity.Provenance) (string, error)
-	Describe(ctx context.Context, id, name, value string, said entity.Provenance) error
-	Relate(ctx context.Context, from, to, kind, topic string, said entity.Provenance) error
+	Describe(ctx context.Context, subject, name, value string, position int, said entity.Provenance) error
+	Relate(ctx context.Context, from, to, kind, topic string, position int, said entity.Provenance) (string, error)
 
 	Get(ctx context.Context, id string) (*entity.Entity, error)
 	Find(ctx context.Context, kind, name string) (*entity.Entity, error)
 	Kind(ctx context.Context, kind string) ([]*entity.Entity, error)
 	Kinds(ctx context.Context) ([]entity.Kind, error)
+	RelationKinds(ctx context.Context) ([]entity.RelationKind, error)
+	Relations(ctx context.Context, id string) ([]entity.Relation, error)
 	Properties(ctx context.Context, id string) ([]entity.Property, error)
 	Related(ctx context.Context, id, kind, topic string) ([]*entity.Entity, error)
 	Provenances(ctx context.Context, id string) ([]entity.Provenance, error)
@@ -64,17 +66,19 @@ type (
 		Said entity.Provenance `json:"said"`
 	}
 	describeAsk struct {
-		ID    string            `json:"id"`
-		Name  string            `json:"name"`
-		Value string            `json:"value"`
-		Said  entity.Provenance `json:"said"`
+		Subject  string            `json:"subject"`
+		Name     string            `json:"name"`
+		Value    string            `json:"value"`
+		Position int               `json:"position,omitempty"`
+		Said     entity.Provenance `json:"said"`
 	}
 	relateAsk struct {
-		From  string            `json:"from"`
-		To    string            `json:"to"`
-		Kind  string            `json:"kind"`
-		Topic string            `json:"topic,omitempty"`
-		Said  entity.Provenance `json:"said"`
+		From     string            `json:"from"`
+		To       string            `json:"to"`
+		Kind     string            `json:"kind"`
+		Topic    string            `json:"topic,omitempty"`
+		Position int               `json:"position,omitempty"`
+		Said     entity.Provenance `json:"said"`
 	}
 	idAsk struct {
 		ID string `json:"id"`
@@ -117,11 +121,11 @@ func (c *Conn) ServeEntities(store Graph) (*Service, error) {
 		})
 	serving(c, s, EntitySubject("describe"), EntityQueue,
 		func(ctx context.Context, a describeAsk) (none, error) {
-			return none{}, store.Describe(ctx, a.ID, a.Name, a.Value, a.Said)
+			return none{}, store.Describe(ctx, a.Subject, a.Name, a.Value, a.Position, a.Said)
 		})
 	serving(c, s, EntitySubject("relate"), EntityQueue,
-		func(ctx context.Context, a relateAsk) (none, error) {
-			return none{}, store.Relate(ctx, a.From, a.To, a.Kind, a.Topic, a.Said)
+		func(ctx context.Context, a relateAsk) (string, error) {
+			return store.Relate(ctx, a.From, a.To, a.Kind, a.Topic, a.Position, a.Said)
 		})
 
 	serving(c, s, EntitySubject("get"), EntityQueue,
@@ -139,6 +143,14 @@ func (c *Conn) ServeEntities(store Graph) (*Service, error) {
 	serving(c, s, EntitySubject("kinds"), EntityQueue,
 		func(ctx context.Context, _ nothingAsk) ([]entity.Kind, error) {
 			return store.Kinds(ctx)
+		})
+	serving(c, s, EntitySubject("relationkinds"), EntityQueue,
+		func(ctx context.Context, _ nothingAsk) ([]entity.RelationKind, error) {
+			return store.RelationKinds(ctx)
+		})
+	serving(c, s, EntitySubject("relations"), EntityQueue,
+		func(ctx context.Context, a idAsk) ([]entity.Relation, error) {
+			return store.Relations(ctx, a.ID)
 		})
 	serving(c, s, EntitySubject("properties"), EntityQueue,
 		func(ctx context.Context, a idAsk) ([]entity.Property, error) {
@@ -201,16 +213,15 @@ func (e *Entities) Assert(ctx context.Context, kind, name string, said entity.Pr
 		assertAsk{Kind: kind, Name: name, Said: said})
 }
 
-func (e *Entities) Describe(ctx context.Context, id, name, value string, said entity.Provenance) error {
+func (e *Entities) Describe(ctx context.Context, subject, name, value string, position int, said entity.Provenance) error {
 	_, err := call[describeAsk, none](ctx, e.conn, EntitySubject("describe"), e.wait,
-		describeAsk{ID: id, Name: name, Value: value, Said: said})
+		describeAsk{Subject: subject, Name: name, Value: value, Position: position, Said: said})
 	return err
 }
 
-func (e *Entities) Relate(ctx context.Context, from, to, kind, topic string, said entity.Provenance) error {
-	_, err := call[relateAsk, none](ctx, e.conn, EntitySubject("relate"), e.wait,
-		relateAsk{From: from, To: to, Kind: kind, Topic: topic, Said: said})
-	return err
+func (e *Entities) Relate(ctx context.Context, from, to, kind, topic string, position int, said entity.Provenance) (string, error) {
+	return call[relateAsk, string](ctx, e.conn, EntitySubject("relate"), e.wait,
+		relateAsk{From: from, To: to, Kind: kind, Topic: topic, Position: position, Said: said})
 }
 
 func (e *Entities) Get(ctx context.Context, id string) (*entity.Entity, error) {
@@ -229,6 +240,15 @@ func (e *Entities) Kind(ctx context.Context, kind string) ([]*entity.Entity, err
 
 func (e *Entities) Kinds(ctx context.Context) ([]entity.Kind, error) {
 	return call[nothingAsk, []entity.Kind](ctx, e.conn, EntitySubject("kinds"), e.wait, nothingAsk{})
+}
+
+func (e *Entities) RelationKinds(ctx context.Context) ([]entity.RelationKind, error) {
+	return call[nothingAsk, []entity.RelationKind](ctx, e.conn,
+		EntitySubject("relationkinds"), e.wait, nothingAsk{})
+}
+
+func (e *Entities) Relations(ctx context.Context, id string) ([]entity.Relation, error) {
+	return call[idAsk, []entity.Relation](ctx, e.conn, EntitySubject("relations"), e.wait, idAsk{ID: id})
 }
 
 func (e *Entities) Properties(ctx context.Context, id string) ([]entity.Property, error) {

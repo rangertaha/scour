@@ -130,8 +130,9 @@ func (s *step) Close() error { return s.store.Close() }
 // tail is one end of an edge: an entity a relation block named, and the topics
 // that relation says to record the edge under.
 type tail struct {
-	id     string
-	topics []string
+	id       string
+	topics   []string
+	declared *engine.Relation
 }
 
 func (s *step) assert(ctx context.Context, r *record.Record) error {
@@ -151,10 +152,10 @@ func (s *step) assert(ctx context.Context, r *record.Record) error {
 		if err != nil {
 			return err
 		}
-		tails = append(tails, tail{id: id, topics: declared.Topic})
+		tails = append(tails, tail{id: id, topics: declared.Topic, declared: declared})
 	}
 
-	for _, p := range s.item.Properties {
+	for at, p := range s.item.Properties {
 		// Top level only. An entity reference nested inside another property is
 		// a field of that property rather than an edge of the item, and giving
 		// it one would put a dotted name into a vocabulary the whole graph
@@ -175,6 +176,18 @@ func (s *step) assert(ctx context.Context, r *record.Record) error {
 			return err
 		}
 
+		// What the page said about the thing itself. A property nested inside
+		// an entity property describes the entity rather than the item: an
+		// article's `author.role` is the person's role, not the article's, and
+		// the record already carries it under that dotted name because that is
+		// how nested values are flattened.
+		//
+		// Nothing did this before. The graph had entities with a kind and a
+		// name and nothing else, while the page that named them had said more.
+		if err := s.describe(ctx, id, p.Properties, p.Name, r, said); err != nil {
+			return err
+		}
+
 		for _, from := range tails {
 			// No topic is one edge under no topic, rather than none: the edge
 			// happened whether or not anybody scored the page.
@@ -183,10 +196,42 @@ func (s *step) assert(ctx context.Context, r *record.Record) error {
 				topics = []string{""}
 			}
 			for _, topic := range topics {
-				if err := s.store.Relate(ctx, from.id, id, p.Name, topic, said); err != nil {
+				// The position is the property's own, because the edge is
+				// named for the property and a shape that lists the author
+				// before the publisher means it.
+				edge, err := s.store.Relate(ctx, from.id, id, p.Name, topic, at, said)
+				if err != nil {
+					return err
+				}
+				// The edge carries what the relation block declared about it,
+				// which is a statement about the relationship rather than
+				// about either end: when it started, what role it was in.
+				if err := s.describe(ctx, edge, from.declared.Properties, from.declared.Name, r, said); err != nil {
 					return err
 				}
 			}
+		}
+	}
+	return nil
+}
+
+// describe records what the page said about a subject, from the properties
+// nested inside the block that named it.
+//
+// One function for an entity and for an edge, because the two are the same
+// statement about different subjects, and the position each is given is where
+// it was declared: ordering is part of what a shape says.
+func (s *step) describe(ctx context.Context, subject string, declared []*engine.Property, prefix string, r *record.Record, said entity.Provenance) error {
+	if subject == "" {
+		return nil
+	}
+	for at, n := range declared {
+		value := strings.TrimSpace(r.Values[prefix+"."+n.Name])
+		if value == "" {
+			continue
+		}
+		if err := s.store.Describe(ctx, subject, n.Name, value, at, said); err != nil {
+			return err
 		}
 	}
 	return nil

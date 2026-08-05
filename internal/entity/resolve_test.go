@@ -287,12 +287,12 @@ func TestOneJobsAssertionsAreStillOneDeleteAfterAMerge(t *testing.T) {
 
 	publisher, _ := s.Assert(ctx, "company", "The Example", from("news", "https://a.example/"))
 	full, _ := s.Assert(ctx, "person", "Alex Doe", from("news", "https://a.example/1"))
-	if err := s.Relate(ctx, publisher, full, "author", "", from("news", "https://a.example/1")); err != nil {
+	if _, err := s.Relate(ctx, publisher, full, "author", "", 0, from("news", "https://a.example/1")); err != nil {
 		t.Fatal(err)
 	}
 
 	initial, _ := s.Assert(ctx, "person", "A. Doe", from("wire", "https://b.example/2"))
-	if err := s.Relate(ctx, publisher, initial, "author", "", from("wire", "https://b.example/2")); err != nil {
+	if _, err := s.Relate(ctx, publisher, initial, "author", "", 0, from("wire", "https://b.example/2")); err != nil {
 		t.Fatal(err)
 	}
 

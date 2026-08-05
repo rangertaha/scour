@@ -90,13 +90,13 @@ func TestWhichAuthorsHasThisPublisherPublished(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Relate(ctx, publisher, id, "author", "climate@7", from("news", "https://a.example/story")); err != nil {
+		if _, err := s.Relate(ctx, publisher, id, "author", "climate@7", 0, from("news", "https://a.example/story")); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// One author on another topic, to prove the topic narrows it.
 	other, _ := s.Assert(ctx, "person", "Jo Bloggs", from("news", "https://a.example/sport"))
-	if err := s.Relate(ctx, publisher, other, "author", "sport@1", from("news", "https://a.example/sport")); err != nil {
+	if _, err := s.Relate(ctx, publisher, other, "author", "sport@1", 0, from("news", "https://a.example/sport")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -158,7 +158,7 @@ func TestOneJobsMistakesAreOneDelete(t *testing.T) {
 	wrong, _ := s.Assert(ctx, "person", "Copyright 2026", from("broken", "https://b.example/2"))
 
 	publisher, _ := s.Assert(ctx, "company", "The Example", from("broken", "https://b.example/"))
-	if err := s.Relate(ctx, publisher, wrong, "author", "", from("broken", "https://b.example/2")); err != nil {
+	if _, err := s.Relate(ctx, publisher, wrong, "author", "", 0, from("broken", "https://b.example/2")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -253,10 +253,10 @@ func TestAnAssertionHasToSayWhoSaidIt(t *testing.T) {
 	if _, err := s.Assert(ctx, "person", "  ", from("news", "https://a.example/")); err == nil {
 		t.Error("an entity with no name was accepted")
 	}
-	if err := s.Relate(ctx, "a", "b", "author", "", entity.Provenance{}); err == nil {
+	if _, err := s.Relate(ctx, "a", "b", "author", "", 0, entity.Provenance{}); err == nil {
 		t.Error("a relation with no provenance was accepted")
 	}
-	if err := s.Relate(ctx, "", "b", "author", "", from("news", "https://a.example/")); err == nil {
+	if _, err := s.Relate(ctx, "", "b", "author", "", 0, from("news", "https://a.example/")); err == nil {
 		t.Error("a relation from nothing was accepted")
 	}
 }
@@ -396,7 +396,7 @@ func TestAPropertyIsRecordedNotDecided(t *testing.T) {
 		{"acme.com", "https://example.com/b"},
 		{"acme.co.uk", "https://example.com/c"},
 	} {
-		if err := store.Describe(ctx, id, "domain", said.value, entity.Provenance{
+		if err := store.Describe(ctx, id, "domain", said.value, 0, entity.Provenance{
 			Job: "news", URL: said.url,
 		}); err != nil {
 			t.Fatalf("describe: %v", err)
@@ -410,12 +410,26 @@ func TestAPropertyIsRecordedNotDecided(t *testing.T) {
 	if len(props) != 2 {
 		t.Fatalf("len(props) = %d, want both values kept: %+v", len(props), props)
 	}
-	// Most-asserted first, so the disagreement is visible and ordered.
-	if props[0].Value != "acme.com" || props[0].Assertions != 2 {
-		t.Errorf("props[0] = %+v, want acme.com asserted twice", props[0])
+
+	// Both kept, each with its own count, which is the whole claim: the store
+	// records and does not decide.
+	counts := map[string]int{}
+	for _, p := range props {
+		counts[p.Value] = p.Assertions
 	}
-	if props[1].Value != "acme.co.uk" || props[1].Assertions != 1 {
-		t.Errorf("props[1] = %+v, want acme.co.uk asserted once", props[1])
+	if counts["acme.com"] != 2 {
+		t.Errorf("acme.com was asserted %d times, want 2: %+v", counts["acme.com"], props)
+	}
+	if counts["acme.co.uk"] != 1 {
+		t.Errorf("acme.co.uk was asserted %d times, want 1: %+v", counts["acme.co.uk"], props)
+	}
+
+	// Ordered by position and then by value, not by count. Two values of one
+	// property share a position, so the tie breaks on the value and two runs
+	// list them the same way. Ordering by count would have made the list
+	// reshuffle itself as a crawl went on.
+	if props[0].Value != "acme.co.uk" || props[1].Value != "acme.com" {
+		t.Errorf("order = %q then %q, want position and then value", props[0].Value, props[1].Value)
 	}
 }
 
@@ -445,10 +459,10 @@ func TestPropertiesFollowAMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := store.Describe(ctx, full, "role", "correspondent", said); err != nil {
+	if err := store.Describe(ctx, full, "role", "correspondent", 0, said); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Describe(ctx, initial, "beat", "climate", said); err != nil {
+	if err := store.Describe(ctx, initial, "beat", "climate", 1, said); err != nil {
 		t.Fatal(err)
 	}
 
@@ -542,10 +556,10 @@ func TestRetractingAJobTakesItsPropertiesBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Describe(ctx, id, "domain", "acme.com", good); err != nil {
+	if err := store.Describe(ctx, id, "domain", "acme.com", 0, good); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Describe(ctx, id, "domain", "not-acme.example", bad); err != nil {
+	if err := store.Describe(ctx, id, "domain", "not-acme.example", 0, bad); err != nil {
 		t.Fatal(err)
 	}
 

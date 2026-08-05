@@ -39,14 +39,19 @@ func fill(t *testing.T, g bus.Graph) {
 		t.Fatalf("assert person: %v", err)
 	}
 
-	if err := g.Describe(ctx, author, "role", "correspondent", said); err != nil {
+	if err := g.Describe(ctx, author, "role", "correspondent", 0, said); err != nil {
 		t.Fatalf("describe: %v", err)
 	}
-	if err := g.Describe(ctx, author, "beat", "climate", said); err != nil {
+	if err := g.Describe(ctx, author, "beat", "climate", 1, said); err != nil {
 		t.Fatalf("describe: %v", err)
 	}
-	if err := g.Relate(ctx, paper, author, "author", "climate", said); err != nil {
+	edge, err := g.Relate(ctx, paper, author, "author", "climate", 0, said)
+	if err != nil {
 		t.Fatalf("relate: %v", err)
+	}
+	// A property of the edge itself, which is neither end's.
+	if err := g.Describe(ctx, edge, "role", "correspondent", 0, said); err != nil {
+		t.Fatalf("describe the edge: %v", err)
 	}
 
 	// A second spelling and a merge, so resolution is exercised too.
@@ -67,6 +72,14 @@ func snapshot(t *testing.T, g bus.Graph) string {
 	ctx := context.Background()
 	var out string
 
+	edgeKinds, err := g.RelationKinds(ctx)
+	if err != nil {
+		t.Fatalf("relation kinds: %v", err)
+	}
+	for _, k := range edgeKinds {
+		out += fmt.Sprintf("relation kind %s %d\n", k.Name, k.Relations)
+	}
+
 	kinds, err := g.Kinds(ctx)
 	if err != nil {
 		t.Fatalf("kinds: %v", err)
@@ -86,7 +99,7 @@ func snapshot(t *testing.T, g bus.Graph) string {
 				t.Fatalf("properties: %v", err)
 			}
 			for _, p := range props {
-				out += fmt.Sprintf("    property %s=%s x%d\n", p.Name, p.Value, p.Assertions)
+				out += fmt.Sprintf("    property %s=%s position=%d x%d\n", p.Name, p.Value, p.Position, p.Assertions)
 			}
 
 			related, err := g.Related(ctx, e.ID, "", "")
@@ -95,6 +108,23 @@ func snapshot(t *testing.T, g bus.Graph) string {
 			}
 			for _, r := range related {
 				out += fmt.Sprintf("    related %s %s\n", r.Kind, r.Name)
+			}
+
+			edges, err := g.Relations(ctx, e.ID)
+			if err != nil {
+				t.Fatalf("relations: %v", err)
+			}
+			for _, edge := range edges {
+				out += fmt.Sprintf("    edge %s topic=%s position=%d x%d\n",
+					edge.Kind, edge.Topic, edge.Position, edge.Assertions)
+
+				props, err := g.Properties(ctx, edge.ID)
+				if err != nil {
+					t.Fatalf("edge properties: %v", err)
+				}
+				for _, p := range props {
+					out += fmt.Sprintf("      edge property %s=%s position=%d\n", p.Name, p.Value, p.Position)
+				}
 			}
 
 			provs, err := g.Provenances(ctx, e.ID)
