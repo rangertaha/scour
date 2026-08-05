@@ -162,7 +162,10 @@ func (d *Downloader) Handle(ctx context.Context, req *downloader.Request) (*down
 		return nil, fmt.Errorf("bus: %w", err)
 	}
 
-	msg, err := d.conn.RequestWithContext(withTimeout(ctx), Subject(d.job, DownloadSubject), payload)
+	timed, cancel := withTimeout(ctx)
+	defer cancel()
+
+	msg, err := d.conn.RequestWithContext(timed, Subject(d.job, DownloadSubject), payload)
 	if err != nil {
 		return nil, fmt.Errorf("bus: fetch %s: %w", req.URL, noResponders(err))
 	}
@@ -285,7 +288,10 @@ func (s *Spider) Handle(ctx context.Context, resp *downloader.Response) (*spider
 		return nil, fmt.Errorf("bus: %w", err)
 	}
 
-	msg, err := s.conn.RequestWithContext(withTimeout(ctx), Subject(s.job, ReadSubject), payload)
+	timed, cancel := withTimeout(ctx)
+	defer cancel()
+
+	msg, err := s.conn.RequestWithContext(timed, Subject(s.job, ReadSubject), payload)
 	if err != nil {
 		return nil, fmt.Errorf("bus: read %s: %w", resp.URL, noResponders(err))
 	}
@@ -321,12 +327,13 @@ func reply[T any](msg *nats.Msg, payload T) {
 	_ = msg.Respond(encoded)
 }
 
-func withTimeout(ctx context.Context) context.Context {
+// withTimeout bounds one request, unless the caller already bounded it.
+//
+// The cancel comes back rather than being dropped: a request that returns early
+// leaves a timer running otherwise, and a crawl makes one of these per page.
+func withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 	if _, has := ctx.Deadline(); has {
-		return ctx
+		return ctx, func() {}
 	}
-	// The cancel is deliberately dropped: the context is used for exactly one
-	// request, which returns before the timeout or because of it.
-	timed, _ := context.WithTimeout(ctx, Timeout) //nolint:govet // see above
-	return timed
+	return context.WithTimeout(ctx, Timeout)
 }
