@@ -85,17 +85,22 @@ func TestBuildsInCataloguedOrder(t *testing.T) {
   }
 `)
 
-	links, err := plugin.Build(context.Background(), reg, j, engine.StageDownloader, nil)
+	built, err := plugin.Build(context.Background(), reg, j, engine.StageDownloader, nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	if len(links) != 2 {
-		t.Fatalf("built %d links", len(links))
+	defer built.Close()
+
+	if len(built.Links) != 2 {
+		t.Fatalf("built %d links", len(built.Links))
+	}
+	if got := strings.Join(built.Names(), " "); got != "offsite cache" {
+		t.Errorf("Names() = %q, want the way-out order", got)
 	}
 
 	// The catalogue puts offsite at 500 and cache at 900, and the chain has to
 	// come out in that order however the document listed them.
-	h := chain.Build(core(), links)
+	h := built.Handler(core())
 	if _, err := h.Handle(context.Background(), "page"); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
@@ -124,12 +129,13 @@ func TestExplicitOrderWins(t *testing.T) {
   }
 `)
 
-	links, err := plugin.Build(context.Background(), reg, j, engine.StageDownloader, nil)
+	built, err := plugin.Build(context.Background(), reg, j, engine.StageDownloader, nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
+	defer built.Close()
 
-	h := chain.Build(core(), links)
+	h := built.Handler(core())
 	if _, err := h.Handle(context.Background(), "page"); err != nil {
 		t.Fatal(err)
 	}
@@ -248,11 +254,11 @@ func TestAFactoryThatFailsNamesItself(t *testing.T) {
 // TestDisabledIsNeverBuilt: turning a plugin off keeps its configuration, so
 // the seam must not try to construct it and must not need it to be registered.
 func TestDisabledIsNeverBuilt(t *testing.T) {
-	built := map[string]bool{}
+	constructed := map[string]bool{}
 
 	reg := plugin.NewRegistry[string, string](engine.StageDownloader)
 	reg.Register("cache", func(_ context.Context, cfg plugin.Config) (wrapper, error) {
-		built[cfg.Name] = true
+		constructed[cfg.Name] = true
 		return noting(cfg.Name, nil), nil
 	})
 
@@ -267,14 +273,16 @@ func TestDisabledIsNeverBuilt(t *testing.T) {
   }
 `)
 
-	links, err := plugin.Build(context.Background(), reg, j, engine.StageDownloader, nil)
+	built, err := plugin.Build(context.Background(), reg, j, engine.StageDownloader, nil)
 	if err != nil {
 		t.Fatalf("a disabled plugin nothing implements refused the chain: %v", err)
 	}
-	if len(links) != 1 {
-		t.Errorf("built %d links, want only the enabled one", len(links))
+	defer built.Close()
+
+	if len(built.Links) != 1 {
+		t.Errorf("built %d links, want only the enabled one", len(built.Links))
 	}
-	if built["somebody-elses"] {
+	if constructed["somebody-elses"] {
 		t.Error("a disabled plugin was constructed")
 	}
 }
@@ -282,12 +290,20 @@ func TestDisabledIsNeverBuilt(t *testing.T) {
 func TestNoPluginsIsNoChain(t *testing.T) {
 	reg := plugin.NewRegistry[string, string](engine.StageDownloader)
 
-	links, err := plugin.Build(context.Background(), reg, job(t, ""), engine.StageDownloader, nil)
+	built, err := plugin.Build(context.Background(), reg, job(t, ""), engine.StageDownloader, nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	if len(links) != 0 {
-		t.Errorf("built %d links for a job that listed none", len(links))
+	if len(built.Links) != 0 {
+		t.Errorf("built %d links for a job that listed none", len(built.Links))
+	}
+	// Still a chain, so a caller may close it and run a core through it without
+	// checking whether the job configured anything.
+	if err := built.Close(); err != nil {
+		t.Errorf("close: %v", err)
+	}
+	if _, err := built.Handler(core()).Handle(context.Background(), "page"); err != nil {
+		t.Errorf("handle: %v", err)
 	}
 }
 
@@ -386,11 +402,11 @@ func TestStagesDoNotShare(t *testing.T) {
 `)
 
 	ctx := context.Background()
-	if links, err := plugin.Build(ctx, down, j, engine.StageDownloader, nil); err != nil || len(links) != 1 {
-		t.Errorf("downloader chain = %d, %v", len(links), err)
+	if built, err := plugin.Build(ctx, down, j, engine.StageDownloader, nil); err != nil || len(built.Links) != 1 {
+		t.Errorf("downloader chain = %v, %v", built, err)
 	}
-	if links, err := plugin.Build(ctx, spider, j, engine.StageSpider, nil); err != nil || len(links) != 1 {
-		t.Errorf("spider chain = %d, %v", len(links), err)
+	if built, err := plugin.Build(ctx, spider, j, engine.StageSpider, nil); err != nil || len(built.Links) != 1 {
+		t.Errorf("spider chain = %v, %v", built, err)
 	}
 
 	// The downloader's registry has never heard of the spider's plugin.
@@ -505,5 +521,192 @@ func TestASecretIsNotAvailableUntilThen(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cache") {
 		t.Errorf("the error does not name the plugin: %v", err)
+	}
+}
+
+// A plugin's lifetime.
+
+// opener is a plugin that holds something open, which is what a cache plugin
+// with a bucket is.
+func opener(closed *[]string, name string, err error) plugin.Factory[string, string] {
+	return func(_ context.Context, cfg plugin.Config) (wrapper, error) {
+		cfg.Defer(func() error {
+			*closed = append(*closed, name)
+			return err
+		})
+		return noting(name, nil), nil
+	}
+}
+
+// TestWhatAPluginOpensIsClosed: the seam hands back a function, and a function
+// has nowhere to keep a Close method. Without this a server building a chain
+// per job leaks a handle per job.
+func TestWhatAPluginOpensIsClosed(t *testing.T) {
+	var closed []string
+
+	reg := plugin.NewRegistry[string, string](engine.StageDownloader)
+	reg.Register("offsite", opener(&closed, "offsite", nil))
+	reg.Register("cache", opener(&closed, "cache", nil))
+
+	j := job(t, `
+  downloader {
+    plugin "offsite" {}
+    plugin "cache" {}
+  }
+`)
+
+	built, err := plugin.Build(context.Background(), reg, j, engine.StageDownloader, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(closed) != 0 {
+		t.Fatalf("closed %v before anything asked", closed)
+	}
+
+	if err := built.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	// Last opened, first closed: a plugin built later may be holding something
+	// an earlier one handed it.
+	if got := strings.Join(closed, " "); got != "cache offsite" {
+		t.Errorf("closed %q, want the reverse of the order they opened", got)
+	}
+}
+
+// TestClosingTwiceIsNotAnError, so a caller may defer it and close again on the
+// path that has already done so.
+func TestClosingTwiceIsNotAnError(t *testing.T) {
+	var closed []string
+
+	reg := plugin.NewRegistry[string, string](engine.StageDownloader)
+	reg.Register("cache", opener(&closed, "cache", nil))
+
+	built, err := plugin.Build(context.Background(), reg, job(t, `
+  downloader {
+    plugin "cache" {}
+  }
+`), engine.StageDownloader, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	if err := built.Close(); err != nil {
+		t.Fatalf("first close: %v", err)
+	}
+	if err := built.Close(); err != nil {
+		t.Fatalf("second close: %v", err)
+	}
+	if len(closed) != 1 {
+		t.Errorf("closed %d times", len(closed))
+	}
+}
+
+// TestEveryCloseRuns: a bucket that will not close must not keep a database
+// open behind it.
+func TestEveryCloseRuns(t *testing.T) {
+	var closed []string
+	stuck := errors.New("bucket would not close")
+
+	reg := plugin.NewRegistry[string, string](engine.StageDownloader)
+	reg.Register("offsite", opener(&closed, "offsite", nil))
+	reg.Register("cache", opener(&closed, "cache", stuck))
+
+	built, err := plugin.Build(context.Background(), reg, job(t, `
+  downloader {
+    plugin "offsite" {}
+    plugin "cache" {}
+  }
+`), engine.StageDownloader, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	err = built.Close()
+	if !errors.Is(err, stuck) {
+		t.Errorf("close reported %v", err)
+	}
+	if len(closed) != 2 {
+		t.Errorf("only %v closed", closed)
+	}
+}
+
+// TestARefusedChainClosesWhatItOpened: a job refused for its second plugin must
+// not leave the bucket its first one opened, and the caller has no chain to
+// close it with.
+func TestARefusedChainClosesWhatItOpened(t *testing.T) {
+	var closed []string
+
+	reg := plugin.NewRegistry[string, string](engine.StageDownloader)
+	reg.Register("cache", opener(&closed, "cache", nil))
+
+	j := job(t, `
+  downloader {
+    plugin "cache" {}
+
+    plugin "somebody-elses" {
+      order = 42
+    }
+  }
+`)
+
+	built, err := plugin.Build(context.Background(), reg, j, engine.StageDownloader, nil)
+	if err == nil {
+		t.Fatal("built a chain naming something nothing implements")
+	}
+	if built != nil {
+		t.Error("a refused build returned a chain to close")
+	}
+	if len(closed) != 1 || closed[0] != "cache" {
+		t.Errorf("closed %v, want the one plugin that had opened something", closed)
+	}
+}
+
+// TestARefusedChainSaysWhatWouldNotClose, because a plugin that fails to build
+// and a bucket that will not release are two different problems and the second
+// one is the one somebody has to go and look at.
+func TestARefusedChainSaysWhatWouldNotClose(t *testing.T) {
+	var closed []string
+	stuck := errors.New("bucket would not close")
+
+	reg := plugin.NewRegistry[string, string](engine.StageDownloader)
+	reg.Register("cache", opener(&closed, "cache", stuck))
+	reg.Register("offsite", func(context.Context, plugin.Config) (wrapper, error) {
+		return nil, errors.New("no domains configured")
+	})
+
+	_, err := plugin.Build(context.Background(), reg, job(t, `
+  downloader {
+    plugin "offsite" {}
+    plugin "cache" {}
+  }
+`), engine.StageDownloader, nil)
+	if err == nil {
+		t.Fatal("built it anyway")
+	}
+	if !errors.Is(err, stuck) {
+		t.Errorf("the close failure was lost: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no domains configured") {
+		t.Errorf("the build failure was lost: %v", err)
+	}
+}
+
+// TestAHandBuiltConfigHasNowhereToDeferTo, which is what a test constructing
+// one middleware on its own wants.
+func TestAHandBuiltConfigHasNowhereToDeferTo(t *testing.T) {
+	cfg := plugin.Config{Name: "cache"}
+	cfg.Defer(func() error { return errors.New("never runs") })
+
+	// And a nil close is not registered either, so a plugin may pass one
+	// without checking.
+	cfg.Defer(nil)
+}
+
+// TestANilChainCloses, so a caller that deferred a close before checking the
+// error does not panic on the way out.
+func TestANilChainCloses(t *testing.T) {
+	var built *plugin.Chain[string, string]
+	if err := built.Close(); err != nil {
+		t.Errorf("close: %v", err)
 	}
 }
