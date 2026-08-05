@@ -337,6 +337,10 @@ func (i *Item) fingerprint() string {
 	var b strings.Builder
 	b.WriteString(i.Type)
 	b.WriteByte('|')
+	b.WriteString(i.Of)
+	b.WriteByte('|')
+	b.WriteString(i.Time)
+	b.WriteByte('|')
 	writeProperties(&b, i.Properties)
 
 	// Relations are shape rather than evidence: changing one changes what is
@@ -359,8 +363,8 @@ func writeProperties(b *strings.Builder, props []*Property) {
 		// evidence about a shape rather than part of it, so adding one must
 		// not read as a schema change and force a re-extraction of records
 		// that are still correct.
-		fmt.Fprintf(b, "(%s:%s:%s:%t:%s:%s:%s:%s:%s",
-			p.Name, p.Type, p.Entity, p.Required,
+		fmt.Fprintf(b, "(%s:%s:%s:%t:%t:%s:%s:%s:%s:%s",
+			p.Name, p.Type, p.Entity, p.Required, p.Tag,
 			strings.Join(p.Aliases, ","),
 			strings.Join(p.Regexes, ","),
 			strings.Join(p.Transforms, ","),

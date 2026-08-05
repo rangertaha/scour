@@ -149,6 +149,27 @@ func (i *Item) validate() []error {
 		problems = append(problems, err)
 	}
 	problems = append(problems, validateRelations(i.Relations, "item "+i.Name)...)
+
+	// The time has to be a date this item actually extracts, or the event
+	// carries a timestamp from nowhere.
+	if i.Time != "" {
+		found := false
+		for _, p := range i.Properties {
+			if p.Name != i.Time {
+				continue
+			}
+			found = true
+			if Type(p.PropertyType()) != TypeDate {
+				problems = append(problems, fmt.Errorf(
+					"item %q: time is %q, which is typed %s rather than date",
+					i.Name, i.Time, p.PropertyType()))
+			}
+		}
+		if !found {
+			problems = append(problems, fmt.Errorf(
+				"item %q: time is %q, and no such property is declared", i.Name, i.Time))
+		}
+	}
 	return problems
 }
 
@@ -210,6 +231,21 @@ func validateProperties(props []*Property, where string) []error {
 			if !slices.Contains(Transforms, t) {
 				problems = append(problems, fmt.Errorf("%s: transform %q is not one of %s",
 					path, t, strings.Join(TransformNames(), ", ")))
+			}
+		}
+
+		// A dimension has to be one value, or it is not something anybody can
+		// group by. It is also how a time-series store is destroyed: every
+		// distinct tag value is another series.
+		if p.Tag {
+			switch Type(p.PropertyType()) {
+			case TypeObject, TypeList:
+				problems = append(problems, fmt.Errorf(
+					"%s: is a tag but typed %s, and a dimension has to be one value",
+					path, p.PropertyType()))
+			case TypeEntity:
+				problems = append(problems, fmt.Errorf(
+					"%s: is a tag already, because an entity reference is one", path))
 			}
 		}
 

@@ -1300,3 +1300,161 @@ func TestRelationsReachTheSpider(t *testing.T) {
 		t.Errorf("relations = %+v", item.Relations)
 	}
 }
+
+// An item is a measurement when it flows: tags, fields and a time.
+
+const priceItem = `
+job "markets" {
+  start = ["https://example.com/quotes"]
+
+  item "price" {
+    of   = "company"
+    time = "observed"
+
+    property "value" {
+      type = float
+    }
+
+    property "volume" {
+      type = int
+    }
+
+    property "currency" {
+      type = str
+      tag  = true
+    }
+
+    property "observed" {
+      type = date
+    }
+
+    relation "exchange" {
+      entity   = "exchange"
+      property = self.domain
+    }
+  }
+}
+`
+
+func TestTagsAndFields(t *testing.T) {
+	doc := parse(t, priceItem)
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("did not validate: %v", err)
+	}
+
+	item := doc.Jobs[0].Items[0]
+
+	// Dimensions: what it observes, what it relates to, and the scalar
+	// declared a dimension.
+	if got := strings.Join(item.Tags(), ","); got != "currency,exchange,of" {
+		t.Errorf("tags = %q", got)
+	}
+	// Measurements: everything else.
+	if got := strings.Join(item.Fields(), ","); got != "observed,value,volume" {
+		t.Errorf("fields = %q", got)
+	}
+	if item.Of != "company" || item.Time != "observed" {
+		t.Errorf("of = %q time = %q", item.Of, item.Time)
+	}
+}
+
+// TestEntityPropertiesAreTagsAlready: an entity reference is bounded and
+// indexed by definition, so declaring it one is redundant and refused rather
+// than quietly accepted.
+func TestEntityPropertiesAreTagsAlready(t *testing.T) {
+	j := mustValidate(t, `
+  item "byline" {
+    property "author" {
+      type   = entity
+      entity = "person"
+    }
+  }
+`)
+	if got := strings.Join(j.Items[1].Tags(), ","); got != "author" {
+		t.Errorf("tags = %q, want the entity reference", got)
+	}
+
+	refuses(t, `
+  item "b" {
+    property "author" {
+      type   = entity
+      entity = "person"
+      tag    = true
+    }
+  }
+`, "already")
+}
+
+// TestATagHasToBeOneValue is the cardinality guard in its structural form: a
+// dimension nobody can group by is not a dimension.
+func TestATagHasToBeOneValue(t *testing.T) {
+	refuses(t, `
+  item "b" {
+    property "author" {
+      tag = true
+
+      property "name" {
+        type = str
+      }
+    }
+  }
+`, "one value")
+}
+
+// TestEventTimeMustBeADateThisItemExtracts, or the event carries a timestamp
+// from nowhere.
+func TestEventTimeMustBeADateThisItemExtracts(t *testing.T) {
+	refuses(t, `
+  item "b" {
+    time = "published"
+
+    property "title" {
+      type = str
+    }
+  }
+`, "no such property")
+
+	refuses(t, `
+  item "c" {
+    time = "published"
+
+    property "published" {
+      type = str
+    }
+  }
+`, "rather than date")
+}
+
+func TestEventShapeIsShape(t *testing.T) {
+	base := parse(t, priceItem).Jobs[0].Spec()
+
+	// of and time change what the event is, so both are re-extractions.
+	noOf := parse(t, strings.Replace(priceItem, `    of   = "company"`+"\n", "", 1)).Jobs[0].Spec()
+	if base.Fingerprint() == noOf.Fingerprint() {
+		t.Error("what an item observes is not part of its shape")
+	}
+
+	noTime := parse(t, strings.Replace(priceItem, `    time = "observed"`+"\n", "", 1)).Jobs[0].Spec()
+	if base.Fingerprint() == noTime.Fingerprint() {
+		t.Error("which property is the event time is not part of its shape")
+	}
+}
+
+func TestEventShapeReachesTheSpider(t *testing.T) {
+	spec := parse(t, priceItem).Jobs[0].Spec()
+
+	rendered := string(spec.HCL())
+	for _, want := range []string{`of = "company"`, `time = "observed"`, "tag = true"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("the spec lost %q:\n%s", want, rendered)
+		}
+	}
+
+	back, err := engine.ParseSpec(spec.HCL(), "spec.hcl")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if back.Fingerprint() != spec.Fingerprint() {
+		t.Error("the event shape did not survive the round trip")
+	}
+}

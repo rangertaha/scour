@@ -110,6 +110,8 @@ func writeItem(b *strings.Builder, item *Item, depth int) {
 
 	fmt.Fprintf(b, "%sitem %q {\n", pad, item.Name)
 	writeAttr(b, depth+1, "type", item.Type)
+	writeAttr(b, depth+1, "of", item.Of)
+	writeAttr(b, depth+1, "time", item.Time)
 	writeAttr(b, depth+1, "description", item.Description)
 	for _, p := range item.Properties {
 		b.WriteString("\n")
@@ -131,6 +133,9 @@ func writeProperty(b *strings.Builder, p *Property, depth int) {
 	writeAttr(b, depth+1, "description", p.Description)
 	if p.Required {
 		fmt.Fprintf(b, "%s  required = true\n", pad)
+	}
+	if p.Tag {
+		fmt.Fprintf(b, "%s  tag = true\n", pad)
 	}
 	writeList(b, depth+1, "aliases", p.Aliases)
 	writeList(b, depth+1, "examples", p.Examples)

@@ -359,6 +359,78 @@ month behaves the way it did today.
 says, and a mismatch is refused rather than inferred, because silently changing
 a declared type is how a document stops meaning what it reads as.
 
+## Events are items, converted at the edge
+
+There is no event block. An item is what a job declares, and what leaves the
+pipeline is that item rendered as a measurement:
+
+```
+price,company=acme,exchange=lse value=178.23,volume=1000000 1754308800
+```
+
+The split is derived rather than declared. `of` and every `relation` are entity
+references, so they are the **tags**. The properties are the **fields**. `time`
+names which property is the event's own time. Nothing in a document says "this
+is an event", and one model has two renderings: a record for export, a
+measurement for the stream and the archive.
+
+| | |
+| --- | --- |
+| Measurement | The item's name |
+| Tags | `of`, the relations, and any property declared `tag` |
+| Fields | Everything else |
+| Time | The property `time` names |
+
+**Tag cardinality is the failure mode.** Every distinct tag value is another
+series, so tagging by URL or headline destroys a time-series store. Entity
+references are safe because entities are bounded by definition, which is why
+they are the tags and free text never is. A scalar that genuinely is a dimension
+says `tag = true` and wants a bounded set of values; one that cannot be a single
+value is refused.
+
+**Time is event time, never ingest time.** A headline published at nine and
+crawled at half eleven is an event at nine. Getting that wrong makes replay and
+backfill produce series that are wrong in a way nobody notices for months. When
+the source gives no time at all, `time` is absent and the moment of observation
+is all there is, which is worth being explicit about rather than quietly
+inventing.
+
+**Content does not travel.** A five thousand character body is not a field. A
+headline event carries its tags, its small fields and a reference to the body,
+which is the rule the bus already follows for pages.
+
+### Two shapes, one mechanism
+
+A headline happens once. A price is the same thing measured again. The
+difference shows up in the subject, and `of` is what puts it there:
+
+```
+events.news.headline                 every headline
+events.markets.price.<company>       one subject per company
+```
+
+Which is what lets a consumer subscribe to one company rather than filter the
+firehose, and what makes the latest value a fetch rather than a scan.
+
+### Backed up in Parquet
+
+The archive is a subscriber, not the source of truth, and it writes Parquet.
+
+Columnar suits this exactly: tags are low cardinality by construction, so they
+dictionary-encode to almost nothing, and the fields are the values anybody
+queries. It also means correlation over price series and counting distinct
+values per property are the same kind of query, run offline, against files.
+
+**The same storage backend the page cache uses.** Local, S3 and GCS are already
+written and tested, so where the archive lives is a config line rather than a
+component.
+
+**And no server.** DuckDB reads Parquet where it lies, so analytics is pointing
+something at the files rather than importing into a database that then has to be
+kept in step. That keeps the columnar decision from being a bet: if files are
+enough, nothing changes; if they are not, one subscriber is swapped and the hot
+path never notices.
+
 ## Entities
 
 Extraction is per page and knows nothing. An entity store makes it
@@ -1173,6 +1245,7 @@ four stages is the genuinely new distributed-systems problem here.
 | Classifiers: the contract, terms and bayes | Built, tested |
 | Secrets in a sealed KV bucket, resolved at plugin build | Designed, not started |
 | Entity store: assertions with provenance, behind a service | Designed, not started |
+| Events as items: tags, fields, time. Parquet archive | Designed. Schema built |
 | Plugin implementations, all of them | Not started |
 | The stages themselves | Not started |
 | Exporters, all formats | Not started |

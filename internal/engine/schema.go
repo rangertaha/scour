@@ -36,6 +36,7 @@ package engine
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
@@ -160,11 +161,46 @@ type Pipeline struct {
 	Steps []*Step `hcl:"step,block" json:"steps,omitempty"`
 }
 
-// Item is a shape the job is looking for: an article, a product, a person.
+// Item is a shape the job is looking for, and an event when it flows.
+//
+// # Measurement, tags, fields, time
+//
+// An extracted item leaves the pipeline in the shape of a measurement: the
+// item's name, a set of tags, a set of fields and a time.
+//
+//	price,company=acme,exchange=lse value=178.23,volume=1000000 1754308800
+//
+// The split is already declared and does not need saying twice. [Item.Of] and
+// every [Relation] are entity references, so they are the tags: bounded, worth
+// indexing, and what anybody filters or groups by. The properties are the
+// fields: what was measured.
+//
+// **Tag cardinality is the failure mode.** Every distinct tag value is another
+// series, so tagging by URL or by headline destroys a time-series store.
+// Entity references are safe because entities are bounded by definition, which
+// is why they are the tags and free text never is.
 type Item struct {
 	Name        string `hcl:"name,label" json:"name"`
 	Type        string `hcl:"type,optional" json:"type,omitempty"`
 	Description string `hcl:"description,optional" json:"description,omitempty"`
+
+	// Of is the entity this observes, for an item that is a series rather than
+	// an occurrence. A price is of a company; a headline is of nothing.
+	//
+	// It puts the entity in the event's subject, which is what lets a consumer
+	// subscribe to one company rather than filter the whole stream, and what
+	// makes the latest value a fetch rather than a scan.
+	Of string `hcl:"of,optional" json:"of,omitempty"`
+
+	// Time names the property holding when this happened.
+	//
+	// Event time, never ingest time. A headline published at nine and crawled
+	// at half eleven is an event at nine, and getting that wrong makes replay
+	// and backfill produce series that are wrong in a way nobody notices for
+	// months. Absent means the source gave no time and the moment of
+	// observation is all there is, which is worth being explicit about rather
+	// than quietly inventing.
+	Time string `hcl:"time,optional" json:"time,omitempty"`
 
 	Properties []*Property `hcl:"property,block" json:"properties,omitempty"`
 	Relations  []*Relation `hcl:"relation,block" json:"relations,omitempty"`
@@ -218,8 +254,46 @@ type Property struct {
 	// answer neither question properly.
 	Entity string `hcl:"entity,optional" json:"entity,omitempty"`
 
+	// Tag makes this property a dimension rather than a measurement.
+	//
+	// Entity references are tags already, so this is for the scalar that is
+	// genuinely a dimension: a sector, a currency. It wants a bounded set of
+	// values, because an unbounded one is how a time-series store falls over.
+	Tag bool `hcl:"tag,optional" json:"tag,omitempty"`
+
 	// Properties nest, so a property can be an object with fields of its own.
 	Properties []*Property `hcl:"property,block" json:"properties,omitempty"`
+}
+
+// Tags are the dimensions of this item's events: its entity references, its
+// relations, and any property declared a tag.
+func (i *Item) Tags() []string {
+	var out []string
+	if i.Of != "" {
+		out = append(out, "of")
+	}
+	for _, r := range i.Relations {
+		out = append(out, r.Name)
+	}
+	for _, p := range i.Properties {
+		if p.Tag || Type(p.Type) == TypeEntity {
+			out = append(out, p.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Fields are what this item measures: every property that is not a dimension.
+func (i *Item) Fields() []string {
+	var out []string
+	for _, p := range i.Properties {
+		if !p.Tag && Type(p.Type) != TypeEntity {
+			out = append(out, p.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Relation is an edge in the entity graph that is not a field of the record.
