@@ -12,6 +12,7 @@ import (
 	"github.com/rangertaha/scour/internal/bus"
 	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/exporter"
+	"github.com/rangertaha/scour/internal/exporter/exportertest"
 	"github.com/rangertaha/scour/internal/record"
 
 	natsexport "github.com/rangertaha/scour/internal/exporter/nats"
@@ -421,4 +422,42 @@ func TestASubjectIsRequired(t *testing.T) {
 	if !strings.Contains(err.Error(), "subject") {
 		t.Errorf("the error does not say what is missing: %v", err)
 	}
+}
+
+// TestContract holds this format to what every exporter promises. See
+// [exportertest]. The item is the suite's own, so the block declares it.
+func TestContract(t *testing.T) {
+	conn := serving(t)
+
+	exportertest.Run(t, func(t *testing.T, dir string) exporter.Exporter {
+		src := `
+job "markets" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+
+  exporter "nats" "article" {
+    subject = "events.contract.article"
+    url     = "` + conn.Address() + `"
+  }
+}
+`
+		doc, err := engine.Parse([]byte(src), "job.hcl")
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if err := doc.Validate(); err != nil {
+			t.Fatalf("validate: %v", err)
+		}
+
+		set, err := exporter.New(context.Background(), doc.Jobs[0], nil)
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		return set
+	})
 }

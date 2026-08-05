@@ -90,10 +90,11 @@ func open(cfg exporter.Config, extension string) (io.WriteCloser, string, error)
 
 // lines writes one record per line.
 type lines struct {
-	mu   sync.Mutex
-	out  io.WriteCloser
-	enc  *json.Encoder
-	path string
+	mu     sync.Mutex
+	out    io.WriteCloser
+	enc    *json.Encoder
+	path   string
+	closed bool
 }
 
 func newLines(_ context.Context, cfg exporter.Config) (exporter.Exporter, error) {
@@ -104,9 +105,18 @@ func newLines(_ context.Context, cfg exporter.Config) (exporter.Exporter, error)
 	return &lines{out: out, enc: json.NewEncoder(out), path: path}, nil
 }
 
+// A write after Close is refused rather than swallowed. The file is finished,
+// so the record cannot land in it, and returning nil would tell a run that it
+// had: an export that looks complete and is short is the worst outcome
+// available here. All three formats in this file were missing the guard, which
+// the shared contract suite found the first time it was run against them.
 func (l *lines) Write(_ context.Context, records ...*record.Record) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	if l.closed {
+		return fmt.Errorf("%s: already closed", l.path)
+	}
 
 	for _, r := range records {
 		if err := l.enc.Encode(r); err != nil {
@@ -116,7 +126,16 @@ func (l *lines) Write(_ context.Context, records ...*record.Record) error {
 	return nil
 }
 
-func (l *lines) Close() error { return l.out.Close() }
+func (l *lines) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.closed {
+		return nil
+	}
+	l.closed = true
+	return l.out.Close()
+}
 
 // array writes one JSON array.
 type array struct {
@@ -142,6 +161,10 @@ func newJSON(_ context.Context, cfg exporter.Config) (exporter.Exporter, error) 
 func (a *array) Write(_ context.Context, records ...*record.Record) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	if a.closed {
+		return fmt.Errorf("%s: already closed", a.path)
+	}
 
 	for _, r := range records {
 		encoded, err := json.Marshal(r)
@@ -186,6 +209,7 @@ type table struct {
 	path    string
 	layout  *exporter.Layout
 	columns []string
+	closed  bool
 }
 
 func newCSV(_ context.Context, cfg exporter.Config) (exporter.Exporter, error) {
@@ -233,6 +257,10 @@ func (t *table) Write(_ context.Context, records ...*record.Record) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	if t.closed {
+		return fmt.Errorf("%s: already closed", t.path)
+	}
+
 	for _, r := range records {
 		row := make([]string, 0, len(t.columns))
 		for _, name := range t.columns {
@@ -251,6 +279,11 @@ func (t *table) Write(_ context.Context, records ...*record.Record) error {
 func (t *table) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	if t.closed {
+		return nil
+	}
+	t.closed = true
 
 	t.writer.Flush()
 	if err := t.writer.Error(); err != nil {

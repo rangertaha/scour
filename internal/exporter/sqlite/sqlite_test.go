@@ -15,6 +15,7 @@ import (
 
 	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/exporter"
+	"github.com/rangertaha/scour/internal/exporter/exportertest"
 	"github.com/rangertaha/scour/internal/record"
 
 	exportsqlite "github.com/rangertaha/scour/internal/exporter/sqlite"
@@ -451,4 +452,20 @@ func TestTwoExportersShareOneFile(t *testing.T) {
 	if prices != 40 {
 		t.Errorf("price rows = %d, want 40: the second exporter's table was lost", prices)
 	}
+}
+
+// TestContract holds this format to what every exporter promises. See
+// [exportertest].
+func TestContract(t *testing.T) {
+	exportertest.Run(t, func(t *testing.T, dir string) exporter.Exporter {
+		set, err := exporter.New(context.Background(), job(t, `
+  exporter "sqlite" "article" {
+    dir = "`+dir+`"
+  }
+`), nil)
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		return set
+	})
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/exporter"
+	"github.com/rangertaha/scour/internal/exporter/exportertest"
 	"github.com/rangertaha/scour/internal/record"
 
 	exportparquet "github.com/rangertaha/scour/internal/exporter/parquet"
@@ -412,4 +413,20 @@ job "news" {
 	} else if !strings.Contains(err.Error(), "url") {
 		t.Errorf("the error does not say which property: %v", err)
 	}
+}
+
+// TestContract holds this format to what every exporter promises. See
+// [exportertest].
+func TestContract(t *testing.T) {
+	exportertest.Run(t, func(t *testing.T, dir string) exporter.Exporter {
+		set, err := exporter.New(context.Background(), job(t, `
+  exporter "parquet" "article" {
+    dir = "`+dir+`"
+  }
+`), nil)
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		return set
+	})
 }

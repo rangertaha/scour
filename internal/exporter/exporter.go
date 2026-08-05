@@ -97,6 +97,7 @@ func Has(format string) bool { return reg.Has(format) }
 type Set struct {
 	job     string
 	writers []named
+	closed  bool
 }
 
 type named struct {
@@ -157,6 +158,10 @@ func New(ctx context.Context, job *engine.Job, out map[string]io.WriteCloser) (*
 // A record whose item nobody exports is not an error: a job may extract
 // something for a pipeline step to use and never write it out.
 func (s *Set) Write(ctx context.Context, records ...*record.Record) error {
+	if s.closed {
+		return errors.New("exporter: the exports are closed, and these records cannot land in them")
+	}
+
 	var problems []error
 
 	for _, writer := range s.writers {
@@ -178,14 +183,27 @@ func (s *Set) Write(ctx context.Context, records ...*record.Record) error {
 
 // Close finishes every export, and reports every failure rather than the first:
 // a JSON file that would not close must not stop a CSV from being flushed.
+// Close finishes every export.
+//
+// A write after this is refused rather than swallowed. Close used to drop the
+// writers and leave nothing behind that knew it had happened, so a later Write
+// iterated an empty list and reported success: a run that flushed after closing
+// was told its records had landed, and an export that looks complete and is
+// short is the worst outcome available here. The writers are kept for that
+// reason, and closing twice is still not an error, because a run closes on the
+// way out and again from the cleanup it deferred when it failed.
 func (s *Set) Close() error {
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+
 	var problems []error
 	for _, writer := range s.writers {
 		if err := writer.exporter.Close(); err != nil {
 			problems = append(problems, fmt.Errorf("%s: %w", writer.address, err))
 		}
 	}
-	s.writers = nil
 	return joinAll(problems)
 }
 
