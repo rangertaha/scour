@@ -118,6 +118,29 @@ later without changing every link ever written.
 and for the same reasons: short-circuit is not calling next, and a link needing
 state across both directions keeps it in a local variable.
 
+### From a list of names to a chain that runs
+
+`internal/chain` runs an ordered set and does not care where the set came from.
+`internal/engine` reads a document and can say a job wants `cache` at 900.
+Neither can answer whether `cache` is a thing that exists, so `internal/plugin`
+is the seam that does.
+
+It is the first place a job naming a plugin nothing implements is refused.
+Validation deliberately does not do it: `scour validate` runs offline and in CI,
+so it cannot know what some other node has compiled in. Building the chain can,
+because by then there is a process with the implementations in it. All the
+missing names are reported at once, along with what the node does have. A job
+loading six plugins on a node with four of them should be told which two, not
+sent round the loop twice.
+
+What reaches a plugin is its block's body, undecoded. The plugin decodes it
+against its own schema, which is what lets somebody else write one without the
+seam knowing its fields, and is why a bad field is an error with a line and a
+column rather than a value silently ignored. It is also why `secret("name")`
+travels as an unevaluated call through the stored job, the diff and `scour
+show`, and becomes a credential exactly once, on the node that builds the
+plugin.
+
 ## The job document
 
 One HCL file holds one or more jobs, submitted and accepted together. A job
@@ -1307,6 +1330,7 @@ four stages is the genuinely new distributed-systems problem here.
 | Backends: local, s3, gcs | Built, one shared contract suite, all passing |
 | `internal/registry`, generic, shared by every extension point | Built, cache runs on it |
 | `internal/chain`, middleware that wraps, with drop and short-circuit | Built, tested |
+| `internal/plugin`, the seam from a job's plugin list to a chain | Built, tested |
 | HCL job document, stage blocks, nested plugins, multiple jobs | Built, tested |
 | Vocabulary: bare types and transforms | Built, tested |
 | Validation, every problem reported at once | Built, tested |
@@ -1316,7 +1340,7 @@ four stages is the genuinely new distributed-systems problem here.
 | Defaults for every setting, in one file, with a resolved view | Built, tested |
 | Resubmission diff and mutation policy | Built, tested |
 | Classifiers: the contract, terms and bayes | Built, tested |
-| Secrets in a sealed KV bucket, resolved at plugin build | Designed, not started |
+| Secrets in a sealed KV bucket | Designed, not started. The point they resolve at is built |
 | Entity store: assertions with provenance, behind a service | Designed, not started |
 | Events as items: tags, fields, time. Parquet archive | Designed. Schema built |
 | Plugin implementations, all of them | Not started |

@@ -353,6 +353,29 @@ func TestChainUsesCataloguedOrder(t *testing.T) {
 	if len(chain) != 2 || chain[0].Name != "offsite" || chain[1].Name != "cache" {
 		t.Errorf("chain = %v; want offsite (500) before cache (900)", engine.Names(chain))
 	}
+
+	// The default is not just used for sorting and then forgotten: whoever
+	// builds the chain has to be able to read the position back out, because a
+	// plugin's own configuration never mentions it.
+	if chain[0].Position() != 500 || chain[1].Position() != 900 {
+		t.Errorf("positions = %d, %d; want the catalogued 500 and 900",
+			chain[0].Position(), chain[1].Position())
+	}
+}
+
+// TestPositionReportsTheExplicitOrder: a document that sets order is what the
+// position reports, since that is the whole point of setting it.
+func TestPositionReportsTheExplicitOrder(t *testing.T) {
+	j := mustValidate(t, `
+  downloader {
+    plugin "cache" {
+      order = 10
+    }
+  }
+`)
+	if got := j.Chain(engine.StageDownloader)[0].Position(); got != 10 {
+		t.Errorf("position = %d, want the 10 the document asked for", got)
+	}
 }
 
 // TestPluginKnowsItsStageFromItsBlock: there is no stage label, so the block

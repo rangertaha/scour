@@ -356,6 +356,10 @@ func Names(chain []*Plugin) []string {
 	return out
 }
 
+// Position is where this plugin sits in its chain, after the catalogued
+// default has been applied. It is what the chain is ordered by.
+func (p *Plugin) Position() int { return p.order() }
+
 // order is the plugin's position, falling back to the catalogued default.
 func (p *Plugin) order() int {
 	if p.Order != 0 {
