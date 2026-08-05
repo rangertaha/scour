@@ -521,6 +521,7 @@ scour records <job> --follow         As they arrive
 
 ```
 scour serve                 Serve stages for whatever jobs the cluster has
+scour service <file.hcl>    Run the entity graph and the event store
 ```
 
 #### `scour serve`
@@ -554,6 +555,60 @@ node-b joined nats://127.0.0.1:41923
 frontier cannot be shared: two schedulers handing out the same host cannot
 honour a crawl delay between them. Every other node serves stages. That
 asymmetry is the politeness rule rather than a limitation to be lifted.
+
+### Running the shared stores
+
+```
+scour service <file.hcl>    Run the entity graph and the event store
+```
+
+#### `scour service <file.hcl>`
+
+The stores a cluster shares, on the bus, until interrupted.
+
+| Flag | Effect |
+| --- | --- |
+| `--join <url>` | The cluster, as `nats://host:port` |
+
+A service document is not a job document. A job says it wants entities; it does
+not say where they live, and the difference matters more than it looks. The
+entity graph is shared between jobs, which is the whole of its value: two jobs
+crawling different sites should agree about who Acme is. A job document carries
+everything one crawl needs so that a job resubmitted next month does what it did
+today, so an address in it would mean whichever job was submitted last silently
+decided where every other job's entities went, and a job moved between clusters
+would carry the old cluster's address with it.
+
+```hcl
+entity {
+  dir = "./graph"
+}
+
+event {
+  dir = "./events"
+}
+```
+
+| Field | Effect |
+| --- | --- |
+| `dir` | Where the store lives. Required: a store that vanishes on restart is one every writer believes it wrote to |
+| `url` | The bus to answer on. Empty starts one in this process |
+| `timeout` | How long one request may take. Default `30s` |
+
+```
+$ scour service service.hcl
+entities: serving ./graph on scour.entity.*
+events: serving ./events on scour.event.*
+listening on nats://127.0.0.1:41923
+ready. Interrupt to stop
+```
+
+**Both stores have one writer**, because both are SQLite. That is why they are
+behind a service rather than a file each node opens: a cluster where every node
+opened the file would be one where the answer depended on which node you asked,
+and where two nodes writing at once failed. Running a second `scour service`
+against the same document joins the queue group as a standby that shares the
+load, not as a second writer.
 
 ### Secrets
 

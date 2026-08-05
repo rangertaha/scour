@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -344,5 +345,103 @@ func TestVersionIsPrintedByTheBuiltBinary(t *testing.T) {
 	}
 	if strings.TrimSpace(got.stdout+got.stderr) == "" {
 		t.Error("--version printed nothing")
+	}
+}
+
+// running is a scour process that has not finished, which is what a service is.
+//
+// The tests above run a command to completion and read what it printed. A
+// service prints as it goes and then waits, so its output has to be readable
+// while it is still running and it has to be stoppable at the end.
+type running struct {
+	cmd    *exec.Cmd
+	output *lockedBuffer
+}
+
+// lockedBuffer collects a child's output while a test reads it.
+//
+// A plain strings.Builder is written by the copying goroutine os/exec starts
+// and read by the test, which is a data race that -race would fail on and that
+// would otherwise be an occasional wrong answer.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// start runs scour in the background and stops it when the test ends.
+func start(t *testing.T, dir string, args ...string) *running {
+	t.Helper()
+
+	cmd := exec.Command(binary, args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOCOVERDIR="+coverDir)
+
+	out := &lockedBuffer{}
+	cmd.Stdout = out
+	cmd.Stderr = out
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting scour %v: %v", args, err)
+	}
+
+	r := &running{cmd: cmd, output: out}
+	t.Cleanup(func() { r.stop(t) })
+	return r
+}
+
+// waitFor blocks until the process prints a line containing prefix, and returns
+// the rest of that line.
+//
+// Polling the output rather than sleeping a fixed time, because a fixed sleep
+// is either too short on a loaded machine or wasted on an idle one, and this is
+// how a test learns the address an embedded bus chose.
+func waitFor(t *testing.T, r *running, prefix string) string {
+	t.Helper()
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, line := range strings.Split(r.output.String(), "\n") {
+			if i := strings.Index(line, prefix); i >= 0 {
+				return strings.TrimSpace(line[i+len(prefix):])
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	t.Fatalf("scour never printed %q:\n%s", prefix, r.output.String())
+	return ""
+}
+
+// stop interrupts the process and waits for it, so that a test cannot leave one
+// running and a later test cannot inherit its port.
+func (r *running) stop(t *testing.T) {
+	t.Helper()
+
+	if r.cmd.Process == nil || r.cmd.ProcessState != nil {
+		return
+	}
+	r.cmd.Process.Signal(syscall.SIGINT)
+
+	done := make(chan struct{})
+	go func() { r.cmd.Wait(); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		r.cmd.Process.Kill()
+		<-done
+		t.Errorf("scour ignored the interrupt:\n%s", r.output.String())
 	}
 }
