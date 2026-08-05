@@ -4,6 +4,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/hcl/v2/gohcl"
@@ -147,6 +148,36 @@ func (e *EntityService) Wait() (time.Duration, error) {
 	return d, nil
 }
 
+func entityURL(s *Service) string {
+	if s.Entity == nil {
+		return ""
+	}
+	return s.Entity.URL
+}
+
+func eventURL(s *Service) string {
+	if s.Event == nil {
+		return ""
+	}
+	return s.Event.URL
+}
+
+func topicURL(s *Service) string {
+	if s.Topic == nil {
+		return ""
+	}
+	return s.Topic.URL
+}
+
+func contains(list []string, want string) bool {
+	for _, one := range list {
+		if one == want {
+			return true
+		}
+	}
+	return false
+}
+
 // ParseService reads a service document.
 //
 // Separate from [Parse] rather than a mode of it, because the two documents
@@ -184,6 +215,22 @@ func ParseService(src []byte, filename string) (*Service, error) {
 // job document does: a person fixing a file wants the whole list.
 func (s *Service) Validate() error {
 	var problems []error
+
+	// Blocks that disagree about the bus are a document saying two things, and
+	// one process serves whichever blocks are present. Picking one silently is
+	// how somebody ends up debugging why half their services are on the wrong
+	// bus.
+	var urls []string
+	for _, one := range []string{entityURL(s), eventURL(s), topicURL(s)} {
+		if one != "" && !contains(urls, one) {
+			urls = append(urls, one)
+		}
+	}
+	if len(urls) > 1 {
+		problems = append(problems, fmt.Errorf(
+			"the blocks disagree about which bus to answer on: %s. One process serves them all, so they need one url",
+			strings.Join(urls, " and ")))
+	}
 
 	if s.Entity == nil && s.Event == nil && s.Topic == nil {
 		problems = append(problems, fmt.Errorf(

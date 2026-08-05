@@ -10,6 +10,7 @@ import (
 
 	"github.com/rangertaha/scour/internal/bus"
 	"github.com/rangertaha/scour/internal/event"
+	"github.com/rangertaha/scour/internal/event/eventtest"
 )
 
 // measure runs the same sequence against whatever it is given, so the direct
@@ -181,4 +182,32 @@ func TestNothingServingEventsIsNotATimeout(t *testing.T) {
 	if time.Since(started) > 5*time.Second {
 		t.Errorf("it waited %s, so it timed out rather than noticing", time.Since(started))
 	}
+}
+
+// TestTheClientKeepsTheEventContract.
+//
+// The same suite the SQLite store is held to, run against a log on the other
+// side of a bus. It was missing, and its absence hid a real defect: the suite
+// asserts errors.Is(err, event.ErrNotFound) after a delete, and an error that
+// crossed as a string matched nothing, so a client could not tell "not there"
+// from "went wrong". Every implementation of an interface belongs in that
+// interface's suite; one that is not there is the one that drifts.
+func TestTheClientKeepsTheEventContract(t *testing.T) {
+	conn := connect(t)
+
+	eventtest.Run(t, func(t *testing.T) eventtest.Log {
+		store, err := event.Open("")
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		t.Cleanup(func() { store.Close() })
+
+		service, err := conn.ServeEvents(store)
+		if err != nil {
+			t.Fatalf("serve: %v", err)
+		}
+		t.Cleanup(func() { service.Close() })
+
+		return conn.NewEvents(wait)
+	})
 }

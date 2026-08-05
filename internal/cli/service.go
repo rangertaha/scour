@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 
 	ucli "github.com/urfave/cli/v3"
 
@@ -50,6 +51,36 @@ func Service(a *App) *ucli.Command {
 	}
 }
 
+// serviceURL is the bus a document says to answer on.
+//
+// The blocks each carry one because they are configured separately, and one
+// process serves whichever are present, so they have to agree. Disagreeing is a
+// document saying two things, and picking one silently is how somebody ends up
+// debugging why half their services are on the wrong bus.
+func serviceURL(doc *engine.Service) string {
+	var urls []string
+	for _, one := range []string{
+		blockURL(doc.Entity != nil, func() string { return doc.Entity.URL }),
+		blockURL(doc.Event != nil, func() string { return doc.Event.URL }),
+		blockURL(doc.Topic != nil, func() string { return doc.Topic.URL }),
+	} {
+		if one != "" && !slices.Contains(urls, one) {
+			urls = append(urls, one)
+		}
+	}
+	if len(urls) == 1 {
+		return urls[0]
+	}
+	return ""
+}
+
+func blockURL(present bool, get func() string) string {
+	if !present {
+		return ""
+	}
+	return get()
+}
+
 func runService(ctx context.Context, a *App, path, join string) error {
 	src, err := os.ReadFile(path)
 	if err != nil {
@@ -64,7 +95,21 @@ func runService(ctx context.Context, a *App, path, join string) error {
 		return Invalidf("%v", err)
 	}
 
-	conn, err := bus.Connect(bus.Options{URL: join, Name: "scour-service"})
+	// The document's own address is used when it gives one, and --join
+	// overrides it, because a flag is what somebody types to point a service
+	// somewhere else for one run.
+	//
+	// Read from the document at all because it was not: url was parsed,
+	// validated, documented and ignored, so a service told to answer on
+	// nats://10.0.0.5:4222 started an embedded broker on an ephemeral port,
+	// printed that it was ready, and answered nobody. Every node pointed at the
+	// documented address failed to build its chain.
+	url := join
+	if url == "" {
+		url = serviceURL(doc)
+	}
+
+	conn, err := bus.Connect(bus.Options{URL: url, Name: "scour-service"})
 	if err != nil {
 		return Failedf("%v", err)
 	}

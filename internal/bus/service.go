@@ -5,10 +5,14 @@ package bus
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/nats-io/nats.go"
+
+	"github.com/rangertaha/scour/internal/classify/store"
+	"github.com/rangertaha/scour/internal/event"
 )
 
 // The plumbing the services share.
@@ -56,16 +60,63 @@ func call[Req, Res any](ctx context.Context, c *Conn, subject string, wait time.
 	}
 
 	var reply struct {
-		Result Res    `json:"result"`
-		Error  string `json:"error,omitempty"`
+		Result   Res    `json:"result"`
+		Error    string `json:"error,omitempty"`
+		Sentinel string `json:"sentinel,omitempty"`
 	}
 	if err := json.Unmarshal(msg.Data, &reply); err != nil {
 		return zero, fmt.Errorf("bus: %s: %w", subject, err)
 	}
 	if reply.Error != "" {
-		return zero, fmt.Errorf("%s", reply.Error)
+		return zero, remoteError(reply.Error, reply.Sentinel)
 	}
 	return reply.Result, nil
+}
+
+// Sentinels are the errors a caller is expected to test for with [errors.Is],
+// and which therefore have to survive a trip over the bus.
+//
+// An error crosses as a string, so a client that rebuilt it with fmt.Errorf got
+// something that read correctly and matched nothing: errors.Is(err,
+// event.ErrNotFound) was true against a local store and false against the same
+// store one hop away, so a client could not tell "not there" from "went wrong"
+// and the conformance suites could not either. The name travels beside the
+// message and is put back on the other side.
+//
+// A short list on purpose. Everything here is a decision a caller branches on;
+// an error it only reports does not need to be here, and adding one that nobody
+// tests for would be carrying a name for nothing.
+var sentinels = map[string]error{
+	"event.ErrNotFound":      event.ErrNotFound,
+	"classify.ErrNotTrained": store.ErrNotTrained,
+	"bus.ErrNoStage":         ErrNoStage,
+}
+
+// nameOf is the sentinel an error is, if it is one.
+func nameOf(err error) string {
+	for name, sentinel := range sentinels {
+		if errors.Is(err, sentinel) {
+			return name
+		}
+	}
+	return ""
+}
+
+// remote is an error that came back from a service.
+//
+// It keeps the message the store wrote and unwraps to the sentinel the store
+// meant, so errors.Is works the same either side of the bus and the text does
+// not gain a second copy of itself.
+type remote struct {
+	msg string
+	is  error
+}
+
+func (r *remote) Error() string { return r.msg }
+func (r *remote) Unwrap() error { return r.is }
+
+func remoteError(msg, sentinel string) error {
+	return &remote{msg: msg, is: sentinels[sentinel]}
 }
 
 // serve subscribes one operation, in a queue group so that starting a second
@@ -74,8 +125,9 @@ func serve[Req, Res any](c *Conn, subject, queue string, handle func(context.Con
 	sub, err := c.QueueSubscribe(subject, queue, func(msg *nats.Msg) {
 		var req Req
 		var reply struct {
-			Result Res    `json:"result"`
-			Error  string `json:"error,omitempty"`
+			Result   Res    `json:"result"`
+			Error    string `json:"error,omitempty"`
+			Sentinel string `json:"sentinel,omitempty"`
 		}
 
 		if err := json.Unmarshal(msg.Data, &req); err != nil {
@@ -90,6 +142,7 @@ func serve[Req, Res any](c *Conn, subject, queue string, handle func(context.Con
 
 			if err != nil {
 				reply.Error = err.Error()
+				reply.Sentinel = nameOf(err)
 			} else {
 				reply.Result = result
 			}
@@ -157,6 +210,14 @@ func serving[Req, Res any](c *Conn, s *Service, subject, queue string, handle fu
 // half-registered.
 func (s *Service) ready(c *Conn) error {
 	if s.err != nil {
+		// Closed, not merely reported. A registration that failed partway
+		// leaves every subscription that already succeeded in the queue group,
+		// so a caller told "nothing is serving" would in fact have a
+		// half-registered member competing for the operations that did
+		// register, answering them from a store the caller believed it had
+		// abandoned. serving's own comment promised this and it was not
+		// happening.
+		s.Close()
 		return s.err
 	}
 	if err := c.Flush(); err != nil {
