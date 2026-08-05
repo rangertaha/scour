@@ -137,6 +137,10 @@ type Downloader struct {
 	Timeout string `hcl:"timeout,optional" json:"timeout,omitempty"`
 	// MaxBody refuses a body larger than this, before it is downloaded.
 	MaxBody int64 `hcl:"max_body,optional" json:"max_body,omitempty"`
+	// MaxRedirects is how many hops a request may be forwarded through. Zero
+	// follows none and hands back the 3xx. A pointer, because zero is a real
+	// answer and unset has to mean the default.
+	MaxRedirects *int `hcl:"max_redirects,optional" json:"max_redirects,omitempty"`
 
 	Plugins []*Plugin `hcl:"plugin,block" json:"plugins,omitempty"`
 }

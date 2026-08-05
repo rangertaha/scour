@@ -205,6 +205,7 @@ downloader
   user_agent     scour
   timeout        30s
   max_body       33554432
+  max_redirects  10
   chain          cache(900)
 ...
 pipeline: 2 wave(s), 2 at once at the widest

@@ -204,19 +204,20 @@ func diffStages(running, submitted *Job) Changes {
 // read per request, so the next request simply reads the new one.
 func stageFields(a, b *Job) map[string][2]string {
 	return map[string][2]string{
-		"scheduler.policy":      {a.Scheduler.OrderPolicy(), b.Scheduler.OrderPolicy()},
-		"scheduler.rate":        {rateOf(a.Scheduler), rateOf(b.Scheduler)},
-		"scheduler.concurrency": {itoa(a.Scheduler.Parallelism()), itoa(b.Scheduler.Parallelism())},
-		"scheduler.max_depth":   {itoa(a.Scheduler.Depth()), itoa(b.Scheduler.Depth())},
-		"scheduler.max_pages":   {itoa(a.Scheduler.Pages()), itoa(b.Scheduler.Pages())},
-		"scheduler.max_time":    {budgetOf(a.Scheduler), budgetOf(b.Scheduler)},
-		"downloader.robots":     {btoa(a.Downloader.ObeysRobots()), btoa(b.Downloader.ObeysRobots())},
-		"downloader.user_agent": {a.Downloader.Agent(), b.Downloader.Agent()},
-		"downloader.timeout":    {timeoutOf(a.Downloader), timeoutOf(b.Downloader)},
-		"downloader.max_body":   {i64toa(a.Downloader.BodyBytes()), i64toa(b.Downloader.BodyBytes())},
-		"downloader.external":   {btoa(a.Downloader.IsExternal()), btoa(b.Downloader.IsExternal())},
-		"spider.external":       {btoa(a.Spider.IsExternal()), btoa(b.Spider.IsExternal())},
-		"pipeline.external":     {btoa(a.Pipeline.IsExternal()), btoa(b.Pipeline.IsExternal())},
+		"scheduler.policy":         {a.Scheduler.OrderPolicy(), b.Scheduler.OrderPolicy()},
+		"scheduler.rate":           {rateOf(a.Scheduler), rateOf(b.Scheduler)},
+		"scheduler.concurrency":    {itoa(a.Scheduler.Parallelism()), itoa(b.Scheduler.Parallelism())},
+		"scheduler.max_depth":      {itoa(a.Scheduler.Depth()), itoa(b.Scheduler.Depth())},
+		"scheduler.max_pages":      {itoa(a.Scheduler.Pages()), itoa(b.Scheduler.Pages())},
+		"scheduler.max_time":       {budgetOf(a.Scheduler), budgetOf(b.Scheduler)},
+		"downloader.robots":        {btoa(a.Downloader.ObeysRobots()), btoa(b.Downloader.ObeysRobots())},
+		"downloader.user_agent":    {a.Downloader.Agent(), b.Downloader.Agent()},
+		"downloader.timeout":       {timeoutOf(a.Downloader), timeoutOf(b.Downloader)},
+		"downloader.max_body":      {i64toa(a.Downloader.BodyBytes()), i64toa(b.Downloader.BodyBytes())},
+		"downloader.max_redirects": {itoa(a.Downloader.Redirects()), itoa(b.Downloader.Redirects())},
+		"downloader.external":      {btoa(a.Downloader.IsExternal()), btoa(b.Downloader.IsExternal())},
+		"spider.external":          {btoa(a.Spider.IsExternal()), btoa(b.Spider.IsExternal())},
+		"pipeline.external":        {btoa(a.Pipeline.IsExternal()), btoa(b.Pipeline.IsExternal())},
 	}
 }
 

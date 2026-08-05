@@ -82,6 +82,7 @@ func (a *App) showJob(j *engine.Job) {
 	a.field("user_agent", j.Downloader.Agent())
 	a.field("timeout", j.Downloader.Timeout)
 	a.field("max_body", fmt.Sprint(j.Downloader.BodyBytes()))
+	a.field("max_redirects", fmt.Sprint(j.Downloader.Redirects()))
 	if j.Downloader.IsExternal() {
 		a.field("external", "yes, waiting "+j.Downloader.ExternalTimeout)
 	}

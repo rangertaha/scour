@@ -31,6 +31,9 @@ type Stage struct {
 type Options struct {
 	// Client does the requests. Nil builds one from the job's timeout, which
 	// is what everything outside a test wants.
+	//
+	// A client of your own that follows redirects hides them from the chain,
+	// from robots and from the cache. The one built here does not follow.
 	Client *http.Client
 
 	// Eval resolves `secret()` in plugin configuration. Nil means a job whose
@@ -55,7 +58,16 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Stage, error) {
 
 	client := opts.Client
 	if client == nil {
-		client = &http.Client{Timeout: timeout}
+		client = &http.Client{
+			Timeout: timeout,
+			// Redirects are followed by [follower], outside everything, so that
+			// each hop is checked against its own host's robots.txt and cached
+			// under its own key. One the client followed would be invisible to
+			// both.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 	}
 
 	core := &Fetcher{
@@ -82,6 +94,13 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Stage, error) {
 		reader.MaxBody = robots.MaxSize
 
 		handler = newGuard(&reader, core.Agent).wrap(handler)
+	}
+
+	// Outside even that: a redirect is a different URL on a host with its own
+	// rules, so every hop re-enters from the top rather than skipping the
+	// checks the first one passed.
+	if hops := job.Downloader.Redirects(); hops > 0 {
+		handler = (&follower{max: hops}).wrap(handler)
 	}
 
 	return &Stage{

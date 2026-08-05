@@ -60,7 +60,6 @@ var Placements = map[Stage][]Placement{
 		{"headers", 560, "Default request headers"},
 		{"metarefresh", 580, "Follows meta-refresh redirects"},
 		{"proxy", 610, "Routes through a proxy"},
-		{"redirect", 630, "Follows HTTP redirects"},
 		{"stats", 850, "Counts requests, responses and failures"},
 		{"cache", 900, "Reads and writes the page cache"},
 	},

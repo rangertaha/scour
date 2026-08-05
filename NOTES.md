@@ -225,10 +225,11 @@ job "news" {
   }
 
   downloader {
-    robots     = true
-    user_agent = "scour"
-    timeout    = "30s"
-    max_body   = 33554432
+    robots        = true
+    user_agent    = "scour"
+    timeout       = "30s"
+    max_body      = 33554432
+    max_redirects = 10
 
     plugin "cache" {
       order   = 900
@@ -303,8 +304,9 @@ always does; a nested plugin is what was added to it. That is also the answer to
 where caching goes: a cache sits between a request and the network, which is
 what a downloader middleware is, so it is `plugin "cache"` inside `downloader`.
 
-**Obligations are attributes, not plugins.** `robots`, `user_agent`, `timeout`
-and `max_body` were catalogued as middleware and should not have been. A crawl
+**Obligations are attributes, not plugins.** `robots`, `user_agent`, `timeout`,
+`max_body` and `max_redirects` were catalogued as middleware and should not have
+been. A crawl
 with no cache is a valid crawl that costs you money; a crawl with no robots
 handling harms somebody else's server. A thing whose absence hurts a third party
 must not be opt-in through a mechanism that defaults to absent. A knob you can
@@ -831,12 +833,11 @@ them to what is written here.
 | 560 | `headers` | Default request headers |
 | 580 | `metarefresh` | Follows meta-refresh redirects |
 | 610 | `proxy` | Routes through a proxy |
-| 630 | `redirect` | Follows HTTP redirects |
 | 850 | `stats` | Counts requests, responses and failures |
 | 900 | `cache` | Reads and writes the page cache |
 
-`robots`, `user_agent`, `timeout` and `max_body` are not here. They are
-`downloader` attributes, for the reason under Decisions.
+`robots`, `user_agent`, `timeout`, `max_body` and `max_redirects` are not here.
+They are `downloader` attributes, for the reason under Decisions.
 
 **robots is not in the table for a second reason too.** There is exactly one
 correct position for it, and a position that can be configured is a position
@@ -855,6 +856,22 @@ blip costs one request rather than a host.
 What each answer means is RFC 9309 §2.3.1: 2xx is the rules, 4xx is a site with
 nothing to say, and anything else is a site that could not tell us, which is not
 the same as a site that said yes.
+
+**Redirects left the table for the same reason.** A redirect is a different URL,
+on a host that may have its own robots.txt, and a follower anywhere inside the
+robots check would fetch it without ever asking. So following is a
+`max_redirects` attribute, and it wraps everything: each hop re-enters the whole
+downloader from the top, is checked against its own host's robots.txt, and is
+cached under its own key. `max_redirects = 0` follows none and hands the 3xx
+back.
+
+The HTTP client is told not to follow anything itself, because a redirect it
+followed would be invisible to all of this.
+
+When the frontier exists, a redirect that leaves the host should become a
+frontier request rather than an inline hop, so that dedup, scope and politeness
+all get a say in it. Following inline is right for the same-host case, which is
+nearly all of them, and is what this does today.
 
 **Decoding is not in this table, and that is deliberate.**
 
@@ -1370,6 +1387,7 @@ four stages is the genuinely new distributed-systems problem here.
 | The `cache` middleware: hits, sidecar, ttl, statuses | Built, tested |
 | `internal/robots`: RFC 9309, written rather than imported | Built, tested |
 | robots.txt obeyed, outside the whole chain | Built, tested |
+| Redirects followed, every hop checked and cached on its own | Built, tested |
 | HCL job document, stage blocks, nested plugins, multiple jobs | Built, tested |
 | Vocabulary: bare types and transforms | Built, tested |
 | Validation, every problem reported at once | Built, tested |

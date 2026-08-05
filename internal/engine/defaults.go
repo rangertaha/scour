@@ -52,6 +52,7 @@ const (
 	DefaultUserAgent      = "scour (+https://github.com/rangertaha/scour)"
 	DefaultRequestTimeout = 30 * time.Second
 	DefaultMaxBody        = 32 << 20 // 32 MiB
+	DefaultMaxRedirects   = 10
 
 	// External stages.
 	DefaultExternalTimeout = 5 * time.Minute
@@ -88,27 +89,28 @@ var Policies = []string{"priority", "breadth", "depth", "random"}
 // command can print them and a test can check none is missing.
 func Defaults() map[string]string {
 	return map[string]string{
-		"item.type":               string(DefaultItemType),
-		"item.property.type":      string(DefaultPropertyType),
-		"scheduler.policy":        DefaultPolicy,
-		"scheduler.rate":          DefaultRate.String(),
-		"scheduler.concurrency":   fmt.Sprint(DefaultConcurrency),
-		"scheduler.max_depth":     fmt.Sprint(DefaultMaxDepth),
-		"scheduler.max_pages":     fmt.Sprint(DefaultMaxPages),
-		"scheduler.max_time":      DefaultMaxTime.String(),
-		"downloader.robots":       fmt.Sprint(DefaultRobots),
-		"downloader.user_agent":   DefaultUserAgent,
-		"downloader.timeout":      DefaultRequestTimeout.String(),
-		"downloader.max_body":     fmt.Sprint(DefaultMaxBody),
-		"external_timeout":        DefaultExternalTimeout.String(),
-		"monitoring.metrics":      fmt.Sprint(DefaultMetrics),
-		"monitoring.logging":      fmt.Sprint(DefaultLogging),
-		"monitoring.level":        DefaultLogLevel,
-		"plugin.enabled":          fmt.Sprint(DefaultPluginEnabled),
-		"mutation.costly":         DefaultCostly,
-		"mutation.out_of_scope":   DefaultOutOfScope,
-		"mutation.stale_records":  DefaultStaleRecords,
-		"mutation.orphaned_cache": DefaultOrphanedCache,
+		"item.type":                string(DefaultItemType),
+		"item.property.type":       string(DefaultPropertyType),
+		"scheduler.policy":         DefaultPolicy,
+		"scheduler.rate":           DefaultRate.String(),
+		"scheduler.concurrency":    fmt.Sprint(DefaultConcurrency),
+		"scheduler.max_depth":      fmt.Sprint(DefaultMaxDepth),
+		"scheduler.max_pages":      fmt.Sprint(DefaultMaxPages),
+		"scheduler.max_time":       DefaultMaxTime.String(),
+		"downloader.robots":        fmt.Sprint(DefaultRobots),
+		"downloader.user_agent":    DefaultUserAgent,
+		"downloader.timeout":       DefaultRequestTimeout.String(),
+		"downloader.max_body":      fmt.Sprint(DefaultMaxBody),
+		"downloader.max_redirects": fmt.Sprint(DefaultMaxRedirects),
+		"external_timeout":         DefaultExternalTimeout.String(),
+		"monitoring.metrics":       fmt.Sprint(DefaultMetrics),
+		"monitoring.logging":       fmt.Sprint(DefaultLogging),
+		"monitoring.level":         DefaultLogLevel,
+		"plugin.enabled":           fmt.Sprint(DefaultPluginEnabled),
+		"mutation.costly":          DefaultCostly,
+		"mutation.out_of_scope":    DefaultOutOfScope,
+		"mutation.stale_records":   DefaultStaleRecords,
+		"mutation.orphaned_cache":  DefaultOrphanedCache,
 	}
 }
 
@@ -257,6 +259,17 @@ func (d *Downloader) BodyBytes() int64 {
 	return d.MaxBody
 }
 
+// Redirects is how many hops a request may be forwarded through.
+//
+// Zero is a real answer, meaning follow none and hand the 3xx back, so an unset
+// value cannot be told from it by looking. That is what the pointer is for.
+func (d *Downloader) Redirects() int {
+	if d == nil || d.MaxRedirects == nil {
+		return DefaultMaxRedirects
+	}
+	return *d.MaxRedirects
+}
+
 // IsExternal reports whether somebody else runs this stage.
 func (d *Downloader) IsExternal() bool { return d != nil && d.External }
 
@@ -276,6 +289,9 @@ func (d *Downloader) validate() []error {
 
 	if d.MaxBody < 0 {
 		problems = append(problems, fmt.Errorf("downloader.max_body: %d is negative", d.MaxBody))
+	}
+	if d.MaxRedirects != nil && *d.MaxRedirects < 0 {
+		problems = append(problems, fmt.Errorf("downloader.max_redirects: %d is negative", *d.MaxRedirects))
 	}
 	if v, err := d.RequestTimeout(); err != nil {
 		problems = append(problems, err)
@@ -467,12 +483,14 @@ func (j *Job) Resolved() *Job {
 	out.Scheduler = sched
 
 	robots := j.Downloader.ObeysRobots()
+	hops := j.Downloader.Redirects()
 	down := &Downloader{
-		External:  j.Downloader.IsExternal(),
-		Robots:    &robots,
-		UserAgent: j.Downloader.Agent(),
-		MaxBody:   j.Downloader.BodyBytes(),
-		Plugins:   resolvedPlugins(j.Downloader.plugins()),
+		External:     j.Downloader.IsExternal(),
+		Robots:       &robots,
+		UserAgent:    j.Downloader.Agent(),
+		MaxBody:      j.Downloader.BodyBytes(),
+		MaxRedirects: &hops,
+		Plugins:      resolvedPlugins(j.Downloader.plugins()),
 	}
 	if v, err := j.Downloader.RequestTimeout(); err == nil {
 		down.Timeout = v.String()

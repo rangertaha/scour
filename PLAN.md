@@ -40,15 +40,18 @@ what is on disk is the bytes it sent, and decoding the same text out of a hit as
 out of the fetch. robots.txt honoured under a server that disallows. Redirects
 landing at their target.
 
-*Where it is:* the downloader, `cache` and robots are built and tested.
-`redirect` is not.
+*Where it is:* built and tested, all of it.
 
-robots.txt turned out not to be middleware. There is one correct position for
-it, outside everything, so it is a `downloader` attribute that wraps the chain
-rather than a plugin with a number somebody could change. RFC 9309 is
-implemented here rather than imported: being wrong is too permissive on somebody
-else's site, under our name, and nothing in our own output looks wrong when it
-happens.
+Two of the four turned out not to be middleware. robots and redirects each have
+exactly one correct position, outside everything, so both are `downloader`
+attributes that wrap the chain rather than plugins with a number somebody could
+change. A redirect follower inside the robots check would fetch another host's
+pages without ever reading its robots.txt, which is the whole argument in one
+sentence.
+
+RFC 9309 is implemented here rather than imported: being wrong is too permissive
+on somebody else's site, under our name, and nothing in our own output looks
+wrong when it happens.
 
 **Phase 3. The frontier and the scheduler.** Dedup, depth, politeness, the
 ordering policies, leases. SQLite, one database, hand-written SQL: see
