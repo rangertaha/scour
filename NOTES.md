@@ -702,6 +702,36 @@ What is given up, and it is worth being honest: ad-hoc analytics over records
 are not this store's job, and cross-machine writes to one job's frontier are not
 possible without sharding first.
 
+### Reconsidered, and kept
+
+Weighed against Postgres, an embedded key-value store, Redis, DuckDB and
+Parquet, and kept.
+
+The frontier is not close. Politeness already forces one writer per host, the
+lease is a transaction with an ordering in it rather than a row fetched by id,
+and being able to answer "why was that URL never fetched" with a SELECT is worth
+more during development than any of the alternatives offer.
+
+Records are the piece most likely to move, and saying so is the point. Nothing
+forces the choice the way politeness forces the frontier's: it is an append-and-
+query workload, and columnar storage would suit the analytics better. What holds
+it here for now is that marks are updated in place and `stale_records =
+"discard"` is a delete, both of which columnar formats are bad at, so the
+mutable half would need a relational store beside it anyway. DuckDB would also
+cost the clean cross-compile, and one binary with nothing installed is worth
+more than a query nobody has run yet.
+
+**The pipeline owning that database privately is what keeps changing this
+cheap.** Nothing else touches it, so swapping what is underneath is contained
+rather than a migration.
+
+**What would change it:** the distinctness query becoming hot. Counting how many
+distinct values a property takes across the corpus is how a locator that found
+the site's name rather than the headline is caught, and it is genuinely
+analytical. At a few million records SQLite does it comfortably. As a live view
+over tens of millions it would not, and then the records store moves and the
+frontier stays exactly where it is.
+
 What would change the answer: a crawl whose hosts genuinely exceed what one
 scheduler can pace. Then Postgres and `FOR UPDATE SKIP LOCKED`, which is built
 for exactly this, and the migration is a dialect rather than a redesign.
@@ -847,13 +877,14 @@ four stages is the genuinely new distributed-systems problem here.
 | Extraction spec: separable, renders to HCL, fingerprinted | Built, tested |
 | Defaults for every setting, in one file, with a resolved view | Built, tested |
 | Resubmission diff and mutation policy | Built, tested |
+| Classifiers: the contract, terms and bayes | Built, tested |
 | Plugin implementations, all of them | Not started |
 | The stages themselves | Not started |
 | Exporters, all formats | Not started |
 | Cluster join, distributed jobs | Not started |
 | Jobs in a KV bucket, server-side writes | Decided, not started |
-| Frontier in SQLite, one shared database | Decided, not started |
-| Records in SQLite, one database per job | Decided, not started |
+| Frontier in SQLite, one shared database | Decided, reconsidered, kept |
+| Records in SQLite, one database per job | Decided. The piece most likely to move |
 | Run state and nodes in KV buckets of their own | Decided, not started |
 
 `internal/engine/notes_test.go` reads this file. It parses and validates the job
