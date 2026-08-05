@@ -26,12 +26,12 @@ import (
 
 // Store is a cache held in an object storage bucket.
 type Store struct {
-	// bucket is what operations go through, prefixed when a prefix was given.
+	// bucket is what every operation goes through, Close included, and it is
+	// the prefixed wrapper when a prefix was given. The wrapper delegates its
+	// own Close down to what it wraps, so this one handle is the whole story;
+	// keeping a second handle to the unprefixed bucket and closing that instead
+	// is what leaked one bucket per job.
 	bucket *gcblob.Bucket
-	// underlying is what must actually be closed. Closing a prefixed wrapper
-	// does not close what it wraps, so a store that only kept the wrapper
-	// would leak the connection it opened.
-	underlying *gcblob.Bucket
 }
 
 // Open returns a store over the bucket named by a gocloud URL, such as
@@ -61,7 +61,7 @@ func Open(ctx context.Context, bucketURL, prefix string) (*Store, error) {
 // backends build their own client when a job supplies a credential, and hand
 // the bucket here rather than reimplementing the prefixing and the closing.
 func Wrap(bucket *gcblob.Bucket, prefix string) *Store {
-	s := &Store{bucket: bucket, underlying: bucket}
+	s := &Store{bucket: bucket}
 	if prefix != "" {
 		// A prefix that does not end in a separator would silently merge with
 		// the first characters of every key.
@@ -75,22 +75,36 @@ func Wrap(bucket *gcblob.Bucket, prefix string) *Store {
 
 // Put implements [cache.Store].
 //
-// Object storage has no partial write to worry about: a key becomes visible
-// when the writer closes, and until then readers see whatever was there
-// before. That is the same guarantee the local backend buys with a rename.
+// A key becomes visible when the writer closes, and until then readers see
+// whatever was there before, so a Put that fails partway leaves the previous
+// body alone. That is the same guarantee the local backend buys with a rename,
+// and it holds only because a failed copy cancels rather than closes: see
+// below.
 func (s *Store) Put(ctx context.Context, key string, r io.Reader) error {
 	if err := cache.CheckKey(key); err != nil {
 		return err
 	}
+
+	// A context of this write's own, so that a body which stops partway can be
+	// abandoned rather than committed. gocloud is explicit that Close IS the
+	// commit and that cancelling the context is the only way to abort, and
+	// closing on error is what this used to do: a re-crawl whose connection
+	// reset at 40 KB replaced a good 200 KB body with a truncated one that
+	// parses and extracts silently. That is exactly what [cache.Store] forbids
+	// and what the local backend buys with a rename.
+	ctx, abort := context.WithCancel(ctx)
+	defer abort()
 
 	w, err := s.bucket.NewWriter(ctx, key, nil)
 	if err != nil {
 		return fmt.Errorf("cache/blob: write %q: %w", key, err)
 	}
 	if _, err := io.Copy(w, r); err != nil {
-		// Close is still required to release the writer, and its own error is
-		// not the interesting one here.
-		w.Close()
+		abort()
+		// Close after the cancel, which releases the writer without
+		// committing. Its own error is the cancellation and is not the
+		// interesting one.
+		_ = w.Close()
 		return fmt.Errorf("cache/blob: write %q: %w", key, err)
 	}
 	if err := w.Close(); err != nil {
@@ -167,9 +181,17 @@ func (s *Store) Keys(ctx context.Context) iter.Seq2[string, error] {
 	}
 }
 
-// Close implements [cache.Store].
+// Close implements [cache.Store], releasing the bucket.
+//
+// The prefixed wrapper is what gets closed when there is one, and the
+// underlying bucket only when there is not. gocloud's PrefixedBucket marks the
+// bucket it is handed as closed and delegates its own Close down to it, so
+// closing the underlying one directly returned "Bucket has been closed" on a
+// perfectly healthy store and left the driver open: a process opening one cache
+// per job leaked a bucket per job, and the store went on serving reads after
+// Close because the wrapper had never been told.
 func (s *Store) Close() error {
-	if err := s.underlying.Close(); err != nil {
+	if err := s.bucket.Close(); err != nil {
 		return fmt.Errorf("cache/blob: close: %w", err)
 	}
 	return nil

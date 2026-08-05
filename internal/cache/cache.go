@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"strings"
 
 	"github.com/rangertaha/scour/internal/registry"
 )
@@ -190,10 +191,24 @@ func CheckKey(key string) error {
 			return fmt.Errorf("%w: %q contains %q", ErrBadKey, key, r)
 		}
 	}
-	// Rejected after the character check so that "." and ".." cannot be
-	// assembled from otherwise legal characters.
-	if key == "." || key == ".." {
-		return fmt.Errorf("%w: %q", ErrBadKey, key)
+
+	// Every legal character is checked above and none of them is a separator,
+	// which is not enough, because a backend may build a path out of the key's
+	// own characters. The local one shards on the first four, so the key
+	// "...." produced the directories ".." and "..", and a body was written
+	// two levels above the cache root. Refusing "." and ".." was checking the
+	// whole key for something that only had to appear in a slice of it.
+	//
+	// So: no dot pair anywhere, and the first character is a letter or a
+	// digit. Together those make every two-character slice of a key a name
+	// that cannot climb, whatever a backend does with it. A digest is hex and
+	// a readable key in a test is a word, so nothing legitimate is lost.
+	if strings.Contains(key, "..") {
+		return fmt.Errorf("%w: %q contains %q, which can climb out of a directory", ErrBadKey, key, "..")
+	}
+	if first := key[0]; !(first >= 'a' && first <= 'z' || first >= 'A' && first <= 'Z' || first >= '0' && first <= '9') {
+		return fmt.Errorf("%w: %q starts with %q, and a key starts with a letter or a digit",
+			ErrBadKey, key, string(first))
 	}
 	return nil
 }

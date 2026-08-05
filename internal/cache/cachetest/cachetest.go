@@ -40,6 +40,8 @@ func Run(t *testing.T, open Open) {
 	t.Run("EmptyBody", func(t *testing.T) { testEmpty(t, open) })
 	t.Run("LargeBody", func(t *testing.T) { testLarge(t, open) })
 	t.Run("BadKeysRejected", func(t *testing.T) { testBadKeys(t, open) })
+	t.Run("KeysCannotClimb", func(t *testing.T) { testKeysCannotClimb(t, open) })
+	t.Run("AFailedPutKeepsThePrevious", func(t *testing.T) { testFailedPutKeepsPrevious(t, open) })
 	t.Run("Keys", func(t *testing.T) { testKeys(t, open) })
 	t.Run("Concurrent", func(t *testing.T) { testConcurrent(t, open) })
 }
@@ -203,6 +205,64 @@ func testLarge(t *testing.T, open Open) {
 // testBadKeys is the security case. A key can arrive from a database row
 // written by an older version, so a backend must not trust it: none of these
 // may reach the filesystem or the bucket.
+// testKeysCannotClimb is in the shared suite because the escape was not in the
+// key checker, it was in what a backend built out of the key. The local backend
+// shards on the first four characters, so "...." became the directories ".."
+// and "..", and a body landed two levels above the cache root. Any backend that
+// derives a path from a key can make the same mistake, so every backend is
+// asked.
+func testKeysCannotClimb(t *testing.T, open Open) {
+	s := open(t)
+	ctx := context.Background()
+
+	for _, key := range []string{"....", "...", "..", ".", "..a", "ab..xyz", ".hidden", "-dash"} {
+		if err := cache.CheckKey(key); err == nil {
+			t.Errorf("CheckKey accepted %q, which a backend may turn into a path that climbs", key)
+		}
+		if err := cache.PutBytes(ctx, s, key, []byte("escaped")); err == nil {
+			t.Errorf("a store accepted %q", key)
+		}
+	}
+}
+
+// testFailedPutKeepsPrevious is in the shared suite because a truncated body is
+// indistinguishable from a real one to every later reader, which is what
+// [cache.Store] promises and what only one backend was tested for.
+func testFailedPutKeepsPrevious(t *testing.T, open Open) {
+	s := open(t)
+	ctx := context.Background()
+
+	const key = "keeper"
+	good := bytes.Repeat([]byte("a"), 4096)
+	if err := cache.PutBytes(ctx, s, key, good); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// A body that stops partway, which is what a connection reset looks like
+	// from here.
+	if err := s.Put(ctx, key, io.MultiReader(
+		bytes.NewReader(bytes.Repeat([]byte("b"), 512)),
+		failingReader{},
+	)); err == nil {
+		t.Fatal("a body that stopped partway was accepted")
+	}
+
+	back, err := cache.GetBytes(ctx, s, key)
+	if err != nil {
+		t.Fatalf("the previous body is gone entirely: %v", err)
+	}
+	if !bytes.Equal(back, good) {
+		t.Errorf("the previous body was replaced by %d bytes of a failed write", len(back))
+	}
+}
+
+// failingReader stops with an error partway, like a connection that reset.
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) {
+	return 0, errors.New("the connection reset")
+}
+
 func testBadKeys(t *testing.T, open Open) {
 	ctx := context.Background()
 	s := open(t)

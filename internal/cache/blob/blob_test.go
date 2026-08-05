@@ -249,3 +249,19 @@ func TestCloseIsIdempotentEnough(t *testing.T) {
 		t.Errorf("close: %v", err)
 	}
 }
+
+// TestCloseWithAPrefixSucceeds is here because the prefixed wrapper and the
+// bucket it wraps are two handles to one thing, and the store used to close the
+// wrong one. gocloud's PrefixedBucket marks the bucket it is handed as closed,
+// so closing that bucket directly came back "Bucket has been closed" on a store
+// that had done nothing wrong, and the driver underneath was never released: a
+// process opening one cache per job leaked one bucket per job, forever.
+func TestCloseWithAPrefixSucceeds(t *testing.T) {
+	s, err := blob.Open(context.Background(), "mem://", "crawl/bodies")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Errorf("closing a prefixed store: %v", err)
+	}
+}
