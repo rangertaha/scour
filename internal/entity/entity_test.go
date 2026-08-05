@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rangertaha/scour/internal/entity"
+	"github.com/rangertaha/scour/internal/entity/entitytest"
 )
 
 var seen = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
@@ -577,4 +578,20 @@ func TestRetractingAJobTakesItsPropertiesBack(t *testing.T) {
 	if props[0].Value != "acme.com" {
 		t.Errorf("props[0] = %+v, want the good job's value", props[0])
 	}
+}
+
+// TestContract holds the SQLite store to what any entity graph promises.
+//
+// The suite is where the promises live, so that a second backend, or a client
+// reaching the graph over a bus, is measured against the same thing rather than
+// against its own tests. See [entitytest].
+func TestContract(t *testing.T) {
+	entitytest.Run(t, func(t *testing.T) entitytest.Graph {
+		s, err := entity.Open("")
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		t.Cleanup(func() { s.Close() })
+		return s
+	})
 }

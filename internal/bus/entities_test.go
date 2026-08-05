@@ -10,6 +10,7 @@ import (
 
 	"github.com/rangertaha/scour/internal/bus"
 	"github.com/rangertaha/scour/internal/entity"
+	"github.com/rangertaha/scour/internal/entity/entitytest"
 )
 
 // fill runs the same sequence of operations against whatever it is given, so
@@ -236,4 +237,31 @@ func TestNothingServingIsNotATimeoutForTheGraph(t *testing.T) {
 	if time.Since(started) > 5*time.Second {
 		t.Errorf("it waited %s, so it timed out rather than noticing", time.Since(started))
 	}
+}
+
+// TestTheClientKeepsTheGraphContract.
+//
+// The same suite the SQLite store is held to, run against a graph that is on
+// the other side of a bus. This is what "where the store is has to be invisible"
+// means in a form that keeps being true: a promise added to the contract later
+// is one the client has to keep too, without anybody remembering to test it
+// here.
+func TestTheClientKeepsTheGraphContract(t *testing.T) {
+	conn := connect(t)
+
+	entitytest.Run(t, func(t *testing.T) entitytest.Graph {
+		store, err := entity.Open("")
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		t.Cleanup(func() { store.Close() })
+
+		service, err := conn.ServeEntities(store)
+		if err != nil {
+			t.Fatalf("serve: %v", err)
+		}
+		t.Cleanup(func() { service.Close() })
+
+		return conn.NewEntities(wait)
+	})
 }

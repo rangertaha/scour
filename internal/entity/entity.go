@@ -51,6 +51,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rangertaha/scour/internal/storage"
+
 	_ "modernc.org/sqlite" // the pure-Go driver, so this cross-compiles
 )
 
@@ -135,6 +137,11 @@ type Provenance struct {
 // a service in a cluster rather than a file each node opens.
 type Store struct {
 	db *sql.DB
+
+	// sql is the little that differs between one database and another. The
+	// queries are written once and this renders the handful of places where
+	// SQLite and Postgres disagree. See [storage.Dialect].
+	sql storage.Dialect
 }
 
 // Open returns the store, creating the database if it is not there.
@@ -193,7 +200,7 @@ func Open(dir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, sql: storage.SQLite{}}, nil
 }
 
 func schema(db *sql.DB) error {
@@ -380,13 +387,13 @@ func (s *Store) Assert(ctx context.Context, kind, name string, from Provenance) 
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, s.sql.Rebind(`
 INSERT INTO entities (id, kind, name, first_seen, last_seen, assertions)
 VALUES (?, ?, ?, ?, ?, 1)
 ON CONFLICT (id) DO UPDATE SET
-	last_seen  = MAX(last_seen, excluded.last_seen),
-	first_seen = MIN(first_seen, excluded.first_seen),
-	assertions = assertions + 1`,
+	last_seen  = `+s.sql.Greatest("last_seen", "excluded.last_seen")+`,
+	first_seen = `+s.sql.Least("first_seen", "excluded.first_seen")+`,
+	assertions = assertions + 1`),
 		id, strings.ToLower(kind), strings.TrimSpace(name), at, at); err != nil {
 		return "", fmt.Errorf("entity: assert %s: %w", name, err)
 	}
@@ -421,14 +428,14 @@ func (s *Store) Relate(ctx context.Context, from, to, kind, topic string, positi
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, s.sql.Rebind(`
 INSERT INTO relations (id, from_id, to_id, kind, topic, position, first_seen, last_seen, assertions)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
 ON CONFLICT (from_id, to_id, kind, topic) DO UPDATE SET
-	last_seen  = MAX(last_seen, excluded.last_seen),
-	first_seen = MIN(first_seen, excluded.first_seen),
-	position   = MIN(position, excluded.position),
-	assertions = assertions + 1`,
+	last_seen  = `+s.sql.Greatest("last_seen", "excluded.last_seen")+`,
+	first_seen = `+s.sql.Least("first_seen", "excluded.first_seen")+`,
+	position   = `+s.sql.Least("position", "excluded.position")+`,
+	assertions = assertions + 1`),
 		id, from, to, kind, topic, position, at, at); err != nil {
 		return "", fmt.Errorf("entity: relate: %w", err)
 	}

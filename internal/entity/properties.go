@@ -121,14 +121,14 @@ func (s *Store) Describe(ctx context.Context, subject, name, value string, posit
 	}
 
 	at := said.At.UnixNano()
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, s.sql.Rebind(`
 INSERT INTO properties (subject, name, value, position, first_seen, last_seen, assertions)
 VALUES (?, ?, ?, ?, ?, ?, 1)
 ON CONFLICT (subject, name, value) DO UPDATE SET
-	last_seen  = MAX(properties.last_seen, excluded.last_seen),
-	first_seen = MIN(properties.first_seen, excluded.first_seen),
-	position   = MIN(properties.position, excluded.position),
-	assertions = properties.assertions + 1`,
+	last_seen  = `+s.sql.Greatest("properties.last_seen", "excluded.last_seen")+`,
+	first_seen = `+s.sql.Least("properties.first_seen", "excluded.first_seen")+`,
+	position   = `+s.sql.Least("properties.position", "excluded.position")+`,
+	assertions = properties.assertions + 1`),
 		subject, name, value, position, at, at); err != nil {
 		return fmt.Errorf("entity: describe %s: %w", subject, err)
 	}
