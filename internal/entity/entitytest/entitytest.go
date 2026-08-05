@@ -54,7 +54,10 @@ type Graph interface {
 	Related(ctx context.Context, id, kind, topic string) ([]*entity.Entity, error)
 	Provenances(ctx context.Context, id string) ([]entity.Provenance, error)
 
+	Candidates(ctx context.Context, kind, name string) ([]entity.Candidate, error)
 	Merge(ctx context.Context, from, to, rule string, said entity.Provenance) error
+	Unmerge(ctx context.Context, alias string) error
+	Aliases(ctx context.Context, id string) ([]entity.Alias, error)
 	Tag(ctx context.Context, subject, topic string, said entity.Provenance) error
 	Topics(ctx context.Context, subject string) ([]entity.Property, error)
 	About(ctx context.Context, topic string) ([]*entity.Entity, error)
@@ -74,6 +77,7 @@ func Run(t *testing.T, open Open) {
 	t.Run("ReadsFollowAMerge", func(t *testing.T) { testMerge(t, open) })
 	t.Run("OneJobsContributionIsOneDelete", func(t *testing.T) { testRetract(t, open) })
 	t.Run("TypesAndEntitiesCarryTopics", func(t *testing.T) { testTopics(t, open) })
+	t.Run("AMergeIsProposedRecordedAndUndoable", func(t *testing.T) { testResolution(t, open) })
 }
 
 func said(job, url string) entity.Provenance {
@@ -425,5 +429,107 @@ func testTopics(t *testing.T, open Open) {
 	// And the reserved name cannot be written as an ordinary property.
 	if err := g.Describe(ctx, author, entity.TopicProperty, "climate@7", 0, from); err == nil {
 		t.Error("the reserved topic name was writable as a property")
+	}
+}
+
+// testResolution: propose, record, undo.
+//
+// In the contract because every method in it is a promise a second backend has
+// to keep, and these three were the ones nothing exercised: they sat in the
+// interface while only the SQLite store's own tests touched them, so the bus
+// client's versions had never run at all. That is the same hole a shared suite
+// exists to close, one level in.
+//
+// The rule itself is deliberately conservative. Merging two people who are not
+// the same person corrupts the graph in a way nobody notices: the rows still
+// look right and the counts go up. Failing to merge is visible, because the
+// same person is in the list twice and somebody says so.
+func testResolution(t *testing.T, open Open) {
+	ctx := context.Background()
+	g := open(t)
+	from := said("news", "https://a.example/1")
+
+	full, err := g.Assert(ctx, "person", "Alex Doe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := g.Assert(ctx, "person", "A. Doe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// One full name it could belong to, so the initial has a candidate.
+	proposed, err := g.Candidates(ctx, "person", "A. Doe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposed) != 1 {
+		t.Fatalf("Candidates = %+v, want the one unambiguous proposal", proposed)
+	}
+	if proposed[0].From != initial || proposed[0].To != full {
+		t.Errorf("Candidates proposed %s into %s, want %s into %s",
+			proposed[0].From, proposed[0].To, initial, full)
+	}
+	if proposed[0].Rule == "" {
+		t.Error("a proposal that does not say which rule made it cannot be undone as a class")
+	}
+
+	// Proposing writes nothing: the two are still two.
+	if kinds, err := g.Kinds(ctx); err != nil {
+		t.Fatal(err)
+	} else if kinds[0].Entities != 2 {
+		t.Errorf("Candidates changed the graph: %+v", kinds)
+	}
+
+	// A second full name makes it ambiguous, and nothing is proposed rather
+	// than the more-asserted one, which would be a popularity contest dressed
+	// as evidence.
+	if _, err := g.Assert(ctx, "person", "Alan Doe", from); err != nil {
+		t.Fatal(err)
+	}
+	ambiguous, err := g.Candidates(ctx, "person", "A. Doe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ambiguous) != 0 {
+		t.Errorf("Candidates = %+v, want nothing proposed while two names compete", ambiguous)
+	}
+
+	// A person saying so is still obeyed, and it is recorded rather than
+	// applied: both spellings keep their rows.
+	if err := g.Merge(ctx, initial, full, entity.RuleManual, from); err != nil {
+		t.Fatal(err)
+	}
+
+	aliases, err := g.Aliases(ctx, full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(aliases) != 1 || aliases[0].ID != initial {
+		t.Fatalf("Aliases = %+v, want the spelling that lost its identity", aliases)
+	}
+	if aliases[0].Rule != entity.RuleManual {
+		t.Errorf("the alias does not say which rule made it: %+v", aliases[0])
+	}
+	if aliases[0].Said.Job == "" {
+		t.Errorf("the alias carries no provenance: %+v", aliases[0])
+	}
+
+	// And undoing it is one delete, after which they are two people again.
+	if err := g.Unmerge(ctx, initial); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := g.Aliases(ctx, full); err != nil {
+		t.Fatal(err)
+	} else if len(after) != 0 {
+		t.Errorf("Aliases after Unmerge = %+v", after)
+	}
+
+	one, err := g.Get(ctx, initial)
+	if err != nil {
+		t.Fatalf("the spelling did not survive being unmerged: %v", err)
+	}
+	if one.Name != "A. Doe" {
+		t.Errorf("Get(initial) = %+v, want it back as itself", one)
 	}
 }
