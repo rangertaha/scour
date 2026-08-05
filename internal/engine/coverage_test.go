@@ -1133,3 +1133,170 @@ job "j" {
 	}
 
 }
+
+// Relations are graph edges, not record fields. A publisher is the site rather
+// than a byline, so it needs somewhere other than the text to come from.
+
+const withRelation = `
+job "news" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+
+    property "author" {
+      type   = entity
+      entity = "person"
+    }
+
+    relation "publisher" {
+      entity   = "company"
+      property = self.domain
+      topic    = ["climate@7"]
+    }
+  }
+}
+`
+
+func TestRelationParsesAndValidates(t *testing.T) {
+	doc := parse(t, withRelation)
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("did not validate: %v", err)
+	}
+
+	item := doc.Jobs[0].Items[0]
+	if len(item.Relations) != 1 {
+		t.Fatalf("got %d relations", len(item.Relations))
+	}
+
+	r := item.Relations[0]
+	if r.Name != "publisher" || r.Entity != "company" {
+		t.Errorf("relation = %+v", r)
+	}
+	// self.domain resolves to the field's own name, so a misspelling is caught
+	// by the parser rather than becoming an empty value.
+	if r.Property != engine.SourceDomain {
+		t.Errorf("property = %q, want %q", r.Property, engine.SourceDomain)
+	}
+	if len(r.Topic) != 1 || r.Topic[0] != "climate@7" {
+		t.Errorf("topic = %v", r.Topic)
+	}
+}
+
+func TestRelationNeedsAnEntity(t *testing.T) {
+	// Required rather than validated, so it is a parse error with a position.
+	_, err := engine.Parse([]byte(minimal(`
+  item "b" {
+    property "p" {
+      type = str
+    }
+
+    relation "publisher" {
+      property = self.domain
+    }
+  }
+`)), "job.hcl")
+	if err == nil {
+		t.Fatal("accepted an edge to nothing in particular")
+	}
+	if !strings.Contains(err.Error(), "job.hcl") {
+		t.Errorf("error does not point at the file: %v", err)
+	}
+}
+
+func TestUnknownSelfFieldIsCaughtByTheParser(t *testing.T) {
+	_, err := engine.Parse([]byte(minimal(`
+  item "b" {
+    property "p" {
+      type = str
+    }
+
+    relation "publisher" {
+      entity   = "company"
+      property = self.doamin
+    }
+  }
+`)), "job.hcl")
+	if err == nil {
+		t.Fatal("accepted a field self does not have")
+	}
+}
+
+func TestRelationTopicNeedsAVersion(t *testing.T) {
+	refuses(t, `
+  item "b" {
+    property "p" {
+      type = str
+    }
+
+    relation "publisher" {
+      entity = "company"
+      topic  = ["climate"]
+    }
+  }
+`, "version")
+}
+
+func TestDuplicateRelationIsRefused(t *testing.T) {
+	refuses(t, `
+  item "b" {
+    property "p" {
+      type = str
+    }
+
+    relation "publisher" {
+      entity = "company"
+    }
+
+    relation "publisher" {
+      entity = "person"
+    }
+  }
+`, "twice")
+}
+
+// TestRelationIsShape: changing what gets asserted about the world is a
+// re-extraction, not a free edit.
+func TestRelationIsShape(t *testing.T) {
+	without := parse(t, minimal(`
+  item "b" {
+    property "p" {
+      type = str
+    }
+  }
+`)).Jobs[0].Spec()
+
+	with := parse(t, withRelation).Jobs[0].Spec()
+
+	if without.Fingerprint() == with.Fingerprint() {
+		t.Error("adding a relation did not change the shape")
+	}
+}
+
+// TestRelationsReachTheSpider: a relation is something the spider has to
+// assert, so it travels in the spec like everything else it needs.
+func TestRelationsReachTheSpider(t *testing.T) {
+	spec := parse(t, withRelation).Jobs[0].Spec()
+
+	rendered := string(spec.HCL())
+	for _, want := range []string{`relation "publisher"`, "company", "domain", "climate@7"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("the spec lost %q:\n%s", want, rendered)
+		}
+	}
+
+	back, err := engine.ParseSpec(spec.HCL(), "spec.hcl")
+	if err != nil {
+		t.Fatalf("the rendered spec does not parse: %v", err)
+	}
+	if back.Fingerprint() != spec.Fingerprint() {
+		t.Error("relations did not survive the round trip")
+	}
+
+	item, _ := back.Item("article")
+	if len(item.Relations) != 1 || item.Relations[0].Entity != "company" {
+		t.Errorf("relations = %+v", item.Relations)
+	}
+}

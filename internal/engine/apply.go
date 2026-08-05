@@ -338,6 +338,14 @@ func (i *Item) fingerprint() string {
 	b.WriteString(i.Type)
 	b.WriteByte('|')
 	writeProperties(&b, i.Properties)
+
+	// Relations are shape rather than evidence: changing one changes what is
+	// asserted about the world, so it is a re-extraction and not a free edit.
+	relations := append([]*Relation(nil), i.Relations...)
+	sort.Slice(relations, func(a, c int) bool { return relations[a].Name < relations[c].Name })
+	for _, r := range relations {
+		fmt.Fprintf(&b, "[%s:%s:%s:%s]", r.Name, r.Entity, r.Property, strings.Join(r.Topic, ","))
+	}
 	return b.String()
 }
 

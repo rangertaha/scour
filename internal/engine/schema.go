@@ -167,6 +167,7 @@ type Item struct {
 	Description string `hcl:"description,optional" json:"description,omitempty"`
 
 	Properties []*Property `hcl:"property,block" json:"properties,omitempty"`
+	Relations  []*Relation `hcl:"relation,block" json:"relations,omitempty"`
 }
 
 // Property is one field of an item.
@@ -219,6 +220,49 @@ type Property struct {
 
 	// Properties nest, so a property can be an object with fields of its own.
 	Properties []*Property `hcl:"property,block" json:"properties,omitempty"`
+}
+
+// Relation is an edge in the entity graph that is not a field of the record.
+//
+//	relation "publisher" {
+//	  entity   = "company"
+//	  property = self.domain
+//	  topic    = ["climate@7"]
+//	}
+//
+// # Why this is not a property
+//
+// A property is extracted into the record and travels with it: put the
+// publisher there and it appears in every exported article whether anybody
+// wanted it or not. A relation belongs to the graph. It has its own attributes
+// and its own lifetime, and the record stays what somebody asked for.
+//
+// A property typed entity is the case that is both: a byline is wanted in the
+// record and is also a link worth keeping, so it is extracted and asserted.
+//
+// The label is the relation's name, the same rule properties follow. An
+// unnamed edge between an article and a company could be its publisher, its
+// advertiser or its subject, and a name each document invented for itself
+// would give a shared graph several words for one thing.
+type Relation struct {
+	Name string `hcl:"name,label" json:"name"`
+
+	// Entity is the kind of thing at the other end. Required, because an edge
+	// to nothing in particular cannot be resolved against anything.
+	Entity string `hcl:"entity" json:"entity"`
+
+	// Property is where the other end comes from when it is not in the text,
+	// as a field of self: a publisher is the site rather than a byline.
+	// Absent means the relation is asserted from an extracted property of the
+	// same name.
+	Property string `hcl:"property,optional" json:"property,omitempty"`
+
+	// Topic names the classifiers whose scores are recorded on this edge.
+	//
+	// Which evidence to attach, not what to assert. The page was scored while
+	// it was crawled, so forty articles give the edge a distribution rather
+	// than a number somebody typed once and never revisited.
+	Topic []string `hcl:"topic,optional" json:"topic,omitempty"`
 }
 
 // Monitoring is what a job reports while it runs.

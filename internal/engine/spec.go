@@ -115,6 +115,10 @@ func writeItem(b *strings.Builder, item *Item, depth int) {
 		b.WriteString("\n")
 		writeProperty(b, p, depth+1)
 	}
+	for _, r := range item.Relations {
+		b.WriteString("\n")
+		writeRelation(b, r, depth+1)
+	}
 	fmt.Fprintf(b, "%s}\n", pad)
 }
 
@@ -139,6 +143,16 @@ func writeProperty(b *strings.Builder, p *Property, depth int) {
 		b.WriteString("\n")
 		writeProperty(b, nested, depth+1)
 	}
+	fmt.Fprintf(b, "%s}\n", pad)
+}
+
+func writeRelation(b *strings.Builder, r *Relation, depth int) {
+	pad := strings.Repeat("  ", depth)
+
+	fmt.Fprintf(b, "%srelation %q {\n", pad, r.Name)
+	writeAttr(b, depth+1, "entity", r.Entity)
+	writeAttr(b, depth+1, "property", r.Property)
+	writeList(b, depth+1, "topic", r.Topic)
 	fmt.Fprintf(b, "%s}\n", pad)
 }
 

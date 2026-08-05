@@ -85,6 +85,36 @@ var Transforms = []string{
 	TransformNormaliseSpace,
 }
 
+// Sources are what is known about every extraction without anybody declaring
+// it, and what a relation can be derived from.
+//
+// A publisher is usually not written on the page: it is the site. So a relation
+// needs somewhere other than the text to come from, and these are the things
+// every fetched page has whether or not the job mentions them.
+const (
+	SourceURL       = "url"
+	SourceDomain    = "domain"
+	SourceHost      = "host"
+	SourcePath      = "path"
+	SourceFetchedAt = "fetched_at"
+)
+
+// Sources is every field of self.
+var Sources = []string{SourceURL, SourceDomain, SourceHost, SourcePath, SourceFetchedAt}
+
+// selfObject is what `self` resolves to.
+//
+// Each field evaluates to its own name, which is the same trick the type names
+// use: the document reads as a reference, the parser catches a misspelling with
+// a line and a column, and what comes out is a string this package can act on.
+func selfObject() cty.Value {
+	fields := make(map[string]cty.Value, len(Sources))
+	for _, name := range Sources {
+		fields[name] = cty.StringVal(name)
+	}
+	return cty.ObjectVal(fields)
+}
+
 // evalContext predeclares the vocabulary, so bare words resolve.
 func evalContext() *hcl.EvalContext {
 	vars := make(map[string]cty.Value, len(Types)+len(Transforms))
@@ -95,6 +125,8 @@ func evalContext() *hcl.EvalContext {
 	for _, t := range Transforms {
 		vars[t] = cty.StringVal(t)
 	}
+
+	vars["self"] = selfObject()
 
 	return &hcl.EvalContext{Variables: vars}
 }

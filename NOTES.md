@@ -436,6 +436,49 @@ are one, recording `same_as` beats rewriting rows: it is reversible, it keeps
 both provenance trails, and it does not destroy the fact that they were once
 thought distinct, which is the thing you need when the merge was wrong.
 
+### A relation is not a record field
+
+A property is extracted into the record and travels with it. Put the publisher
+there and it appears in every exported article whether anybody wanted it or not.
+A relation belongs to the graph: it has its own attributes and its own lifetime,
+and the record stays what somebody asked for.
+
+```hcl
+job "news" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "author" {
+      type   = entity
+      entity = "person"
+    }
+
+    relation "publisher" {
+      entity   = "company"
+      property = self.domain
+      topic    = ["climate@7"]
+    }
+  }
+}
+```
+
+A byline is the case that is both: wanted in the record and worth keeping as a
+link, so a property typed entity is extracted and asserted. A publisher is not
+on the page at all, it *is* the site, so it needs somewhere other than the text
+to come from.
+
+**`self` is a small predeclared vocabulary**: `self.url`, `self.domain`,
+`self.host`, `self.path`, `self.fetched_at`. Things true of every extraction
+without anybody declaring them, resolved the same way the type names are, so
+`self.doamin` is a parse error with a line and a column rather than an empty
+value nobody notices.
+
+**`topic` says which evidence to attach, not what to assert.** The page was
+already scored while it was crawled, so naming a classifier records that score
+on the edge. Forty articles then give the edge a distribution rather than a
+number somebody typed once and never revisited. Writing a topic as a literal
+would be the assertion this store exists to avoid.
+
 ### The relation is the property's name
 
 `property "author"` on `item "article"` already says everything:

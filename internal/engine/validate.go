@@ -9,6 +9,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/rangertaha/scour/internal/classify"
 )
 
 // Validate reports every problem in the document at once.
@@ -145,6 +147,41 @@ func (i *Item) validate() []error {
 
 	for _, err := range validateProperties(i.Properties, "item "+i.Name) {
 		problems = append(problems, err)
+	}
+	problems = append(problems, validateRelations(i.Relations, "item "+i.Name)...)
+	return problems
+}
+
+func validateRelations(relations []*Relation, where string) []error {
+	var problems []error
+
+	seen := map[string]bool{}
+	for _, r := range relations {
+		path := where + " relation " + r.Name
+
+		if strings.TrimSpace(r.Name) == "" {
+			problems = append(problems, fmt.Errorf("%s: a relation needs a name", where))
+		}
+		if seen[r.Name] {
+			problems = append(problems, fmt.Errorf("%s: declared twice", path))
+		}
+		seen[r.Name] = true
+
+		if strings.TrimSpace(r.Entity) == "" {
+			problems = append(problems, fmt.Errorf("%s: does not say what is at the other end", path))
+		}
+		if r.Property != "" && !slices.Contains(Sources, r.Property) {
+			problems = append(problems, fmt.Errorf("%s: property %q is not one of self.%s",
+				path, r.Property, strings.Join(Sources, ", self.")))
+		}
+
+		// A classifier reference without a version would let retraining change
+		// what the graph records, with nothing in the document to show why.
+		for _, ref := range r.Topic {
+			if _, err := classify.ParseRef(ref); err != nil {
+				problems = append(problems, fmt.Errorf("%s: topic %v", path, err))
+			}
+		}
 	}
 	return problems
 }
