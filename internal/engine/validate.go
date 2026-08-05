@@ -206,6 +206,22 @@ func validateRelations(relations []*Relation, where string) []error {
 				problems = append(problems, fmt.Errorf("%s: topic %v", path, err))
 			}
 		}
+
+		// What the relation says about itself gets the same checks an item's
+		// properties get, which it was not getting at all: a duplicate, an
+		// empty name and a type nobody defined all validated clean. One named
+		// `topic` was worse than clean, because the graph reserves that name
+		// and refuses it at run time, so a document that submitted happily
+		// aborted the wave on the first page that filled it and threw away
+		// every record the crawl had produced.
+		problems = append(problems, validateProperties(r.Properties, path)...)
+		for _, p := range r.Properties {
+			if p.Name == ReservedTopic {
+				problems = append(problems, fmt.Errorf(
+					"%s property %q: that name is what the graph records a classifier's verdict under. Rename it",
+					path, p.Name))
+			}
+		}
 	}
 	return problems
 }

@@ -349,7 +349,14 @@ func (i *Item) fingerprint() string {
 	relations := append([]*Relation(nil), i.Relations...)
 	sort.Slice(relations, func(a, c int) bool { return relations[a].Name < relations[c].Name })
 	for _, r := range relations {
-		fmt.Fprintf(&b, "[%s:%s:%s:%s]", r.Name, r.Entity, r.Property, strings.Join(r.Topic, ","))
+		fmt.Fprintf(&b, "[%s:%s:%s:%s", r.Name, r.Entity, r.Property, strings.Join(r.Topic, ","))
+		// What the relation says about itself is shape too, and leaving it out
+		// meant deleting every declared property from an edge left the
+		// fingerprint unchanged: records extracted under the old shape carried
+		// a Spec saying the shape had never moved, which is the one thing a
+		// fingerprint exists to prevent.
+		writeProperties(&b, r.Properties)
+		b.WriteString("]")
 	}
 	return b.String()
 }

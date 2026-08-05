@@ -4,6 +4,7 @@ package entities_test
 
 import (
 	"context"
+	"github.com/rangertaha/scour/internal/extract"
 	"strconv"
 	"strings"
 	"testing"
@@ -461,5 +462,231 @@ job "news" {
 	}
 	if props[1].Name != "beat" || props[1].Value != "climate" {
 		t.Errorf("props[1] = %+v, want the beat second", props[1])
+	}
+}
+
+// TestAnEdgeSaysWhatItIs.
+//
+// A relation's declared properties were accepted by the document, looked for by
+// this step, and extracted from nowhere: nothing planned them, so the record
+// never carried one and every edge property was silently absent. An edge that
+// can say what it is was the whole reason relations were given properties.
+//
+// Through a document and a real extraction, not by calling Describe, because
+// calling Describe is what hid the same defect on the entity side.
+func TestAnEdgeSaysWhatItIs(t *testing.T) {
+	dir := t.TempDir()
+
+	src := `
+job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/"]
+
+  item "article" {
+    property "author" {
+      type   = entity
+      entity = "person"
+      css    = [".byline"]
+    }
+
+    relation "publisher" {
+      entity   = "company"
+      property = self.domain
+
+      property "section" {
+        type = str
+        css  = [".section"]
+      }
+    }
+  }
+
+  pipeline {
+    step "entities" "article" {
+      dir = "` + dir + `"
+    }
+  }
+}
+`
+	doc, err := engine.Parse([]byte(src), "job.hcl")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	job := doc.Jobs[0]
+
+	// The relation's property has to reach the record, which is what nothing
+	// planned. Extracted from a real page rather than typed into the map.
+	reader, err := extract.New(job.Spec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := reader.Page("https://example.com/a", []byte(`<!doctype html><html><body>
+	  <div class="byline">Alex Doe</div>
+	  <div class="section">Environment</div>
+	</body></html>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	records := record.From("https://example.com/a", job.Spec().Fingerprint(),
+		time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC), result.Items)
+	if len(records) != 1 {
+		t.Fatalf("extracted %d records", len(records))
+	}
+	if got := records[0].Values["publisher.section"]; got != "Environment" {
+		t.Fatalf("publisher.section = %q, want the edge's own property extracted", got)
+	}
+
+	graph, err := pipeline.New(context.Background(), job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer graph.Close()
+
+	if _, err := graph.Run(context.Background(), records); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	store, err := entity.New(context.Background(), entity.Config{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	publisher, err := store.Find(context.Background(), "company", "example.com")
+	if err != nil {
+		t.Fatalf("the publisher was not asserted: %v", err)
+	}
+
+	edges, err := store.Relations(context.Background(), publisher.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 1 {
+		t.Fatalf("Relations = %+v, want the one author edge", edges)
+	}
+
+	props, err := store.Properties(context.Background(), edges[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(props) != 1 || props[0].Name != "section" || props[0].Value != "Environment" {
+		t.Fatalf("the edge's own properties = %+v", props)
+	}
+
+	// And it belongs to the edge, not to either end.
+	for _, id := range []string{publisher.ID, entity.ID("person", "Alex Doe")} {
+		if ends, err := store.Properties(context.Background(), id); err != nil {
+			t.Fatal(err)
+		} else if len(ends) != 0 {
+			t.Errorf("the edge's property attached to %s: %+v", id, ends)
+		}
+	}
+}
+
+// TestARelationsPropertiesAreShape.
+//
+// Deleting them all left the fingerprint unchanged, so records extracted under
+// the old edge shape carried a Spec saying the shape had never moved, which is
+// the one thing a fingerprint exists to prevent.
+func TestARelationsPropertiesAreShape(t *testing.T) {
+	shape := func(extra string) string {
+		return `
+job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+
+    relation "publisher" {
+      entity   = "company"
+      property = self.domain
+` + extra + `
+    }
+  }
+}
+`
+	}
+
+	fingerprint := func(src string) string {
+		t.Helper()
+		doc, err := engine.Parse([]byte(src), "job.hcl")
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if err := doc.Validate(); err != nil {
+			t.Fatalf("validate: %v", err)
+		}
+		return doc.Jobs[0].Spec().Fingerprint()
+	}
+
+	bare := fingerprint(shape(""))
+	with := fingerprint(shape(`
+      property "section" {
+        type = str
+      }
+`))
+
+	if bare == with {
+		t.Error("adding a property to an edge left the fingerprint unchanged")
+	}
+}
+
+// TestAnEdgePropertyMayNotTakeTheReservedName.
+//
+// The graph records a classifier's verdict under `topic` and refuses that name
+// from anything else, so a document declaring one submitted happily and then
+// aborted the wave on the first page that filled it, discarding every record
+// the crawl had produced. Refused when the document is read instead.
+func TestAnEdgePropertyMayNotTakeTheReservedName(t *testing.T) {
+	doc, err := engine.Parse([]byte(`
+job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+
+    relation "publisher" {
+      entity   = "company"
+      property = self.domain
+
+      property "topic" {
+        type = str
+      }
+    }
+  }
+}
+`), "job.hcl")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	err = doc.Validate()
+	if err == nil {
+		t.Fatal("an edge property named topic was accepted")
+	}
+	if !strings.Contains(err.Error(), "topic") {
+		t.Errorf("the refusal does not name it: %v", err)
+	}
+}
+
+// TestTheReservedNameIsOneName.
+//
+// The engine refuses it when a document is read and the graph refuses it when a
+// property is written, and the two hold the literal separately: the engine
+// reads documents and must not depend on a store. Separately held is how two
+// constants drift, so this is what stops them.
+func TestTheReservedNameIsOneName(t *testing.T) {
+	if engine.ReservedTopic != entity.TopicProperty {
+		t.Errorf("the engine reserves %q and the graph reserves %q; a document would be accepted and then refused at run time",
+			engine.ReservedTopic, entity.TopicProperty)
 	}
 }

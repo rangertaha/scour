@@ -158,6 +158,14 @@ func writeRelation(b *strings.Builder, r *Relation, depth int) {
 	writeAttr(b, depth+1, "entity", r.Entity)
 	writeAttr(b, depth+1, "property", r.Property)
 	writeList(b, depth+1, "topic", r.Topic)
+
+	// What the edge says about itself, so a spider in another language reading
+	// the rendered spec learns those properties exist. Omitting them meant the
+	// spec described an edge with nothing on it.
+	for _, p := range r.Properties {
+		writeProperty(b, p, depth+1)
+	}
+
 	fmt.Fprintf(b, "%s}\n", pad)
 }
 

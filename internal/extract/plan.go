@@ -40,6 +40,35 @@ func planItem(item *engine.Item) (*itemPlan, error) {
 		}
 		plan.props = append(plan.props, compiled)
 	}
+
+	// What each relation says about itself, planned as though the relation were
+	// a property of that name with those children, so its values land in the
+	// record under `publisher.role` the way `author.role` does.
+	//
+	// Nothing did this, so a relation's declared properties were extracted from
+	// nowhere: the document accepted them, the entities step looked for them,
+	// and the record never carried one. An edge that could say what it was is
+	// the whole reason relations were given properties, and it had no way to
+	// find out.
+	//
+	// The relation itself is not extracted here. Its far end comes from `self`
+	// or from an item property, which the entities step resolves; this plans
+	// only the children.
+	for _, r := range item.Relations {
+		if len(r.Properties) == 0 {
+			continue
+		}
+		compiled, err := planProperty(item.Name, &engine.Property{
+			Name:       r.Name,
+			Type:       string(engine.TypeObject),
+			Properties: r.Properties,
+		})
+		if err != nil {
+			return nil, err
+		}
+		plan.props = append(plan.props, compiled)
+	}
+
 	return plan, nil
 }
 

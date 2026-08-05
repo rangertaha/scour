@@ -532,6 +532,14 @@ type Exporter struct {
 	raw string
 }
 
+// ReservedTopic is the property name the entity graph records a classifier's
+// verdict under, and which a document therefore may not use.
+//
+// Declared here rather than imported from internal/entity, because the engine
+// reads documents and must not depend on a store: this is the name, and the
+// store's own constant is checked against it by a test so the two cannot drift.
+const ReservedTopic = "topic"
+
 // Address is how one exporter is named in an error.
 func (e *Exporter) Address() string { return e.Format + "." + e.Item }
 

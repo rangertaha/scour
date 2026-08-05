@@ -67,7 +67,24 @@ func (p *propPlan) find(page *page, within *html.Node) *Value {
 
 	// Guessed, and therefore last. Everything above it was written down by
 	// somebody who had looked at the page.
-	return p.semantic(page, within)
+	if found := p.semantic(page, within); found != nil {
+		return found
+	}
+
+	// A property that found nothing itself may still have fields that find
+	// something, and the fields are the point of it.
+	//
+	// [propPlan.value] was already written for this: it refuses an empty value
+	// only when there is nothing nested. It was never reached, because finding
+	// nothing here returned before it. So an object property declared purely to
+	// group fields yielded nothing at all unless the group itself happened to
+	// match something, and a relation's properties — which have no parent value
+	// by construction, since the far end comes from `self` — could never be
+	// extracted at all.
+	if len(p.nested) > 0 {
+		return p.value(page, "", "", BySemantics, nil)
+	}
+	return nil
 }
 
 // semantic looks for what a page says about itself, under any of the names
@@ -259,6 +276,13 @@ func (p *propPlan) value(page *page, raw, from, how string, node *html.Node) *Va
 			}
 			v.Nested[nested.prop.Name] = inner
 		}
+	}
+
+	// Nothing of its own and nothing beneath it is not a value, for the reason
+	// the empty check above gives: saying otherwise makes an absent group look
+	// like a successful extraction.
+	if raw == "" && len(v.Nested) == 0 {
+		return nil
 	}
 	return v
 }
