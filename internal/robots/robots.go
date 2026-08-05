@@ -28,6 +28,7 @@
 package robots
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -114,7 +115,7 @@ func Parse(body []byte) *Rules {
 			if value == "" {
 				continue
 			}
-			current.rules = append(current.rules, rule{allow: field == "allow", pattern: value})
+			current.rules = append(current.rules, rule{allow: field == "allow", pattern: encodePattern(value)})
 
 		case "crawl-delay":
 			if current == nil {
@@ -293,6 +294,42 @@ func Token(agent string) string {
 		agent = agent[:i]
 	}
 	return strings.ToLower(agent)
+}
+
+// encodePattern percent-encodes a rule the way a request path is encoded.
+//
+// RFC 9309 section 2.2.2 says both sides are compared percent-encoded, and only
+// one side was. The path comes from the URL and is therefore already encoded:
+// a link to /müll/ is /m%C3%BC ll/ by the time anything can follow it. The
+// pattern is whatever the publisher typed, and a robots.txt served as UTF-8
+// says `Disallow: /müll/` in plain letters. Compared byte for byte those two
+// fail on the first non-ASCII character, so the rule never matched anything,
+// Allowed said yes, and the crawler fetched what the site had refused. Every
+// pattern holding a space, a bracket or any non-ASCII character behaved that
+// way, which is most of the non-English web.
+//
+// The wildcards are held out of the encoding, because `*` and `$` are the
+// pattern's own syntax and not characters to be matched. A pattern that was
+// already written percent-encoded is unescaped first, so encoding it again does
+// not turn %C3%BC into %25C3%25BC.
+func encodePattern(pattern string) string {
+	var b strings.Builder
+
+	for i := range len(pattern) {
+		c := pattern[i]
+		// Printable ASCII is left exactly as written, which keeps the
+		// pattern's own syntax (`*`, `$`) intact and keeps the punctuation a
+		// request URI carries raw: escaping `?` would break every rule written
+		// against a query string, and escaping `/` every rule at all. It also
+		// means a pattern already written percent-encoded passes through
+		// unchanged, so %C3%BC does not become %25C3%25BC.
+		if c > 0x20 && c < 0x7f {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+	}
+	return b.String()
 }
 
 // matches reports whether a path matches a robots.txt pattern.

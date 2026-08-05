@@ -491,3 +491,43 @@ func TestAByteOrderMarkIsNotAField(t *testing.T) {
 		t.Error("something outside the rule was refused")
 	}
 }
+
+// TestANonASCIIRuleIsObeyed.
+//
+// RFC 9309 section 2.2.2 compares both sides percent-encoded, and only one side
+// was. A path comes from a URL and is already encoded: a link to /müll/ is
+// /m%C3%BCll/ by the time anything can follow it. The pattern is whatever the
+// publisher typed, and a robots.txt served as UTF-8 says `Disallow: /müll/` in
+// plain letters. Byte for byte those two differ at the first non-ASCII
+// character, so the rule matched nothing, Allowed said yes, and the crawler
+// fetched what the site had refused. Every pattern holding a space or any
+// non-ASCII character behaved that way, which is most of the non-English web.
+//
+// This is the one kind of defect in the crawler that harms somebody else's
+// server rather than its own output, which is why the downloader will not make
+// robots optional either.
+func TestANonASCIIRuleIsObeyed(t *testing.T) {
+	rules := robots.Parse([]byte("User-agent: *\nDisallow: /müll/\nDisallow: /a b/\n"))
+
+	for _, path := range []string{
+		"/m%C3%BCll/page",
+		"/a%20b/page",
+	} {
+		if rules.Allowed("scour", path) {
+			t.Errorf("Allowed(%q) = true, and the site refused it", path)
+		}
+	}
+
+	// A rule the publisher already wrote percent-encoded still works, so
+	// encoding is not applied twice.
+	encoded := robots.Parse([]byte("User-agent: *\nDisallow: /m%C3%BCll/\n"))
+	if encoded.Allowed("scour", "/m%C3%BCll/page") {
+		t.Error("a pattern written percent-encoded was double-encoded and stopped matching")
+	}
+
+	// And something the rules do not name is still allowed, so this is not
+	// satisfied by refusing everything.
+	if !rules.Allowed("scour", "/news/story") {
+		t.Error("a path no rule names was refused")
+	}
+}
