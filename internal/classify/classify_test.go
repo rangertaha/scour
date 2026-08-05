@@ -280,3 +280,52 @@ func TestBothAreRegistered(t *testing.T) {
 		t.Error("something that needs a dependency is registered by default")
 	}
 }
+
+// TestBayesStraddlesTheMiddleOnALopsidedCorpus.
+//
+// Review labels are lopsided: somebody marks a handful of pages as the subject
+// and everything else as not. The score was Sigmoid(evidence * scale), and
+// evidence carries the prior, which is the log of the ratio of the two sides.
+// Multiplying by a scale stretches around zero and cannot move a middle, so on
+// twenty against two hundred the prior was -2.3, both class means were negative,
+// and every page scored below a half including the classifier's own positive
+// examples. A job with `least = 0.5` dropped an entire crawl while reporting
+// well-formed scores for every page in it.
+//
+// Ten to one here rather than ten to one hundred, because the defect is in the
+// arithmetic and not in the size of the corpus, and a test somebody has to read
+// should be readable.
+func TestBayesStraddlesTheMiddleOnALopsidedCorpus(t *testing.T) {
+	docs := []bayes.Document{
+		{Text: "The climate committee criticised the pace of decarbonisation.", About: true},
+	}
+	for _, text := range []string{
+		"The manager named an unchanged squad for the cup fixture.",
+		"Shares fell after the company cut its quarterly guidance.",
+		"The film won three awards including best original screenplay.",
+		"The transfer window closed with no signings at all.",
+		"Quarterly revenue beat guidance and the shares rose.",
+		"A sequel was announced at the festival on Friday.",
+		"The squad travelled without three injured players.",
+		"Investors welcomed the dividend and the buyback.",
+		"The director thanked the crew in a short speech.",
+		"The league confirmed the fixture would be replayed.",
+	} {
+		docs = append(docs, bayes.Document{Text: text, About: false})
+	}
+
+	b, err := bayes.Train("climate", 1, docs)
+	if err != nil {
+		t.Fatalf("train: %v", err)
+	}
+
+	on := score(t, b, "The climate committee criticised the pace of decarbonisation.")
+	off := score(t, b, "The manager named an unchanged squad for the cup fixture.")
+
+	if on < 0.5 {
+		t.Errorf("the classifier's own positive example scored %.2f, below the middle", on)
+	}
+	if off > 0.5 {
+		t.Errorf("a negative example scored %.2f, above the middle", off)
+	}
+}

@@ -64,6 +64,16 @@ type Bayes struct {
 	// Prior is the log-odds of the subject before any word is read.
 	Prior float64 `json:"prior"`
 
+	// Midpoint is the evidence that scores exactly a half: the halfway point
+	// between what the two sides of the corpus averaged. Fitted, because the
+	// evidence has a middle of its own that is only zero when the corpus was
+	// perfectly balanced, and a scale can stretch around a middle but cannot
+	// move one. See [fit].
+	//
+	// Absent from a model trained before this existed, which decodes as zero
+	// and scores as that model always did.
+	Midpoint float64 `json:"midpoint"`
+
 	// Scale converts summed evidence into the contract's range. Fitted during
 	// training rather than guessed, because the spread of log-odds depends on
 	// the corpus and a constant that suited one would misjudge the next.
@@ -134,11 +144,12 @@ func Train(subject string, version int, docs []Document) (*Bayes, error) {
 		b.LogOdds[term] = math.Log(pAbout / pAgainst)
 	}
 
-	b.Scale = fitScale(b, docs)
+	b.Midpoint, b.Scale = fit(b, docs)
 	return b, nil
 }
 
-// fitScale chooses how sharply summed evidence turns into a score.
+// fit chooses where the middle of the score is and how sharply evidence turns
+// into one.
 //
 // The spread of per-word log-odds depends entirely on the corpus: a subject
 // whose vocabulary barely overlaps with everything else produces large numbers,
@@ -147,9 +158,26 @@ func Train(subject string, version int, docs []Document) (*Bayes, error) {
 // in the middle, and a threshold written for one would be nonsense for the
 // other.
 //
-// So it is fitted: take the mean evidence of the examples on each side and pick
-// a scale that puts them either side of the middle by a comfortable margin.
-func fitScale(b *Bayes, docs []Document) float64 {
+// So it is fitted: take the mean evidence of the examples on each side, put the
+// middle of the score halfway between them, and pick a scale that puts them
+// either side of it by a comfortable margin.
+//
+// # Why a midpoint and not only a scale
+//
+// Because multiplying cannot move a middle, it can only stretch around one, and
+// the evidence has a middle of its own that is not zero: [Bayes.evidence] adds
+// the prior, which is the log of how many examples were on each side. Only a
+// corpus with exactly as many of each has a prior of zero, and review labels
+// never do. Trained on twenty pages about the subject and two hundred about
+// anything else, the prior is -2.3, both class means are negative, and every
+// page scores below 0.1 including the classifier's own positive examples: a job
+// with `least = 0.5` dropped the whole crawl while reporting well-formed
+// scores. The reverse imbalance put everything above 0.9.
+//
+// A model trained before this has no midpoint, so it decodes with zero and
+// scores exactly as it did. That is right for the balanced corpus it was
+// probably trained on and wrong for any other, and retraining is what fixes it.
+func fit(b *Bayes, docs []Document) (midpoint, scale float64) {
 	var aboutSum, againstSum float64
 	var about, against int
 
@@ -164,18 +192,26 @@ func fitScale(b *Bayes, docs []Document) float64 {
 		against++
 	}
 
-	gap := (aboutSum / float64(about)) - (againstSum / float64(against))
+	aboutMean := aboutSum / float64(about)
+	againstMean := againstSum / float64(against)
+
+	midpoint = (aboutMean + againstMean) / 2
+	if math.IsNaN(midpoint) {
+		midpoint = 0
+	}
+
+	gap := aboutMean - againstMean
 	if gap <= 0 || math.IsNaN(gap) {
 		// The examples do not separate. A scale of one is as good as any, and
 		// the scores will sit near the middle, which is the honest report of a
 		// classifier that has not learned anything.
-		return 1
+		return midpoint, 1
 	}
 
 	// Put the average example about two logistic units from the middle, which
 	// is roughly 0.88 and 0.12: confident without claiming certainty it has
 	// not earned.
-	return 4 / gap
+	return midpoint, 4 / gap
 }
 
 // evidence is the summed log-odds per word, before it is squashed.
@@ -212,7 +248,7 @@ func (b *Bayes) Score(_ context.Context, text string) (float64, error) {
 	if strings.TrimSpace(text) == "" {
 		return 0, nil
 	}
-	return classify.Clamp(classify.Sigmoid(b.evidence(text) * b.Scale)), nil
+	return classify.Clamp(classify.Sigmoid((b.evidence(text) - b.Midpoint) * b.Scale)), nil
 }
 
 // Name implements [classify.Classifier].
