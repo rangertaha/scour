@@ -359,6 +359,129 @@ month behaves the way it did today.
 says, and a mismatch is refused rather than inferred, because silently changing
 a declared type is how a document stops meaning what it reads as.
 
+## Entities
+
+Extraction is per page and knows nothing. An entity store makes it
+corpus-informed: knowing that a publisher has published these authors on this
+subject gives a mangled byline something to be resolved against rather than
+merely parsed.
+
+```hcl
+job "news" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+
+    property "author" {
+      type   = entity
+      entity = "person"
+      via    = "writes_for"     # the relation back to the publisher
+    }
+  }
+}
+```
+
+It composes with topics in a way that is worth noticing: **"Apple" in a
+technology article is a company and in an agriculture article it is a fruit.**
+Topic-conditioned linking falls out of having both, and neither was designed
+with the other in mind.
+
+### Shared, like a classifier
+
+A publisher means the same thing in every job, so the store is referenced rather
+than copied. That is the second thing to be shared and it makes a pattern:
+anything whose meaning does not depend on the job belongs outside it.
+
+### It needs a service, and the others do not
+
+The frontier has one owner and the records store has one owner, so both stay
+private files. This has two: the pipeline writes resolved entities, and the
+spider reads known ones to disambiguate what it is extracting. Two stages
+touching one database would break the ownership rule, and a service is what
+keeps it: one process owns the file and both stages ask.
+
+### Everything is an assertion
+
+Nothing in the store is true. Everything was **asserted by something, at a time,
+with a confidence**, and provenance is carried on every one:
+
+| | |
+| --- | --- |
+| Job | Which crawl said so |
+| URL | Which page it came from |
+| Record | Which extraction |
+| Spec | Which shape it was extracted under |
+| Classifier | Which topic version, when one was involved |
+| Confidence | How sure that extraction was |
+| Observed | When |
+
+Provenance hangs on the assertions and not on the entity, because an entity's
+existence is implied by things being said about it. That has three consequences
+worth having.
+
+**Conflict stops being a problem to prevent.** Two pages giving different
+founding years is not corruption, it is two assertions, and the current value
+becomes a question you ask rather than a field you overwrite: most confident,
+most recent, most corroborated, or by source. Materialise that view if it gets
+hot; compute it until then.
+
+**Retraction becomes a delete.** One job extracting badly used to mean polluting
+a shared store with no way to tell which values came from where. With provenance
+it is `where job = ?`, and the store is clean.
+
+**A merge is an assertion too.** When identity resolution decides two entities
+are one, recording `same_as` beats rewriting rows: it is reversible, it keeps
+both provenance trails, and it does not destroy the fact that they were once
+thought distinct, which is the thing you need when the merge was wrong.
+
+### Relations carry properties
+
+"Monbiot writes for the Guardian **about environment**" is an attribute of the
+relation rather than of either end. That is the difference between a table of
+pairs and a small graph, and it is much cheaper to decide now than later.
+
+So a relation has an identity of its own and can be the subject of assertions,
+the same way an entity can.
+
+### Explicit tables, not triples
+
+Everything here could be one table of subject-predicate-object with provenance
+columns, which is the elegant answer and handles entity properties, aliases,
+relations and relation properties uniformly.
+
+It is not the one to take. In SQLite a triple store turns every question into a
+chain of self-joins, and being able to answer a question with a readable SELECT
+is the argument that won the frontier decision. Explicit tables are more of them
+and less cleverness, and they stay legible at three in the morning.
+
+### The loop has a failure mode
+
+Known entities improving extraction is also known entities **crowding out new
+ones**. If a byline only resolves cleanly when it matches something already
+stored, discovery stops and the store converges on what it already believed,
+looking exactly like rising accuracy the whole time.
+
+The guard is the one topics needed: **known entities raise confidence, they
+never gate extraction.** A novel author must come out as easily as a familiar
+one, so the store makes the crawl surer rather than able. That wants a test: a
+byline belonging to nobody in the store still extracts.
+
+### Named entity recognition is a plugin
+
+Go has no good NER, and the honest choices are a Python service or a language
+model: expensive, shared, wanted by some jobs and not others. That is the remote
+middleware contract exactly, the same as a classifier, and for the same reasons.
+
+Open: **staging.** The property-to-entity reference and a store of typed
+entities with typed relations is contained and useful alone, since it answers
+"which authors has this publisher published" for nothing. Identity resolution is
+the middle piece. Recognition and linking is the large one, and the feedback
+into extraction needs all three. Building them as one thing is how this becomes
+a year of work that never ships.
+
 ## Topics are optional
 
 Most jobs crawl a site because they want that site. Some want a subject
@@ -986,6 +1109,7 @@ four stages is the genuinely new distributed-systems problem here.
 | Resubmission diff and mutation policy | Built, tested |
 | Classifiers: the contract, terms and bayes | Built, tested |
 | Secrets in a sealed KV bucket, resolved at plugin build | Designed, not started |
+| Entity store: assertions with provenance, behind a service | Designed, not started |
 | Plugin implementations, all of them | Not started |
 | The stages themselves | Not started |
 | Exporters, all formats | Not started |

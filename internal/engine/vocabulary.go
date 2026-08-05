@@ -33,12 +33,17 @@ const (
 	TypeURL    Type = "url"
 	TypeObject Type = "object"
 	TypeList   Type = "list"
+	// TypeEntity is a reference to something in the shared entity store: a
+	// person, an organisation, a place. The value extracted is a name; what is
+	// stored is a link to the thing that name refers to, resolved against what
+	// the store already knows.
+	TypeEntity Type = "entity"
 )
 
 // Types is every type a property or item may declare.
 var Types = []Type{
 	TypeStr, TypeInt, TypeFloat, TypeBool,
-	TypeDate, TypeURL, TypeObject, TypeList,
+	TypeDate, TypeURL, TypeObject, TypeList, TypeEntity,
 }
 
 // DefaultType is what a property that does not say gets. Text, because most

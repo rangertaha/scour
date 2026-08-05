@@ -1048,3 +1048,101 @@ job "j" {
 		t.Errorf("examples = %v", got)
 	}
 }
+
+// Entity references. What is extracted is a name; what is kept is a link to the
+// thing that name refers to.
+
+func TestEntityReference(t *testing.T) {
+	j := mustValidate(t, "")
+	_ = j
+
+	doc := parse(t, `
+job "news" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+
+    property "author" {
+      type   = entity
+      entity = "person"
+      via    = "writes_for"
+    }
+  }
+}
+`)
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("did not validate: %v", err)
+	}
+
+	author := doc.Jobs[0].Items[0].Properties[1]
+	if author.Type != string(engine.TypeEntity) {
+		t.Errorf("type = %q", author.Type)
+	}
+	if author.Entity != "person" || author.Via != "writes_for" {
+		t.Errorf("entity = %q via %q", author.Entity, author.Via)
+	}
+}
+
+func TestEntityMustSayWhichKind(t *testing.T) {
+	refuses(t, `
+  item "b" {
+    property "author" {
+      type = entity
+    }
+  }
+`, "which kind")
+}
+
+func TestEntityFieldsNeedAnEntityType(t *testing.T) {
+	refuses(t, `
+  item "b" {
+    property "author" {
+      type   = str
+      entity = "person"
+    }
+  }
+`, "nothing would resolve it")
+
+	refuses(t, `
+  item "c" {
+    property "author" {
+      type = str
+      via  = "writes_for"
+    }
+  }
+`, "nothing for it to relate")
+}
+
+// TestEntityReferenceIsShape: unlike an example, which is evidence about how to
+// find a value, an entity reference changes what is extracted, so it belongs in
+// the fingerprint and a change to it is a re-extraction.
+func TestEntityReferenceIsShape(t *testing.T) {
+	shape := func(body string) *engine.Spec {
+		src := `
+job "j" {
+  start = ["https://example.com/"]
+  item "article" {
+    property "author" {
+      ` + body + `
+    }
+  }
+}
+`
+		return parse(t, src).Jobs[0].Spec()
+	}
+
+	plain := shape(`type = str`)
+	linked := shape(`type = entity` + "\n      " + `entity = "person"`)
+
+	if plain.Fingerprint() == linked.Fingerprint() {
+		t.Error("turning a property into an entity reference did not change the shape")
+	}
+
+	viaOnly := shape(`type = entity` + "\n      " + `entity = "person"` + "\n      " + `via = "writes_for"`)
+	if linked.Fingerprint() == viaOnly.Fingerprint() {
+		t.Error("adding a relation did not change the shape")
+	}
+}

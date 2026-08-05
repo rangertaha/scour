@@ -176,6 +176,22 @@ func validateProperties(props []*Property, where string) []error {
 			}
 		}
 
+		// An entity reference has to say what kind of thing it refers to.
+		// Without it there is nothing to resolve against, and the property
+		// would quietly behave as a string.
+		if Type(p.Type) == TypeEntity && strings.TrimSpace(p.Entity) == "" {
+			problems = append(problems, fmt.Errorf(
+				"%s: typed entity but does not say which kind, as in entity = \"person\"", path))
+		}
+		if p.Entity != "" && p.Type != "" && Type(p.Type) != TypeEntity {
+			problems = append(problems, fmt.Errorf(
+				"%s: names an entity kind but is typed %s, so nothing would resolve it", path, p.Type))
+		}
+		if p.Via != "" && Type(p.Type) != TypeEntity {
+			problems = append(problems, fmt.Errorf(
+				"%s: has a relation but is not an entity, so there is nothing for it to relate", path))
+		}
+
 		// A property with children describes an object, whatever it says. The
 		// mismatch is an error rather than an inference, because silently
 		// changing a declared type is how a document stops meaning what it

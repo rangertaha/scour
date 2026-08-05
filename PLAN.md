@@ -174,6 +174,20 @@ credential chain stays as the fallback, so a laptop is unaffected.
 with no cloud credentials in its environment; and the value appearing in neither
 the stored job, a plan, nor `scour show`.
 
+**Phase 5.75. The entity store.** Typed entities and typed relations, both
+carrying properties, every fact an assertion with provenance, behind a service
+because two stages touch it.
+
+Staged, because built as one thing this is a year that never ships. The
+property-to-entity reference and a store of typed entities is contained and
+useful alone: it answers which authors a publisher has published for nothing.
+Identity resolution is the middle piece. Recognition and linking is the large
+one, and the feedback into extraction needs all three.
+
+*Proved by:* a byline belonging to nobody in the store extracting as easily as a
+familiar one, because known entities must raise confidence and never gate
+extraction; and one job's assertions being removable with a single delete.
+
 **Phase 6. The bus.** Stages talking over NATS instead of calling each other,
 in one process against an embedded server.
 
@@ -279,5 +293,6 @@ has numbers to compare against the ones on `main`.
 | 4.75. Topic classification, optional | Designed, not started |
 | 5. Pipelines and exporters | Not started |
 | 5.5. Secrets | Designed, not started |
+| 5.75. Entity store, assertions with provenance | Designed. Reference built |
 | 6. The bus | Not started |
 | 7. The cluster | Not started |
