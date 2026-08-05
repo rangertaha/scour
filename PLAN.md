@@ -105,6 +105,9 @@ one URL, no frontier.
 
 *Proved by:* a second run against a local server that the server never sees.
 
+*Where it is:* built and tested. It found the robots.txt redirect bug the first
+time it was pointed at a real site.
+
 **Phase 4. The spider.** Parsing a response into items against the `item` and
 `property` blocks, and discovering links.
 
@@ -114,6 +117,10 @@ number rather than a pass or a fail.
 
 *Proved by:* a corpus, and per-field fill rates that get written down. The old
 implementation's numbers are on the `main` branch and are the bar.
+
+*Where it is:* built and tested. Four ways to find a value, taught before
+guessed, and every value says which of them found it. The fill rates against a
+real corpus are not measured yet, which is the part of this phase still owed.
 
 **Phase 4.5. `scour train`, locators written back into the document.**
 Induction over the cached pages, proposing an xpath or a css selector per
@@ -126,6 +133,9 @@ is the one that makes the loop converge instead of going in circles.
 
 *Proved by:* training over a corpus, hand-correcting one locator, retraining,
 and finding the correction still there.
+
+*Where it is:* built and tested, including that proof. What it writes is marked
+with a comment, and only what is marked is ever replaced.
 
 ### How training should work
 
@@ -182,11 +192,19 @@ the menu. Optional throughout, so a node running no topiced jobs loads nothing.
 over the same budget, measured rather than asserted; and a job with no topic
 plugin never opening the classifier at all.
 
+*Where it is:* the spider's half is built and tested, with classifiers shared,
+versioned and stored one file per training. The scheduler's half, scoring a URL
+before it is fetched, is the other question and is not built, so the
+measurement that this phase turns on cannot be made yet.
+
 **Phase 5. Pipelines and exporters.** The DAG runner over `Waves()`, and the
 formats.
 
 *Proved by:* independent steps demonstrably running at once, and export output
 that round-trips.
+
+*Where it is:* built and tested, both proofs included. json, jsonlines and csv;
+parquet, nats and sqlite are not written.
 
 **Phase 5.5. Secrets.** `SCOUR_SECRETS` sealed with a cluster key, `secret()`
 resolved when a plugin is built, and the S3 and GCS backends taught to accept
@@ -202,6 +220,11 @@ credential chain stays as the fallback, so a laptop is unaffected.
 with no cloud credentials in its environment; and the value appearing in neither
 the stored job, a plan, nor `scour show`.
 
+*Where it is:* the store and the resolution are built and tested, including that
+the call resolves in one evaluation context and nowhere else. Teaching the S3
+and GCS backends to take an explicit credential is not done, so a secret can be
+resolved and there is not yet a backend that wants one.
+
 **Phase 5.75. The entity store.** Typed entities and typed relations, both
 carrying properties, every fact an assertion with provenance, behind a service
 because two stages touch it.
@@ -216,6 +239,10 @@ one, and the feedback into extraction needs all three.
 familiar one, because known entities must raise confidence and never gate
 extraction; and one job's assertions being removable with a single delete.
 
+*Where it is:* the first stage is built and tested, including the single delete.
+Identity resolution and recognition are not, and nothing feeds the store from a
+crawl yet, so the first proof cannot be made.
+
 **Phase 6. The bus.** Stages talking over NATS instead of calling each other,
 in one process against an embedded server.
 
@@ -223,11 +250,20 @@ in one process against an embedded server.
 wired directly or through the broker. That equivalence is the whole claim, and
 it is a test, not an aspiration.
 
+*Where it is:* built, and that is the test. The downloader and the spider are
+services; the scheduler is not one and will not be, because the frontier cannot
+be shared.
+
 **Phase 7. The cluster.** `--join`, jobs in JetStream, work distributed by queue
 group, and bring-your-own-stage.
 
 *Proved by:* two nodes, one job, work done on both. An external spider written
 as a subscriber, in a language that is not Go.
+
+*Where it is:* two nodes on one job with work done on both is built and tested.
+Jobs and nodes are in KV and watched. A spider in another language is possible
+by construction, since the wire format is JSON and the spec renders to HCL, and
+nobody has written one.
 
 ## What blocks Phase 3
 
