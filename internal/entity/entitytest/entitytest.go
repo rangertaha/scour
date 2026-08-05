@@ -55,6 +55,9 @@ type Graph interface {
 	Provenances(ctx context.Context, id string) ([]entity.Provenance, error)
 
 	Merge(ctx context.Context, from, to, rule string, said entity.Provenance) error
+	Tag(ctx context.Context, subject, topic string, said entity.Provenance) error
+	Topics(ctx context.Context, subject string) ([]entity.Property, error)
+	About(ctx context.Context, topic string) ([]*entity.Entity, error)
 	Retract(ctx context.Context, job string) (int64, error)
 }
 
@@ -70,6 +73,7 @@ func Run(t *testing.T, open Open) {
 	t.Run("AnEdgeHasATypeAndPropertiesOfItsOwn", func(t *testing.T) { testEdge(t, open) })
 	t.Run("ReadsFollowAMerge", func(t *testing.T) { testMerge(t, open) })
 	t.Run("OneJobsContributionIsOneDelete", func(t *testing.T) { testRetract(t, open) })
+	t.Run("TypesAndEntitiesCarryTopics", func(t *testing.T) { testTopics(t, open) })
 }
 
 func said(job, url string) entity.Provenance {
@@ -343,5 +347,83 @@ func testRetract(t *testing.T, open Open) {
 	// What only the withdrawn job asserted is gone entirely.
 	if _, err := g.Find(ctx, "company", "Ghost"); err == nil {
 		t.Error("an entity only the withdrawn job asserted is still there")
+	}
+}
+
+// testTopics: a type and an entity can both be about something.
+//
+// "person" being about climate is a different claim from any particular person
+// being about it, and both are worth making, so a type gets a derived id and is
+// a subject like anything else.
+func testTopics(t *testing.T, open Open) {
+	ctx := context.Background()
+	g := open(t)
+	from := said("news", "https://a.example/1")
+
+	author, err := g.Assert(ctx, "person", "Alex Doe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := g.Assert(ctx, "person", "Sam Roe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Twice, so the count means something and the ordering has work to do.
+	for _, url := range []string{"https://a.example/1", "https://a.example/2"} {
+		if err := g.Tag(ctx, author, "climate@7", said("news", url)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := g.Tag(ctx, author, "energy@2", from); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Tag(ctx, other, "climate@7", from); err != nil {
+		t.Fatal(err)
+	}
+
+	// A type carries one too.
+	if err := g.Tag(ctx, entity.KindID("person"), "climate@7", from); err != nil {
+		t.Fatal(err)
+	}
+
+	topics, err := g.Topics(ctx, author)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topics) != 2 {
+		t.Fatalf("Topics = %+v, want both", topics)
+	}
+	if topics[0].Value != "climate@7" || topics[0].Assertions != 2 {
+		t.Errorf("topics[0] = %+v, want the most-asserted first", topics[0])
+	}
+
+	if kind, err := g.Topics(ctx, entity.KindID("person")); err != nil {
+		t.Fatal(err)
+	} else if len(kind) != 1 || kind[0].Value != "climate@7" {
+		t.Errorf("the type's topics = %+v", kind)
+	}
+
+	// The reverse: what is about this.
+	about, err := g.About(ctx, "climate@7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(about) != 2 {
+		t.Fatalf("About = %+v, want both people and not the type", about)
+	}
+	if about[0].Name != "Alex Doe" {
+		t.Errorf("about[0] = %+v, want the most-asserted first", about[0])
+	}
+
+	// A topic without a version is refused: the graph would be saying an entity
+	// is about a subject without saying which training decided it.
+	if err := g.Tag(ctx, author, "climate", from); err == nil {
+		t.Error("a topic with no version was accepted")
+	}
+
+	// And the reserved name cannot be written as an ordinary property.
+	if err := g.Describe(ctx, author, entity.TopicProperty, "climate@7", 0, from); err == nil {
+		t.Error("the reserved topic name was writable as a property")
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -97,6 +98,21 @@ type RelationKind struct {
 // An entity subject is written against its canonical id, so describing either
 // spelling of a merged pair describes the pair.
 func (s *graph) Describe(ctx context.Context, subject, name, value string, position int, said Provenance) error {
+	if name == TopicProperty {
+		// Reserved, so that what a job declares and what a classifier decided
+		// cannot end up in the same rows meaning different things. Refused here
+		// rather than documented, because a convention nobody enforces is one
+		// somebody eventually writes through.
+		return fmt.Errorf(
+			"entity: %q is reserved for what a topic classifier decided. Use Tag, or rename the property",
+			TopicProperty)
+	}
+	return s.describe(ctx, subject, name, value, position, said)
+}
+
+// describe is the write itself, without the reserved-name check, so [graph.Tag]
+// can record the one name Describe refuses.
+func (s *graph) describe(ctx context.Context, subject, name, value string, position int, said Provenance) error {
 	if subject == "" || name == "" {
 		return errors.New("entity: a property needs a subject and a name")
 	}
@@ -197,6 +213,22 @@ SELECT p.name, p.value, MIN(p.position), SUM(p.assertions), MIN(p.first_seen), M
 // A relation id is derived from its two ends and its type rather than from a
 // name, so it is not in the alias family and resolving one would find nothing.
 func subjectOf(ctx context.Context, tx *sql.Tx, subject string) (string, error) {
+	// A type, which is a subject in its own right: "person" being about
+	// climate is a different claim from any particular person being about it.
+	// Checked against what has actually been asserted, so a type nobody has
+	// ever seen is refused the way a mistyped entity id is.
+	if kind, ok := strings.CutPrefix(subject, KindPrefix); ok {
+		var seen int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM entities WHERE kind = ?`, kind).Scan(&seen); err != nil {
+			return "", fmt.Errorf("entity: describe: %w", err)
+		}
+		if seen == 0 {
+			return "", fmt.Errorf("entity: no kind %q in the graph", kind)
+		}
+		return subject, nil
+	}
+
 	var exists int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM relations WHERE id = ?`, subject).Scan(&exists); err != nil {

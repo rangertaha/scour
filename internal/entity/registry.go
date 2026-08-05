@@ -63,6 +63,16 @@ type Store interface {
 	Unmerge(ctx context.Context, alias string) error
 	Aliases(ctx context.Context, id string) ([]Alias, error)
 
+	// Tag records that a subject is about a topic, as a versioned reference:
+	// "climate@7". The subject is an entity, a relation or a [KindID].
+	Tag(ctx context.Context, subject, topic string, said Provenance) error
+
+	// Topics is what a subject is about, most-asserted first.
+	Topics(ctx context.Context, subject string) ([]Property, error)
+
+	// About is every entity the graph says is about a topic.
+	About(ctx context.Context, topic string) ([]*Entity, error)
+
 	Retract(ctx context.Context, job string) (int64, error)
 	Close() error
 }

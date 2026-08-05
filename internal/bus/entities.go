@@ -52,6 +52,10 @@ type Graph interface {
 	Unmerge(ctx context.Context, alias string) error
 	Aliases(ctx context.Context, id string) ([]entity.Alias, error)
 
+	Tag(ctx context.Context, subject, topic string, said entity.Provenance) error
+	Topics(ctx context.Context, subject string) ([]entity.Property, error)
+	About(ctx context.Context, topic string) ([]*entity.Entity, error)
+
 	Retract(ctx context.Context, job string) (int64, error)
 	Close() error
 }
@@ -100,6 +104,14 @@ type (
 	}
 	aliasAsk struct {
 		Alias string `json:"alias"`
+	}
+	tagAsk struct {
+		Subject string            `json:"subject"`
+		Topic   string            `json:"topic"`
+		Said    entity.Provenance `json:"said"`
+	}
+	topicAsk struct {
+		Topic string `json:"topic"`
 	}
 	jobAsk struct {
 		Job string `json:"job"`
@@ -180,6 +192,19 @@ func (c *Conn) ServeEntities(store Graph) (*Service, error) {
 	serving(c, s, EntitySubject("aliases"), EntityQueue,
 		func(ctx context.Context, a idAsk) ([]entity.Alias, error) {
 			return store.Aliases(ctx, a.ID)
+		})
+
+	serving(c, s, EntitySubject("tag"), EntityQueue,
+		func(ctx context.Context, a tagAsk) (none, error) {
+			return none{}, store.Tag(ctx, a.Subject, a.Topic, a.Said)
+		})
+	serving(c, s, EntitySubject("topics"), EntityQueue,
+		func(ctx context.Context, a idAsk) ([]entity.Property, error) {
+			return store.Topics(ctx, a.ID)
+		})
+	serving(c, s, EntitySubject("about"), EntityQueue,
+		func(ctx context.Context, a topicAsk) ([]*entity.Entity, error) {
+			return store.About(ctx, a.Topic)
 		})
 
 	serving(c, s, EntitySubject("retract"), EntityQueue,
@@ -282,6 +307,21 @@ func (e *Entities) Unmerge(ctx context.Context, alias string) error {
 
 func (e *Entities) Aliases(ctx context.Context, id string) ([]entity.Alias, error) {
 	return call[idAsk, []entity.Alias](ctx, e.conn, EntitySubject("aliases"), e.wait, idAsk{ID: id})
+}
+
+func (e *Entities) Tag(ctx context.Context, subject, topic string, said entity.Provenance) error {
+	_, err := call[tagAsk, none](ctx, e.conn, EntitySubject("tag"), e.wait,
+		tagAsk{Subject: subject, Topic: topic, Said: said})
+	return err
+}
+
+func (e *Entities) Topics(ctx context.Context, subject string) ([]entity.Property, error) {
+	return call[idAsk, []entity.Property](ctx, e.conn, EntitySubject("topics"), e.wait, idAsk{ID: subject})
+}
+
+func (e *Entities) About(ctx context.Context, topic string) ([]*entity.Entity, error) {
+	return call[topicAsk, []*entity.Entity](ctx, e.conn, EntitySubject("about"), e.wait,
+		topicAsk{Topic: topic})
 }
 
 func (e *Entities) Retract(ctx context.Context, job string) (int64, error) {
