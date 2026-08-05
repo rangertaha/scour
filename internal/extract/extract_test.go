@@ -643,3 +643,60 @@ func TestDatesInWhateverShapeThePageWroteThem(t *testing.T) {
 		})
 	}
 }
+
+// TestAnObjectFoundInMetadataStillFillsItsFields.
+//
+// A value that came from a `<meta>`, from JSON-LD or from an `itemprop` has no
+// node to look inside, and the fields were simply left empty: measured over the
+// corpus, `author` filled on 60% of pages and `author.name` on 40%, the
+// difference being entirely pages that describe their author in metadata.
+//
+// The fallback is the weaker inference and says so, because it is the "name
+// from anywhere" problem the node exists to avoid. It is done anyway because an
+// empty field is not safer than a wrong one, only quieter, and How says which
+// of the two you are looking at.
+func TestAnObjectFoundInMetadataStillFillsItsFields(t *testing.T) {
+	const body = `<html><head>
+	  <meta itemprop="author" content="Alex Doe">
+	  <meta itemprop="name" content="Alex Doe">
+	  <meta itemprop="profile" content="https://example.com/people/alex">
+	</head><body></body></html>`
+
+	item := one(t, `
+  item "article" {
+    property "author" {
+      type = object
+
+      property "name" {
+        type = str
+      }
+
+      property "profile" {
+        type = url
+      }
+    }
+  }
+`, body)
+
+	author, ok := item.Get("author")
+	if !ok {
+		t.Fatal("the author was not found at all")
+	}
+	if author.Nested["name"] == nil || author.Nested["name"].Text != "Alex Doe" {
+		t.Errorf("name = %+v, want the field filled from the page's own metadata", author.Nested["name"])
+	}
+	if author.Nested["profile"] == nil {
+		t.Fatal("profile was not filled")
+	}
+
+	// Marked as the weaker inference, because it was not read out of the
+	// author: nothing here says these three metadata elements describe one
+	// person, and on a page whose masthead carries an itemprop of its own this
+	// would find the site.
+	if got := author.Nested["name"].How; got != extract.BySemantics {
+		t.Errorf("how = %q, want it marked as a guess", got)
+	}
+	if !strings.Contains(author.Nested["name"].From, "outside author") {
+		t.Errorf("from = %q, want it to say where it was not found", author.Nested["name"].From)
+	}
+}
