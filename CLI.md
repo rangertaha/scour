@@ -249,6 +249,7 @@ for the same page.
 
 ```
 scour try <file> [url]     Run one page and show what came out
+scour run <file>           Crawl a job here, without a server
 scour train <file>         Read the cache, propose locators, write them back
 ```
 
@@ -290,6 +291,40 @@ does.
 
 `--strict` is for CI: a job whose `required` properties stopped matching has
 broken, and that should fail a build rather than quietly export nothing.
+
+#### `scour run <file>`
+
+Runs the whole engine in this process: scheduler, downloader, spider, pipeline
+and exporters, wired to each other directly. No server, no cluster, no broker.
+
+**It resumes.** The frontier is a file under `.scour` beside the document, so a
+crawl that was stopped, or that hit its budget, continues where it left off.
+
+| Flag | Effect |
+| --- | --- |
+| `--job <name>` | Which job, if the document holds several |
+| `--dir <path>` | Where to keep the frontier and the cache |
+| `--verbose`, `-v` | Log every page |
+| `--fresh` | Forget what a previous run queued |
+
+```console
+$ scour run news.hcl
+crawling news: 1 seeded, 1 queued
+finished in 2.4s
+  fetched   48 (12 from the cache)
+  dropped   9
+  failed    0
+  items     41
+  exported  41
+  wrote     jsonlines.article
+```
+
+The summary says *why* it ended, because a crawl that finished a site and one
+that ran out of budget look identical otherwise and mean opposite things.
+
+This is also the thing a cluster has to be equivalent to: the same job on
+several nodes should produce the same records, and being able to run both is
+what makes that checkable rather than merely claimed.
 
 #### `scour train <file>`
 

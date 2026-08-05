@@ -40,6 +40,7 @@ func root(a *cli.App) *ucli.Command {
 			cli.Show(a),
 			cli.Spec(a),
 			cli.Try(a),
+			cli.Crawl(a),
 			cli.Defaults(a),
 		},
 		// Reached when nothing matched. An unknown command is a usage error

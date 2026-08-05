@@ -50,9 +50,6 @@ var (
 	// ErrTooDeep reports a URL past the job's max_depth.
 	ErrTooDeep = fmt.Errorf("deeper than the job crawls: %w", chain.ErrDrop)
 
-	// ErrBudgetSpent reports a job that has fetched as many pages as it may.
-	ErrBudgetSpent = fmt.Errorf("the job's page budget is spent: %w", chain.ErrDrop)
-
 	// ErrOutOfScope reports a URL outside the job's domains, included or
 	// excluded.
 	ErrOutOfScope = fmt.Errorf("outside the job's scope: %w", chain.ErrDrop)
@@ -101,7 +98,6 @@ type Stage struct {
 
 	scope    *scope.Scope
 	maxDepth int
-	maxPages int
 	canon    urls.Options
 }
 
@@ -169,7 +165,6 @@ func New(ctx context.Context, job *engine.Job, opts Options, open func(frontier.
 		chain:    built,
 		scope:    bounds,
 		maxDepth: job.Scheduler.Depth(),
-		maxPages: job.Scheduler.Pages(),
 		canon:    opts.Canon,
 	}
 	s.handler = built.Handler(HandlerFunc(s.enqueue))
@@ -209,9 +204,16 @@ func (s *Stage) Submit(ctx context.Context, reqs ...*Request) (int, error) {
 // enqueue is the core the chain wraps: what a request means once every link has
 // had its say.
 //
-// The budget is checked here rather than in a link, because max_depth and
-// max_pages are attributes and an attribute's enforcement cannot be something a
-// job turns off by deleting a plugin.
+// Depth and scope are checked here rather than in a link, because both are
+// attributes and an attribute's enforcement cannot be something a job turns off
+// by deleting a plugin.
+//
+// max_pages is not checked here, and the difference is worth stating: depth is
+// a property of a URL and is knowable the moment one arrives, while a page
+// budget is a count of pages fetched and is only knowable where fetching
+// happens. Checking it here against the length of the queue looked equivalent
+// and was not: it stopped a crawl from queueing what it had discovered, so a
+// crawl that hit its budget left nothing for a later run to resume from.
 func (s *Stage) enqueue(ctx context.Context, req *Request) (*Request, error) {
 	if err := s.prepare(req); err != nil {
 		return nil, err
@@ -223,16 +225,6 @@ func (s *Stage) enqueue(ctx context.Context, req *Request) (*Request, error) {
 	if !s.scope.Allows(req.URL) {
 		return nil, fmt.Errorf("%s: %w", req.URL, ErrOutOfScope)
 	}
-	if s.maxPages > 0 {
-		waiting, err := s.queue.Len(ctx, s.job)
-		if err != nil {
-			return nil, err
-		}
-		if waiting >= s.maxPages {
-			return nil, fmt.Errorf("%s: %w (%d queued)", req.URL, ErrBudgetSpent, waiting)
-		}
-	}
-
 	added, err := s.queue.Add(ctx, s.job, *req)
 	if err != nil {
 		return nil, err

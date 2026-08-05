@@ -153,3 +153,24 @@ func TestDomainsAreReportedBack(t *testing.T) {
 		t.Errorf("domains = %v", got)
 	}
 }
+
+// TestAPortIsNotPartOfASitesName. A job that wrote one meant the site, and a
+// domain that kept its port would match nothing at all: the URL's host has its
+// port taken off before the comparison, so the domain must too. Every crawl
+// against a test server hits this, which is how it was found.
+func TestAPortIsNotPartOfASitesName(t *testing.T) {
+	s := build(t, []string{"127.0.0.1:8080"}, nil, nil)
+
+	for _, url := range []string{
+		"http://127.0.0.1:8080/a",
+		"http://127.0.0.1:9090/a",
+		"http://127.0.0.1/a",
+	} {
+		if !s.Allows(url) {
+			t.Errorf("Allows(%q) = false", url)
+		}
+	}
+	if s.Allows("http://elsewhere.example/a") {
+		t.Error("another host was allowed")
+	}
+}

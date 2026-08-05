@@ -50,7 +50,16 @@ func New(domains, included, excluded []string) (*Scope, error) {
 		if d == "" {
 			continue
 		}
-		s.domains = append(s.domains, strings.TrimPrefix(d, "*."))
+		d = strings.TrimPrefix(d, "*.")
+
+		// A port is not part of a site's name, and a job that wrote one meant
+		// the site. Stripping it here is what makes the comparison symmetric:
+		// the URL's host has its port taken off too, and a domain that kept one
+		// would match nothing at all.
+		if i := strings.LastIndex(d, ":"); i >= 0 && !strings.Contains(d[i:], "]") {
+			d = d[:i]
+		}
+		s.domains = append(s.domains, d)
 	}
 	for _, list := range []struct {
 		name string

@@ -164,14 +164,18 @@ func TestTheBudgetIsEnforcedWithoutAPluginEither(t *testing.T) {
 		}
 	})
 
-	t.Run("pages", func(t *testing.T) {
+	// max_pages is deliberately not enforced here. Depth is a property of a
+	// URL and is knowable the moment one arrives; a page budget is a count of
+	// pages fetched, and the scheduler does not fetch. Checking it here against
+	// the length of the queue looked equivalent and was not.
+	t.Run("pages are not the queue's business", func(t *testing.T) {
 		s := stage(t, job(t, `
   scheduler {
     max_pages = 2
   }
 `))
-		if n := submit(t, s, "https://example.com/a", "https://example.com/b", "https://example.com/c"); n != 2 {
-			t.Errorf("queued %d of three under a budget of two", n)
+		if n := submit(t, s, "https://example.com/a", "https://example.com/b", "https://example.com/c"); n != 3 {
+			t.Errorf("queued %d of three; a page budget stopped urls being discovered", n)
 		}
 	})
 }
@@ -549,22 +553,3 @@ func (b *brokenFrontier) Done(context.Context, string, string) error { return b.
 func (b *brokenFrontier) Fail(context.Context, string, string) error { return b.err }
 func (b *brokenFrontier) Len(context.Context, string) (int, error)   { return 0, b.err }
 func (b *brokenFrontier) Close() error                               { return b.closeErr }
-
-// TestABudgetCheckThatCannotReadTheStoreIsAFailure, rather than a URL silently
-// dropped because the count was unavailable.
-func TestABudgetCheckThatCannotReadTheStoreIsAFailure(t *testing.T) {
-	s, err := scheduler.New(context.Background(), job(t, `
-  scheduler {
-    max_pages = 10
-  }
-`), scheduler.Options{Frontier: &brokenFrontier{err: errors.New("no such table")}}, nil)
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	defer s.Close()
-
-	if _, err := s.Submit(context.Background(),
-		&scheduler.Request{URL: "https://example.com/a", Discovered: origin}); err == nil {
-		t.Error("a budget that could not be read let the URL through")
-	}
-}
