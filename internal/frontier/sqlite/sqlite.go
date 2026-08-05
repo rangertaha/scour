@@ -221,9 +221,6 @@ func ordering(policy string) (string, error) {
 	}
 }
 
-// Policy is the ordering this was built with.
-func (f *Frontier) Policy() string { return f.policy.Name() }
-
 // Add implements [frontier.Frontier].
 //
 // Re-discovering a URL is not news: the first sighting is kept, along with the

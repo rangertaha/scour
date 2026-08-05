@@ -11,7 +11,6 @@ package memory
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"time"
 
@@ -191,35 +190,6 @@ func (f *Frontier) Len(_ context.Context, job string) (int, error) {
 		}
 	}
 	return n, nil
-}
-
-// Hosts is how many distinct hosts this frontier is pacing, which is what a
-// benchmark needs to know it built the workload it meant to.
-func (f *Frontier) Hosts() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.hosts)
-}
-
-// Waiting lists the hashes still to be handed out, in policy order. It is how a
-// test checks an ordering without leasing everything one at a time.
-func (f *Frontier) Waiting(job string) []frontier.Request {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	q := f.jobs[job]
-	if q == nil {
-		return nil
-	}
-
-	out := make([]frontier.Request, 0, len(q.order))
-	for _, hash := range q.order {
-		if e := q.byID[hash]; !e.done {
-			out = append(out, e.req)
-		}
-	}
-	sort.SliceStable(out, func(a, b int) bool { return f.policy.Less(out[a], out[b]) })
-	return out
 }
 
 // Close implements [frontier.Frontier].
