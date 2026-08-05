@@ -1445,6 +1445,8 @@ four stages is the genuinely new distributed-systems problem here.
 | Defaults for every setting, in one file, with a resolved view | Built, tested |
 | Resubmission diff and mutation policy | Built, tested |
 | Classifiers: the contract, terms and bayes | Built, tested |
+| `internal/classify/store`: shared, versioned, one file per training | Built, tested |
+| The `topic` middleware in the spider | Built, tested |
 | Secrets in a sealed KV bucket, resolved at plugin build | Built, tested |
 | Entity store: assertions with provenance, behind a service | Designed, not started |
 | Events as items: tags, fields, time. Parquet archive | Designed. Schema built |
