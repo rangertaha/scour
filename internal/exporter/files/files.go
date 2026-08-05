@@ -31,11 +31,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 
-	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/exporter"
 	"github.com/rangertaha/scour/internal/record"
 )
@@ -186,10 +184,21 @@ type table struct {
 	out     io.WriteCloser
 	writer  *csv.Writer
 	path    string
+	layout  *exporter.Layout
 	columns []string
 }
 
 func newCSV(_ context.Context, cfg exporter.Config) (exporter.Exporter, error) {
+	// The layout is built before the file, so a shape this format cannot write
+	// leaves no empty file behind for somebody to find and wonder about. It is
+	// also where the collision check lives: this exporter did not have one, so
+	// a property named `url` produced a header with two `url` columns, both the
+	// page address, and the extracted value never reached the file.
+	layout, err := exporter.NewLayout("csv", cfg.Shape, []string{"url", "fetched"})
+	if err != nil {
+		return nil, err
+	}
+
 	out, path, err := open(cfg, "csv")
 	if err != nil {
 		return nil, err
@@ -199,7 +208,8 @@ func newCSV(_ context.Context, cfg exporter.Config) (exporter.Exporter, error) {
 		out:     out,
 		writer:  csv.NewWriter(out),
 		path:    path,
-		columns: columns(cfg),
+		layout:  layout,
+		columns: layout.Columns(),
 	}
 
 	// The header goes in at construction, not on the first row. A job whose
@@ -219,37 +229,6 @@ func newCSV(_ context.Context, cfg exporter.Config) (exporter.Exporter, error) {
 	return t, nil
 }
 
-// columns are the header, from the shape the job declared.
-//
-// From the declaration rather than from whichever record arrived first, or two
-// runs over one corpus would produce two different headers and neither would be
-// wrong. Nested properties are flattened the way records are.
-func columns(cfg exporter.Config) []string {
-	out := []string{"url", "fetched"}
-	if cfg.Shape == nil {
-		return out
-	}
-
-	var names []string
-	var add func(prefix string, p *engine.Property)
-	add = func(prefix string, p *engine.Property) {
-		name := prefix + p.Name
-		if len(p.Properties) == 0 {
-			names = append(names, name)
-			return
-		}
-		for _, nested := range p.Properties {
-			add(name+".", nested)
-		}
-	}
-	for _, p := range cfg.Shape.Properties {
-		add("", p)
-	}
-
-	sort.Strings(names)
-	return append(out, names...)
-}
-
 func (t *table) Write(_ context.Context, records ...*record.Record) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -257,14 +236,9 @@ func (t *table) Write(_ context.Context, records ...*record.Record) error {
 	for _, r := range records {
 		row := make([]string, 0, len(t.columns))
 		for _, name := range t.columns {
-			switch name {
-			case "url":
-				row = append(row, r.URL)
-			case "fetched":
-				row = append(row, r.Fetched.UTC().Format("2006-01-02T15:04:05Z"))
-			default:
-				row = append(row, strings.ReplaceAll(r.Values[name], "\n", " "))
-			}
+			// Newlines out, because a CSV cell holding one is legal and is read
+			// back as two rows by half the things that open a CSV.
+			row = append(row, strings.ReplaceAll(t.layout.Value(r, name), "\n", " "))
 		}
 		if err := t.writer.Write(row); err != nil {
 			return fmt.Errorf("%s: %w", t.path, err)

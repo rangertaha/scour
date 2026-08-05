@@ -69,7 +69,6 @@ import (
 	parquetgo "github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress"
 
-	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/exporter"
 	"github.com/rangertaha/scour/internal/record"
 )
@@ -145,6 +144,10 @@ type file struct {
 	writer *parquetgo.Writer
 	path   string
 
+	// layout says what each column holds, so every format renders a record the
+	// same way. See [exporter.Layout].
+	layout *exporter.Layout
+
 	// columns is the file's column order, taken from the schema rather than
 	// assumed, because a row is written by column index.
 	columns []string
@@ -167,10 +170,11 @@ func open(_ context.Context, cfg exporter.Config) (exporter.Exporter, error) {
 	if err != nil {
 		return nil, err
 	}
-	names := columns(cfg)
-	if err := usable(names); err != nil {
+	layout, err := exporter.NewLayout("parquet", cfg.Shape, []string{"url", "fetched", "spec"})
+	if err != nil {
 		return nil, err
 	}
+	names := layout.Columns()
 	schema := schemaOf(cfg.Item, names)
 
 	out, path, err := destination(cfg, c)
@@ -185,6 +189,7 @@ func open(_ context.Context, cfg exporter.Config) (exporter.Exporter, error) {
 		out:     out,
 		writer:  parquetgo.NewWriter(out, schema, parquetgo.Compression(codec)),
 		path:    path,
+		layout:  layout,
 		columns: leaves(schema),
 	}, nil
 }
@@ -246,51 +251,6 @@ func destination(cfg exporter.Config, c Config) (io.WriteCloser, string, error) 
 // url, fetched and spec are here because they are what a query filters by:
 // which page it came from, when that page was fetched, and which version of the
 // shape read it.
-func columns(cfg exporter.Config) []string {
-	out := []string{"url", "fetched", "spec"}
-	if cfg.Shape == nil {
-		return out
-	}
-
-	var names []string
-	var add func(prefix string, p *engine.Property)
-	add = func(prefix string, p *engine.Property) {
-		name := prefix + p.Name
-		if len(p.Properties) == 0 {
-			names = append(names, name)
-			return
-		}
-		for _, nested := range p.Properties {
-			add(name+".", nested)
-		}
-	}
-	for _, p := range cfg.Shape.Properties {
-		add("", p)
-	}
-
-	sort.Strings(names)
-	return append(out, names...)
-}
-
-// usable refuses a shape whose property would collide with a column this owns.
-//
-// The SQLite exporter refuses the same collision for the same reason, and here
-// there is a second one: a schema is built from a set of names, so two columns
-// of one name are not two columns, they are one, and the file would be missing
-// a property without anything having failed. Renaming the property is a
-// one-line fix that they can make and this cannot.
-func usable(names []string) error {
-	seen := map[string]bool{}
-	for _, name := range names {
-		if seen[name] {
-			return fmt.Errorf(
-				"exporter/parquet: a property named %q collides with the column this writes; rename it", name)
-		}
-		seen[name] = true
-	}
-	return nil
-}
-
 // schemaOf builds the file's schema: one required string column per name.
 //
 // Required rather than optional, because the record model has no null. A
@@ -355,27 +315,9 @@ func (f *file) Write(_ context.Context, records ...*record.Record) error {
 func (f *file) row(r *record.Record) parquetgo.Row {
 	row := make(parquetgo.Row, 0, len(f.columns))
 	for i, name := range f.columns {
-		row = append(row, parquetgo.ByteArrayValue([]byte(value(r, name))).Level(0, 0, i))
+		row = append(row, parquetgo.ByteArrayValue([]byte(f.layout.Value(r, name))).Level(0, 0, i))
 	}
 	return row
-}
-
-// value is what one column holds for one record.
-//
-// A value the record does not have is empty, and the fetch time is rendered the
-// way the CSV and SQLite exporters render it. Two exports of one crawl that
-// disagreed about what a record said would be worse than either of them alone.
-func value(r *record.Record, name string) string {
-	switch name {
-	case "url":
-		return r.URL
-	case "fetched":
-		return r.Fetched.UTC().Format("2006-01-02T15:04:05Z")
-	case "spec":
-		return r.Spec
-	default:
-		return r.Values[name]
-	}
 }
 
 // flush closes the row group in progress. The caller holds the lock.

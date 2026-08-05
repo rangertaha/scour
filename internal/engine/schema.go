@@ -278,6 +278,42 @@ type Property struct {
 	Properties []*Property `hcl:"property,block" json:"properties,omitempty"`
 }
 
+// Names are this item's property names, nested ones flattened with a dot and
+// the whole sorted.
+//
+// The one derivation of what a record from this shape is called. Three
+// exporters had a private copy, character for character identical, and the
+// collision check that must go with it had been written twice: the CSV exporter
+// was the one that had not, so a job declaring a property named `url` produced a
+// header with two `url` columns, both filled with the page address, and the
+// extracted value never reached the file. Nothing failed, and the same shape was
+// refused at build time by the other two formats.
+//
+// Sorted here rather than by each caller, because a header whose order depended
+// on the caller would make two runs over one corpus produce two files that are
+// both right and not comparable.
+func (i *Item) Names() []string {
+	var out []string
+
+	var add func(prefix string, p *Property)
+	add = func(prefix string, p *Property) {
+		name := prefix + p.Name
+		if len(p.Properties) == 0 {
+			out = append(out, name)
+			return
+		}
+		for _, nested := range p.Properties {
+			add(name+".", nested)
+		}
+	}
+	for _, p := range i.Properties {
+		add("", p)
+	}
+
+	sort.Strings(out)
+	return out
+}
+
 // Tags are the dimensions of this item's events: its entity references, its
 // relations, and any property declared a tag.
 func (i *Item) Tags() []string {

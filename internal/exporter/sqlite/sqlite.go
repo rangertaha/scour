@@ -40,13 +40,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 
 	_ "modernc.org/sqlite" // the pure-Go driver, so this cross-compiles
 
-	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/exporter"
 	"github.com/rangertaha/scour/internal/record"
 )
@@ -93,8 +91,11 @@ type table struct {
 	tx      *sql.Tx
 	pending int
 
-	item    string
-	path    string
+	item string
+	path string
+	// layout says what each column holds, so every format renders a record the
+	// same way. See [exporter.Layout].
+	layout  *exporter.Layout
 	columns []string
 	insert  string
 	closed  bool
@@ -108,10 +109,11 @@ func open(ctx context.Context, cfg exporter.Config) (exporter.Exporter, error) {
 
 	// Checked before anything is created, so a job that will never work leaves
 	// no half-made database behind for somebody to find later and wonder about.
-	cols := columns(cfg)
-	if err := usable(cols); err != nil {
+	layout, err := exporter.NewLayout("sqlite", cfg.Shape, []string{"url", "fetched", "spec"}, "key")
+	if err != nil {
 		return nil, err
 	}
+	cols := layout.Columns()
 
 	name := c.File
 	if name == "" {
@@ -143,6 +145,7 @@ func open(ctx context.Context, cfg exporter.Config) (exporter.Exporter, error) {
 		db:      db,
 		item:    cfg.Item,
 		path:    path,
+		layout:  layout,
 		columns: cols,
 	}
 	t.insert = insert(t.item, t.columns)
@@ -152,25 +155,6 @@ func open(ctx context.Context, cfg exporter.Config) (exporter.Exporter, error) {
 		return nil, err
 	}
 	return t, nil
-}
-
-// usable refuses a shape whose property would collide with a column this owns.
-//
-// Refused when the exporter is built rather than worked around, because both
-// ways round are wrong: giving the property the column loses the record's
-// provenance, and keeping the provenance loses the property, and a person
-// reading either table afterwards would have no way to tell which had happened.
-// Renaming the property is a one-line fix that they can make and this cannot.
-func usable(cols []string) error {
-	seen := map[string]bool{"key": true}
-	for _, name := range cols {
-		if seen[name] {
-			return fmt.Errorf(
-				"exporter/sqlite: a property named %q collides with the column this writes; rename it", name)
-		}
-		seen[name] = true
-	}
-	return nil
 }
 
 // dsn is the frontier's, for the reasons given there.
@@ -195,32 +179,6 @@ func dsn(path string) string {
 // url, fetched and spec come first because they are what a query filters by:
 // which page it came from, when that page was fetched, and which version of the
 // shape read it.
-func columns(cfg exporter.Config) []string {
-	out := []string{"url", "fetched", "spec"}
-	if cfg.Shape == nil {
-		return out
-	}
-
-	var names []string
-	var add func(prefix string, p *engine.Property)
-	add = func(prefix string, p *engine.Property) {
-		name := prefix + p.Name
-		if len(p.Properties) == 0 {
-			names = append(names, name)
-			return
-		}
-		for _, nested := range p.Properties {
-			add(name+".", nested)
-		}
-	}
-	for _, p := range cfg.Shape.Properties {
-		add("", p)
-	}
-
-	sort.Strings(names)
-	return append(out, names...)
-}
-
 // schema creates the table if it is not already there.
 //
 // IF NOT EXISTS rather than a drop, because re-running a crawl into an existing
@@ -320,16 +278,7 @@ func (t *table) Write(ctx context.Context, records ...*record.Record) error {
 func (t *table) row(r *record.Record) []string {
 	out := make([]string, 0, len(t.columns))
 	for _, name := range t.columns {
-		switch name {
-		case "url":
-			out = append(out, r.URL)
-		case "fetched":
-			out = append(out, r.Fetched.UTC().Format("2006-01-02T15:04:05Z"))
-		case "spec":
-			out = append(out, r.Spec)
-		default:
-			out = append(out, r.Values[name])
-		}
+		out = append(out, t.layout.Value(r, name))
 	}
 	return out
 }
