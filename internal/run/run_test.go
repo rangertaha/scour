@@ -588,3 +588,56 @@ func mustOpen(t *testing.T) frontier.Frontier {
 	t.Cleanup(func() { f.Close() })
 	return f
 }
+
+// TestAPoliteCrawlIsNotMistakenForAStalledOne.
+//
+// The stall bound was a constant six minutes measured from the last completed
+// fetch, and politeness waiting is invisible to that: the loop takes the
+// nothing-due branch and sleeps without touching the clock it is judged by. So
+// a job that was told `rate = "8m"` fetched its first page, waited exactly as
+// instructed, and killed itself two minutes later with an ending of "stalled"
+// and an error blaming the store for zero refused writes. Every rate above a
+// minute did it, and the larger the rate the more certain.
+//
+// The clock steps forward on every reading rather than being wound by the test,
+// because winding it forward expires the leases too, and then the URLs come
+// back, the loop progresses, and the stall under test cannot happen.
+func TestAPoliteCrawlIsNotMistakenForAStalledOne(t *testing.T) {
+	server, _ := site(t)
+
+	var ticks atomic.Int64
+	base := time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)
+	clock := func() time.Time {
+		return base.Add(time.Duration(ticks.Add(1)) * 20 * time.Second)
+	}
+
+	r, err := run.New(context.Background(), document(t, server, `
+  scheduler {
+    rate      = "8m"
+    max_pages = 2
+  }
+`), run.Options{
+		Dir:  t.TempDir(),
+		Open: func(cfg frontier.Config) (frontier.Frontier, error) { return sqlite.Open(cfg) },
+		Now:  clock,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	if _, err := r.Seed(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	ending, err := r.Do(context.Background())
+	if err != nil {
+		t.Fatalf("a crawl waiting out its own politeness rate failed: %v", err)
+	}
+	if ending == run.Stalled {
+		t.Error("ending = stalled: the crawl was killed for obeying its rate")
+	}
+	if got := r.Stats().Store.Load(); got != 0 {
+		t.Errorf("a healthy crawl counted %d refused writes", got)
+	}
+}

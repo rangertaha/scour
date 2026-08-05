@@ -74,6 +74,13 @@ const Idle = 50 * time.Millisecond
 // Measured from the last thing that happened rather than from the start, so a
 // slow polite crawl is not mistaken for a stalled one, and longer than [Lease]
 // so that waiting for a lease to expire is not mistaken for one either.
+//
+// The job's politeness rate is added to it, because that is the other thing
+// that legitimately makes the loop wait and this constant alone cannot know how
+// long for. Without it a job with `rate = "10m"` and two URLs on one host
+// fetched the first page, waited politely as it was told to, and killed itself
+// six minutes in with an error blaming the store for zero refused writes. Any
+// rate above a minute did that.
 const Stall = Lease + time.Minute
 
 // Options are what a caller supplies that the job document cannot.
@@ -314,9 +321,14 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 	var progress atomic.Int64
 	progress.Store(r.now().UnixNano())
 
+	rate, err := r.job.Scheduler.RateDuration()
+	if err != nil {
+		return "", fmt.Errorf("run: job %q: %w", r.job.Name, err)
+	}
+
 	stall := r.opts.Stall
 	if stall <= 0 {
-		stall = Stall
+		stall = Stall + rate
 	}
 
 	for range workers {
