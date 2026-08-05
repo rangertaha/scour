@@ -74,6 +74,16 @@ func find(lines []string, proposal Proposal) (insertAt int, indent string, repla
 		}
 
 		if strings.HasPrefix(trimmed, property) {
+			// A property written on one line has no body to insert into, and
+			// the scan below would latch onto the closing brace of whatever
+			// block came next: the locator landed outside the property, the
+			// document stopped decoding, and every later command on it failed
+			// with "Unsupported argument". Giving up is what this function's
+			// documentation already promised, and it was not doing it.
+			if closes(trimmed) {
+				return -1, "", -1
+			}
+
 			// The property's body: its closing brace, the line to insert
 			// before, and any induced locator already in it.
 			indent = leading(line) + "  "
@@ -108,6 +118,24 @@ func find(lines []string, proposal Proposal) (insertAt int, indent string, repla
 		}
 	}
 	return -1, "", -1
+}
+
+// closes reports whether a block opens and closes on one line.
+//
+// Counted rather than matched on a suffix, because `property "a" {}` and
+// `property "a" { type = str }` are both one-line blocks and only the first
+// ends in a brace.
+func closes(line string) bool {
+	var depth int
+	for _, r := range line {
+		switch r {
+		case '{':
+			depth++
+		case '}':
+			depth--
+		}
+	}
+	return depth <= 0 && strings.Contains(line, "{")
 }
 
 func leading(line string) string {

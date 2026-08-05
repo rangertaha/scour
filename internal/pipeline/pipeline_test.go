@@ -497,3 +497,174 @@ func TestOrderAndRegistered(t *testing.T) {
 		t.Errorf("Registered() = %v", pipeline.Registered())
 	}
 }
+
+// TestTwoTransformingStepsInOneWaveKeepBothTransformations.
+//
+// The regression test for a silent total data loss. `merge` used to identify a
+// record by its values, and a step transforms values, so a step's output was a
+// different record from its input. Two independent `clean` steps, which is the
+// most natural pipeline anybody would write for a job with two items, produced
+// four identities where there were two records, neither reached every step's
+// output, and the wave returned nothing at all. The crawl exported zero records
+// and reported that it had finished.
+//
+// Writing the same two steps with `requires` on the second worked, so the
+// output depended on whether the author happened to serialise steps that did
+// not need serialising.
+func TestTwoTransformingStepsInOneWaveKeepBothTransformations(t *testing.T) {
+	out := run(t, job(t, `
+  item "price" {
+    property "value" {
+      type = float
+    }
+  }
+
+  pipeline {
+    step "clean" "article" {}
+    step "clean" "price" {}
+  }
+`),
+		rec("https://example.com/a", map[string]string{"title": "  One  "}),
+		&record.Record{Item: "price", URL: "https://example.com/p", Fetched: fetched,
+			Values: map[string]string{"value": "  1.50  "}})
+
+	if len(out) != 2 {
+		t.Fatalf("%d records survived a wave of two transforming steps, want both", len(out))
+	}
+
+	got := map[string]string{}
+	for _, r := range out {
+		got[r.Item] = r.Get("title") + r.Get("value")
+	}
+	// Each step's transformation survived, not just one of them.
+	if got["article"] != "One" {
+		t.Errorf("the article was not cleaned: %q", got["article"])
+	}
+	if got["price"] != "1.50" {
+		t.Errorf("the price was not cleaned: %q", got["price"])
+	}
+}
+
+// TestAFilterAndATransformInOneWaveBothApply, which is the mixed case the old
+// identity could not express at all.
+func TestAFilterAndATransformInOneWaveBothApply(t *testing.T) {
+	out := run(t, job(t, `
+  pipeline {
+    step "clean" "article" {}
+
+    step "validate" "article" {
+      require = ["title"]
+    }
+  }
+`),
+		rec("https://example.com/a", map[string]string{"title": "  One  "}),
+		rec("https://example.com/b", map[string]string{"author": "no title"}))
+
+	if len(out) != 1 {
+		t.Fatalf("kept %d records, want the one that passed the filter", len(out))
+	}
+	if out[0].Get("title") != "One" {
+		t.Errorf("the transformation was lost when it ran beside a filter: %q", out[0].Get("title"))
+	}
+}
+
+// TestTwoStepsEditingOneRecordResolveTheSameWayEveryRun.
+//
+// A job saying two contradictory things about one item is a job with a problem,
+// and neither ordering is more correct than the other. What matters is that the
+// answer is not the scheduler's whim: a crawl that produced different output on
+// alternate runs would be impossible to debug.
+func TestTwoStepsEditingOneRecordResolveTheSameWayEveryRun(t *testing.T) {
+	pipeline.Register("test-shout", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+		return pipeline.Func(func(_ context.Context, records []*record.Record) ([]*record.Record, error) {
+			for _, r := range records {
+				if r.Item == "article" {
+					r.Values["title"] = strings.ToUpper(r.Values["title"])
+				}
+			}
+			return records, nil
+		}), nil
+	})
+	pipeline.Register("test-whisper", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+		return pipeline.Func(func(_ context.Context, records []*record.Record) ([]*record.Record, error) {
+			for _, r := range records {
+				if r.Item == "article" {
+					r.Values["title"] = strings.ToLower(r.Values["title"])
+				}
+			}
+			return records, nil
+		}), nil
+	})
+
+	j := job(t, `
+  pipeline {
+    step "test-shout" "one" {}
+    step "test-whisper" "two" {}
+  }
+`)
+
+	var first string
+	for attempt := range 12 {
+		out := run(t, j, rec("https://example.com/a", map[string]string{"title": "MiXeD"}))
+		if len(out) != 1 {
+			t.Fatalf("attempt %d kept %d records", attempt, len(out))
+		}
+		if attempt == 0 {
+			first = out[0].Get("title")
+			continue
+		}
+		if out[0].Get("title") != first {
+			t.Fatalf("run %d produced %q where the first produced %q: the answer depends on which goroutine finished",
+				attempt, out[0].Get("title"), first)
+		}
+	}
+	// Wave order, so the earlier step wins.
+	if first != "MIXED" {
+		t.Errorf("title = %q, want the earlier step in wave order to have won", first)
+	}
+}
+
+// TestTwoRecordsWithOneIdentityAreRefusedLoudly.
+//
+// Extraction cannot produce this, since one page yields at most one record per
+// item. A step that invented a second could, and then the merge would have to
+// guess which of them a later step's output referred to. Refusing beats
+// guessing, which is the lesson of the bug the merge was rewritten for.
+func TestTwoRecordsWithOneIdentityAreRefusedLoudly(t *testing.T) {
+	p, err := pipeline.New(context.Background(), job(t, `
+  pipeline {
+    step "clean" "article" {}
+    step "validate" "article" {}
+  }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = p.Run(context.Background(), []*record.Record{
+		rec("https://example.com/a", map[string]string{"title": "One"}),
+		rec("https://example.com/a", map[string]string{"title": "Two"}),
+	})
+	if err == nil {
+		t.Fatal("two records with one identity were merged rather than refused")
+	}
+	if !strings.Contains(err.Error(), "identity") {
+		t.Errorf("the error does not say what is wrong: %v", err)
+	}
+}
+
+// TestIdentityIsStableUnderTransformation, stated where it is relied on.
+func TestIdentityIsStableUnderTransformation(t *testing.T) {
+	before := rec("https://example.com/a", map[string]string{"title": "  One  "})
+
+	after := before.Clone()
+	after.Values["title"] = "One"
+
+	if before.Identity() != after.Identity() {
+		t.Error("cleaning a record changed which record it is")
+	}
+	other := rec("https://example.com/b", map[string]string{"title": "One"})
+	if before.Identity() == other.Identity() {
+		t.Error("two records from different pages share an identity")
+	}
+}

@@ -172,6 +172,10 @@ func (p *Pipeline) Run(ctx context.Context, records []*record.Record) ([]*record
 			continue
 		}
 
+		if err := unique(current); err != nil {
+			return nil, fmt.Errorf("pipeline: job %q: %w", p.job, err)
+		}
+
 		results := make([][]*record.Record, len(wave))
 		problems := make([]error, len(wave))
 
@@ -188,7 +192,7 @@ func (p *Pipeline) Run(ctx context.Context, records []*record.Record) ([]*record
 		if err := errors.Join(problems...); err != nil {
 			return nil, err
 		}
-		current = merge(results)
+		current = merge(current, results)
 	}
 	return current, nil
 }
@@ -232,54 +236,109 @@ func (p *Pipeline) Order() []string {
 
 // merge combines what a wave's steps returned.
 //
-// A record is kept if every step that saw it kept it, which is what makes two
-// filters in one wave behave like the same two in sequence. Order follows the
-// first step that returned it, so the result does not depend on which goroutine
-// finished first.
-func merge(results [][]*record.Record) []*record.Record {
+// Two rules, and the first one is the one that used to be wrong.
+//
+// **A record is the same record if [record.Identity] says so**, which is the
+// item and the page and not the values. Steps transform values, so identifying
+// them by value meant a step's output was a different record from its input:
+// two independent `clean` steps in one wave produced four identities where
+// there were two records, neither reached every step's output, and the wave
+// returned nothing at all. Silently, reporting success.
+//
+// **A record is kept if every step kept it**, which is what makes two filters
+// in one wave behave like the same two in sequence.
+//
+// **The version taken is the one that changed**, because a step is named for
+// the item it works on and leaves the others alone: of the copies handed out,
+// at most one has been edited. If more than one was, the earlier step in wave
+// order wins, deterministically, so that two runs over one corpus produce the
+// same output whichever goroutine finished first. Two steps in one wave editing
+// one item is a job saying two contradictory things about it, and neither
+// ordering is more correct than the other; what matters is that it is not the
+// scheduler's whim.
+func merge(before []*record.Record, results [][]*record.Record) []*record.Record {
 	if len(results) == 0 {
 		return nil
 	}
 
-	counts := map[*record.Record]int{}
-	byIdentity := map[string]*record.Record{}
-	var order []string
+	// The order to return them in, and what each looked like going in.
+	order := make([]string, 0, len(before))
+	original := make(map[string]*record.Record, len(before))
+	for _, r := range before {
+		order = append(order, r.Identity())
+		original[r.Identity()] = r
+	}
+
+	kept := map[string]int{}
+	changed := map[string]*record.Record{}
 
 	for _, list := range results {
 		seen := map[string]bool{}
 		for _, r := range list {
-			id := identity(r)
+			id := r.Identity()
 			if seen[id] {
 				continue
 			}
 			seen[id] = true
-			if _, known := byIdentity[id]; !known {
-				byIdentity[id] = r
+			kept[id]++
+
+			// A record this step never had is one it added. Keep it at the end
+			// rather than dropping it, and count it like any other.
+			if _, known := original[id]; !known {
+				original[id] = r
 				order = append(order, id)
+				continue
 			}
-			counts[byIdentity[id]]++
+			if _, already := changed[id]; !already && !same(original[id], r) {
+				changed[id] = r
+			}
 		}
 	}
 
 	out := make([]*record.Record, 0, len(order))
 	for _, id := range order {
-		if counts[byIdentity[id]] == len(results) {
-			out = append(out, byIdentity[id])
+		if kept[id] != len(results) {
+			continue
 		}
+		if edited, ok := changed[id]; ok {
+			out = append(out, edited)
+			continue
+		}
+		out = append(out, original[id])
 	}
 	return out
 }
 
-// identity is what makes two records the same record across steps that each
-// worked on their own copy.
-func identity(r *record.Record) string {
-	names := r.Names()
-	parts := make([]string, 0, len(names)+2)
-	parts = append(parts, r.Item, r.URL)
-	for _, name := range names {
-		parts = append(parts, name+"="+r.Values[name])
+// same reports whether a step left a record as it found it.
+func same(before, after *record.Record) bool {
+	if len(before.Values) != len(after.Values) {
+		return false
 	}
-	return strings.Join(parts, "\x00")
+	for name, value := range before.Values {
+		if after.Values[name] != value {
+			return false
+		}
+	}
+	return before.Item == after.Item && before.URL == after.URL &&
+		before.Spec == after.Spec && before.Fetched.Equal(after.Fetched)
+}
+
+// unique refuses a set of records in which two share an identity.
+//
+// One page produces at most one record per item, so this cannot happen from
+// extraction. A step that invented a second record for one item on one page
+// could, and the merge would then have to guess which of them a later step's
+// output referred to. Refusing loudly beats guessing quietly, which is the
+// lesson of the bug this function was written alongside.
+func unique(records []*record.Record) error {
+	seen := make(map[string]bool, len(records))
+	for _, r := range records {
+		if seen[r.Identity()] {
+			return fmt.Errorf("two records share one identity: item %q from %s", r.Item, r.URL)
+		}
+		seen[r.Identity()] = true
+	}
+	return nil
 }
 
 func clone(records []*record.Record) []*record.Record {

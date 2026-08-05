@@ -217,3 +217,49 @@ func TestHostAndDomain(t *testing.T) {
 		}
 	}
 }
+
+// TestAnEncodedParameterNameSurvives.
+//
+// The regression test for silent data loss. ParseQuery unescapes names on the
+// way in, and the rebuild looked them up escaped, so `filter%5Bcat%5D` matched
+// neither `filter%255Bcat%255D` nor itself and the parameter was dropped. Two
+// consequences, both bad and both silent: the crawler fetched a URL nobody had
+// linked, and two pages differing only in that parameter collapsed to one hash
+// so one of them was never fetched at all.
+//
+// `filter[x]=` is what a JavaScript client encodes, so this is the common case
+// rather than an exotic one.
+func TestAnEncodedParameterNameSurvives(t *testing.T) {
+	for name, in := range map[string]string{
+		"brackets":  "https://example.com/search?filter%5Bcat%5D=news&page=2",
+		"a plus":    "https://example.com/search?a+b=1&c=2",
+		"a percent": "https://example.com/search?name%20with%20spaces=1&c=2",
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := urls.Normalise(in, urls.Options{})
+			if err != nil {
+				t.Fatalf("normalise: %v", err)
+			}
+			if got != in {
+				t.Errorf("got  %q\nwant %q, unchanged: the default must not drop a parameter", got, in)
+			}
+		})
+	}
+}
+
+// TestTwoPagesDifferingOnlyInAnEncodedParameterAreTwoPages, which is the half
+// of that bug a crawl would notice last.
+func TestTwoPagesDifferingOnlyInAnEncodedParameterAreTwoPages(t *testing.T) {
+	news, err := urls.Normalise("https://example.com/s?filter%5Bcat%5D=news", urls.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sport, err := urls.Normalise("https://example.com/s?filter%5Bcat%5D=sport", urls.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if urls.Hash(news) == urls.Hash(sport) {
+		t.Errorf("%q and %q hashed the same, so one of them would never be fetched", news, sport)
+	}
+}

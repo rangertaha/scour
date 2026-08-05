@@ -410,3 +410,84 @@ func TestToken(t *testing.T) {
 		}
 	}
 }
+
+// TestGroupsAddressingOneAgentAreCombined.
+//
+// RFC 9309 section 2.2.1 requires it, and the first version of this returned on
+// the first matching group. A file with two `User-agent: *` blocks, which is
+// what hand-editing and tooling that appends both produce, had every rule after
+// the first block silently discarded, and a path the site had explicitly
+// refused was crawled.
+func TestGroupsAddressingOneAgentAreCombined(t *testing.T) {
+	rules := robots.Parse([]byte(`
+User-agent: *
+Disallow: /tmp/
+
+User-agent: *
+Disallow: /admin/
+`))
+
+	for _, path := range []string{"/tmp/x", "/admin/secret"} {
+		if rules.Allowed(us, path) {
+			t.Errorf("%s was allowed: a second block addressing the same agent was discarded", path)
+		}
+	}
+	if !rules.Allowed(us, "/public") {
+		t.Error("combining the groups refused something neither of them did")
+	}
+}
+
+// TestGroupsAddressingOneNamedAgentAreCombinedToo, since a repeated named token
+// is the same mistake with a different word.
+func TestGroupsAddressingOneNamedAgentAreCombinedToo(t *testing.T) {
+	rules := robots.Parse([]byte(`
+User-agent: scour
+Disallow: /one/
+
+User-agent: scour
+Disallow: /two/
+
+User-agent: *
+Disallow: /
+`))
+
+	for _, path := range []string{"/one/x", "/two/x"} {
+		if rules.Allowed(us, path) {
+			t.Errorf("%s was allowed", path)
+		}
+	}
+	// Still our own groups rather than the catch-all, which refuses everything.
+	if !rules.Allowed(us, "/three") {
+		t.Error("the catch-all was applied to an agent that has its own groups")
+	}
+}
+
+// TestTheFirstCrawlDelayWins when two combined groups disagree: a file
+// contradicting itself is a file, and the earlier line is what somebody reading
+// top to bottom expects.
+func TestTheFirstCrawlDelayWins(t *testing.T) {
+	rules := robots.Parse([]byte("User-agent: *\nCrawl-delay: 2\n\nUser-agent: *\nCrawl-delay: 9\n"))
+
+	if d, ok := rules.Delay(us); !ok || d != 2*time.Second {
+		t.Errorf("delay = %s, %v", d, ok)
+	}
+}
+
+// TestAByteOrderMarkIsNotAField.
+//
+// U+FEFF left Unicode's White_Space property in 4.0.1, so strings.TrimSpace
+// does not remove it. Without an explicit strip, the first line of a file
+// written by a Windows editor reads as a field called "\ufeffuser-agent", it
+// matches nothing, and every rule after it is discarded as addressed to nobody.
+// The whole file becomes permission, which is the most dangerous way for a
+// robots parser to fail.
+func TestAByteOrderMarkIsNotAField(t *testing.T) {
+	rules := robots.Parse([]byte("\ufeffUser-agent: *\nDisallow: /private/\n"))
+
+	if rules.Allowed(us, "/private/x") {
+		t.Error("a byte order mark turned the whole file into permission")
+	}
+	if !rules.Allowed(us, "/public") {
+		t.Error("something outside the rule was refused")
+	}
+}

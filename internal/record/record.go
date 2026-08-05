@@ -76,6 +76,21 @@ func From(url, spec string, fetched time.Time, items []*extract.Item) []*Record 
 	return out
 }
 
+// Identity is what makes two records the same record.
+//
+// The item and the page, and deliberately not the values. A pipeline step
+// transforms values, so an identity derived from them changes when a step runs,
+// and anything comparing a record before and after would conclude it was
+// looking at two records. That is not hypothetical: the wave merge did exactly
+// that, and a pipeline of two independent `clean` steps discarded every record
+// it was given, silently, reporting success.
+//
+// One page produces at most one record per item, so this is unique within a
+// run. A step that invented a second record for one item on one page would
+// break that, which is why the pipeline refuses a wave whose input holds two
+// records with one identity rather than merging them wrongly.
+func (r *Record) Identity() string { return r.Item + "\x00" + r.URL }
+
 // Names lists the value names, sorted, which is what a writer with columns
 // needs and what makes any two runs produce the same header.
 func (r *Record) Names() []string {

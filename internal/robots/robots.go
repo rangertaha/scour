@@ -133,6 +133,14 @@ func Parse(body []byte) *Rules {
 
 // split breaks a line into its field and value, dropping comments.
 func split(line string) (field, value string, ok bool) {
+	// A byte order mark is not whitespace as far as strings.TrimSpace is
+	// concerned: U+FEFF left Unicode's White_Space property in 4.0.1. RFC 9309
+	// requires it to be ignored, and without this the first line of a file
+	// written by a Windows editor reads as a field called "\ufeffuser-agent",
+	// matches nothing, and every rule after it is discarded as addressed to
+	// nobody. The whole file becomes permission.
+	line = strings.TrimPrefix(line, "\ufeff")
+
 	if i := strings.IndexByte(line, '#'); i >= 0 {
 		line = line[:i]
 	}
@@ -204,13 +212,21 @@ func (r *Rules) Delay(agent string) (time.Duration, bool) {
 // only for a case-insensitive comparison of the product token, but every real
 // file expects "Googlebot-News" to fall back to the "Googlebot" group, and a
 // crawler that ignored that would follow rules written for somebody else.
+//
+// **Every group at the winning level is combined**, which RFC 9309 §2.2.1
+// requires and which the first version of this did not do: it returned on the
+// first exact match and kept only the first catch-all. A file with two
+// `User-agent: *` blocks, which is what hand-editing and tooling that appends
+// produce, had every rule after the first block silently discarded. A path the
+// site had explicitly refused was then crawled.
 func (r *Rules) group(agent string) *group {
 	token := Token(agent)
 
 	var (
-		specific *group
+		exact    []*group
+		specific []*group
 		matched  int
-		catchAll *group
+		catchAll []*group
 	)
 
 	for i := range r.groups {
@@ -218,21 +234,52 @@ func (r *Rules) group(agent string) *group {
 		for _, want := range g.agents {
 			switch {
 			case want == "*":
-				if catchAll == nil {
-					catchAll = g
-				}
+				catchAll = append(catchAll, g)
 			case want == token:
-				return g
-			case strings.HasPrefix(token, want) && len(want) > matched:
-				specific, matched = g, len(want)
+				exact = append(exact, g)
+			case strings.HasPrefix(token, want):
+				if len(want) > matched {
+					specific, matched = []*group{g}, len(want)
+				} else if len(want) == matched {
+					specific = append(specific, g)
+				}
 			}
 		}
 	}
 
-	if specific != nil {
-		return specific
+	switch {
+	case len(exact) > 0:
+		return combine(exact)
+	case len(specific) > 0:
+		return combine(specific)
+	case len(catchAll) > 0:
+		return combine(catchAll)
 	}
-	return catchAll
+	return nil
+}
+
+// combine folds several groups addressing one agent into the one group the
+// caller reasons about.
+//
+// The rules concatenate, because the longest-match rule that decides between
+// them does not care which block they were written in. A crawl-delay is taken
+// from the first group that gave one: two different delays for one agent is a
+// file contradicting itself, and the earlier line is the one a person reading
+// top to bottom would expect to win.
+func combine(groups []*group) *group {
+	if len(groups) == 1 {
+		return groups[0]
+	}
+
+	out := &group{}
+	for _, g := range groups {
+		out.agents = append(out.agents, g.agents...)
+		out.rules = append(out.rules, g.rules...)
+		if !out.hasDelay && g.hasDelay {
+			out.delay, out.hasDelay = g.delay, true
+		}
+	}
+	return out
 }
 
 // Token is the product token in a User-Agent string: the name a robots.txt

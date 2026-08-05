@@ -368,3 +368,61 @@ func TestReportReadsAsALine(t *testing.T) {
 		t.Errorf("report:\n%s", report)
 	}
 }
+
+// TestAOneLinePropertyIsLeftAloneRatherThanCorrupted.
+//
+// The regression test for a bug that damaged somebody's job document. A
+// property written on one line has no body to insert a locator into, and the
+// scan for the block's closing brace latched onto the closing brace of whatever
+// came next: the locator landed outside the property, the file stopped
+// decoding, and every later `scour validate`, `show` or `run` on it failed with
+// "Unsupported argument". A tool that edits a file people keep in a repository
+// has to fail to act rather than act wrongly.
+func TestAOneLinePropertyIsLeftAloneRatherThanCorrupted(t *testing.T) {
+	for name, document := range map[string]string{
+		"empty": `
+job "news" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "headline" {}
+  }
+}
+`,
+		"with a body on the line": `
+job "news" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "headline" { type = str }
+  }
+}
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			// The shape has to parse for the fixture to mean anything.
+			j := job(t, document)
+
+			proposals, err := train.Learn(j, corpus(t, 5), train.Options{})
+			if err != nil {
+				t.Fatalf("learn: %v", err)
+			}
+
+			edited, written, err := train.Write([]byte(document), proposals)
+			if err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			if written != 0 {
+				t.Errorf("wrote %d locators into a document it cannot edit safely", written)
+			}
+			if string(edited) != document {
+				t.Errorf("the document was changed:\n%s", edited)
+			}
+
+			// The thing that actually matters: whatever came back still parses.
+			if _, err := engine.Parse(edited, "job.hcl"); err != nil {
+				t.Errorf("the document no longer decodes: %v\n%s", err, edited)
+			}
+		})
+	}
+}

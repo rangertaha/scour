@@ -92,6 +92,11 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Stage, error) {
 		// megabyte of HTML still has to be able to read a site's rules.
 		reader := *core
 		reader.MaxBody = robots.MaxSize
+		// Truncated rather than refused. RFC 9309 says to parse the first 500
+		// KiB and ignore the rest; refusing meant a site whose robots.txt was
+		// larger had every URL on it dropped forever, and re-downloaded the
+		// file to decide that each time.
+		reader.Truncate = true
 
 		handler = newGuard(&reader, core.Agent).wrap(handler)
 	}

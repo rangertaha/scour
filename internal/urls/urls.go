@@ -201,14 +201,29 @@ func query(raw string, opts Options) string {
 	}
 
 	// Order preserved, which means rebuilding it by hand: Encode always sorts.
+	//
+	// The lookup unescapes, because ParseQuery unescaped the names on the way
+	// in and the raw pair still carries them encoded. Escaping instead, which
+	// is what this did first, could never match: `filter%5Bcat%5D` was looked
+	// up as `filter%255Bcat%255D` and as itself, the decoded `filter[cat]` was
+	// neither, and the parameter was silently deleted. The crawler then
+	// fetched a URL nobody had linked, and two pages differing only in that
+	// parameter became one.
 	var b strings.Builder
 	for _, pair := range strings.Split(raw, "&") {
 		name, _, _ := strings.Cut(pair, "=")
-		if _, kept := values[url.QueryEscape(name)]; !kept {
-			if _, kept := values[name]; !kept {
-				continue
-			}
+
+		decoded, err := url.QueryUnescape(name)
+		if err != nil {
+			// Not decodable, so it cannot have been in values either. Keeping
+			// it is the conservative answer: this function's whole job is to
+			// avoid changing what a server would return.
+			decoded = name
 		}
+		if _, kept := values[decoded]; !kept {
+			continue
+		}
+
 		if b.Len() > 0 {
 			b.WriteByte('&')
 		}
