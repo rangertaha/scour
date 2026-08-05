@@ -4,6 +4,7 @@ package entity_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/rangertaha/scour/internal/entity"
@@ -368,5 +369,71 @@ func TestRetractingTheJobThatMergedTakesTheMergeBack(t *testing.T) {
 		if got.Assertions != 1 {
 			t.Errorf("%q has %d assertions", spelling, got.Assertions)
 		}
+	}
+}
+
+// TestAMergeIsRefusedIfTheAmbiguityAppearedAfterItWasProposed.
+//
+// Candidates counted in a read of its own and Merge took its word for it, so
+// the safety rule was a read-then-write across two transactions and anything
+// asserted in between defeated it. The entities step calls both per record
+// while a crawl is running, so what decided the merge was the order the pages
+// arrived in and, in a wave, which goroutine got there first. It decided
+// permanently, because a merge is a row.
+//
+// This is the shape the frontier fence fixed once already, by putting the
+// condition in the write rather than in a read before it.
+func TestAMergeIsRefusedIfTheAmbiguityAppearedAfterItWasProposed(t *testing.T) {
+	ctx := context.Background()
+
+	store, err := entity.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	said := entity.Provenance{Job: "news", URL: "https://example.com/a"}
+	for _, name := range []string{"Alan Doe", "A. Doe"} {
+		if _, err := store.Assert(ctx, "person", name, said); err != nil {
+			t.Fatalf("assert %s: %v", name, err)
+		}
+	}
+
+	// Proposed while only one full name was known.
+	proposed, err := store.Candidates(ctx, "person", "A. Doe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposed) != 1 {
+		t.Fatalf("len(proposed) = %d, want the one unambiguous candidate", len(proposed))
+	}
+
+	// A second full name arrives before the merge is made, which is the whole
+	// of what a crawl does between two records.
+	if _, err := store.Assert(ctx, "person", "Alex Doe", said); err != nil {
+		t.Fatal(err)
+	}
+
+	err = store.Merge(ctx, proposed[0].From, proposed[0].To, proposed[0].Rule, said)
+	if err == nil {
+		t.Fatal("a merge proposed before the ambiguity appeared was made anyway")
+	}
+	if !strings.Contains(err.Error(), "since it was proposed") {
+		t.Errorf("the error does not say what changed: %v", err)
+	}
+
+	// All three are still there and none of them reads as another.
+	people, err := store.Kind(ctx, "person")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(people) != 3 {
+		t.Errorf("len(people) = %d, want the three spellings left alone", len(people))
+	}
+
+	// And a person saying so is still obeyed, because the rule exists to stop
+	// the machine guessing and not to overrule somebody who knows.
+	if err := store.Merge(ctx, proposed[0].From, proposed[0].To, entity.RuleManual, said); err != nil {
+		t.Errorf("a manual merge was refused by the ambiguity rule: %v", err)
 	}
 }

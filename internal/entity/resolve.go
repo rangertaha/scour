@@ -181,6 +181,57 @@ func (s *Store) Candidates(ctx context.Context, kind, name string) ([]Candidate,
 //
 // Two kinds are never merged. A person who is also a company is a mistake
 // somewhere upstream, and collapsing them would spread it.
+// unambiguous re-runs the initial-and-surname rule against a transaction.
+//
+// The same question [Store.Candidates] asks, and deliberately the same answer:
+// an initial may be merged into a full name only when exactly one full name
+// shares its surname and its first letter. Asked here so that the counting and
+// the alias row happen with nothing able to slip between them.
+func unambiguous(ctx context.Context, tx *sql.Tx, kind, loser, keeper string) (bool, error) {
+	var loserName, keeperName string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT name FROM entities WHERE id = ?`, loser).Scan(&loserName); err != nil {
+		return false, fmt.Errorf("entity: merge: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx,
+		`SELECT name FROM entities WHERE id = ?`, keeper).Scan(&keeperName); err != nil {
+		return false, fmt.Errorf("entity: merge: %w", err)
+	}
+
+	asked, ok := parseName(loserName)
+	if !ok || !asked.initial {
+		// Not a merge this rule proposes, so it is not this rule's to refuse.
+		return true, nil
+	}
+
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, name FROM entities WHERE kind = ?`, kind)
+	if err != nil {
+		return false, fmt.Errorf("entity: merge: %w", err)
+	}
+	defer rows.Close()
+
+	fulls := 0
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return false, fmt.Errorf("entity: merge: %w", err)
+		}
+		if id == loser {
+			continue
+		}
+		parsed, ok := parseName(name)
+		if !ok || parsed.initial || parsed.surname != asked.surname || parsed.letter != asked.letter {
+			continue
+		}
+		fulls++
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("entity: merge: %w", err)
+	}
+	return fulls == 1, nil
+}
+
 func (s *Store) Merge(ctx context.Context, from, to, rule string, said Provenance) error {
 	if from == "" || to == "" {
 		return errors.New("entity: a merge needs two entities")
@@ -215,6 +266,41 @@ func (s *Store) Merge(ctx context.Context, from, to, rule string, said Provenanc
 	}
 	if loserKind != keeperKind {
 		return fmt.Errorf("entity: refusing to merge a %s into a %s", loserKind, keeperKind)
+	}
+
+	// The rule is checked again here, inside the transaction that acts on it.
+	//
+	// [Store.Candidates] counted in a read of its own and Merge took its word
+	// for it, so the safety rule was a read-then-write across two
+	// transactions and anything asserted in between defeated it. The entities
+	// step calls both per record while a crawl is running, so what decided the
+	// merge was the order the pages arrived in and, in a wave, which goroutine
+	// got there first. It decided permanently, because a merge is a row.
+	//
+	// Concretely: with "Alan Doe" known and "A. Doe" arriving before "Alex
+	// Doe", the count saw one full name and merged, and every article bylined
+	// "A. Doe" attached to the wrong person from then on. The same corpus
+	// produced a different graph on alternate runs.
+	//
+	// This is the shape the frontier fence fixed once already, by putting the
+	// condition in the WHERE clause of the write rather than in a read before
+	// it. A merge cannot be one statement, so the check moves inside the
+	// transaction instead, which buys the same thing: nothing can be asserted
+	// between the counting and the alias row.
+	//
+	// RuleManual is exempt. A person saying two spellings are one person is
+	// evidence, and the ambiguity rule exists to keep the machine from
+	// guessing, not to overrule them.
+	if rule != RuleManual {
+		ok, err := unambiguous(ctx, tx, keeperKind, loser, keeper)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf(
+				"entity: refusing to merge %s: another name it could belong to has been asserted since it was proposed",
+				loser)
+		}
 	}
 
 	// Anything that pointed at the loser now points at the keeper, which is
