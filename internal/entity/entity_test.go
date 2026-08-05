@@ -364,3 +364,203 @@ func TestTwoInMemoryStoresAreTwoStores(t *testing.T) {
 		}
 	}
 }
+
+// TestAPropertyIsRecordedNotDecided.
+//
+// Two sources that disagree about a company's domain are two rows with a count
+// each, not one row that flips depending on who was crawled last. This store
+// records what was said; deciding is what a person does with the counts in
+// front of them, which is the same reason a merge here is a row rather than a
+// rewrite.
+func TestAPropertyIsRecordedNotDecided(t *testing.T) {
+	ctx := context.Background()
+
+	store, err := entity.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	id, err := store.Assert(ctx, "company", "Acme", entity.Provenance{
+		Job: "news", URL: "https://example.com/a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, said := range []struct {
+		value string
+		url   string
+	}{
+		{"acme.com", "https://example.com/a"},
+		{"acme.com", "https://example.com/b"},
+		{"acme.co.uk", "https://example.com/c"},
+	} {
+		if err := store.Describe(ctx, id, "domain", said.value, entity.Provenance{
+			Job: "news", URL: said.url,
+		}); err != nil {
+			t.Fatalf("describe: %v", err)
+		}
+	}
+
+	props, err := store.Properties(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(props) != 2 {
+		t.Fatalf("len(props) = %d, want both values kept: %+v", len(props), props)
+	}
+	// Most-asserted first, so the disagreement is visible and ordered.
+	if props[0].Value != "acme.com" || props[0].Assertions != 2 {
+		t.Errorf("props[0] = %+v, want acme.com asserted twice", props[0])
+	}
+	if props[1].Value != "acme.co.uk" || props[1].Assertions != 1 {
+		t.Errorf("props[1] = %+v, want acme.co.uk asserted once", props[1])
+	}
+}
+
+// TestPropertiesFollowAMerge.
+//
+// What is known about a person is known about them whichever spelling it was
+// said under, the same as every other read here. A property that stayed behind
+// on the losing spelling would make a merge lose information, which is the one
+// thing this store's merge design exists to avoid.
+func TestPropertiesFollowAMerge(t *testing.T) {
+	ctx := context.Background()
+
+	store, err := entity.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	said := entity.Provenance{Job: "news", URL: "https://example.com/a"}
+
+	full, err := store.Assert(ctx, "person", "Alex Doe", said)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := store.Assert(ctx, "person", "A. Doe", said)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Describe(ctx, full, "role", "correspondent", said); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Describe(ctx, initial, "beat", "climate", said); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Merge(ctx, initial, full, entity.RuleManual, said); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both spellings now answer with both properties.
+	for _, id := range []string{full, initial} {
+		props, err := store.Properties(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(props) != 2 {
+			t.Errorf("Properties(%s) = %+v, want both sides of the merge", id, props)
+		}
+	}
+}
+
+// TestKindsIsTheWayIntoAGraphYouDidNotBuild.
+//
+// Counted after merges, because two spellings of one person are one person and
+// a count that said otherwise would be the first thing anybody noticed was
+// wrong.
+func TestKindsIsTheWayIntoAGraphYouDidNotBuild(t *testing.T) {
+	ctx := context.Background()
+
+	store, err := entity.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	said := entity.Provenance{Job: "news", URL: "https://example.com/a"}
+	for _, one := range []struct{ kind, name string }{
+		{"person", "Alex Doe"},
+		{"person", "A. Doe"},
+		{"person", "Sam Roe"},
+		{"company", "Acme"},
+	} {
+		if _, err := store.Assert(ctx, one.kind, one.name, said); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	kinds, err := store.Kinds(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kinds) != 2 {
+		t.Fatalf("kinds = %+v, want person and company", kinds)
+	}
+	if kinds[0].Name != "person" || kinds[0].Entities != 3 {
+		t.Errorf("kinds[0] = %+v, want 3 people", kinds[0])
+	}
+
+	// After a merge, the two spellings are one person.
+	if err := store.Merge(ctx,
+		entity.ID("person", "A. Doe"), entity.ID("person", "Alex Doe"),
+		entity.RuleManual, said); err != nil {
+		t.Fatal(err)
+	}
+
+	kinds, err = store.Kinds(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kinds[0].Entities != 2 {
+		t.Errorf("after a merge kinds[0] = %+v, want 2 people", kinds[0])
+	}
+}
+
+// TestRetractingAJobTakesItsPropertiesBack.
+//
+// One job's contribution is one delete. A property left behind by a job that
+// has been withdrawn is a fact with no evidence, which is exactly what the
+// provenance trail exists to make impossible.
+func TestRetractingAJobTakesItsPropertiesBack(t *testing.T) {
+	ctx := context.Background()
+
+	store, err := entity.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	good := entity.Provenance{Job: "good", URL: "https://example.com/a"}
+	bad := entity.Provenance{Job: "bad", URL: "https://elsewhere.example/x"}
+
+	id, err := store.Assert(ctx, "company", "Acme", good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Describe(ctx, id, "domain", "acme.com", good); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Describe(ctx, id, "domain", "not-acme.example", bad); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.Retract(ctx, "bad"); err != nil {
+		t.Fatal(err)
+	}
+
+	props, err := store.Properties(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(props) != 1 {
+		t.Fatalf("props = %+v, want only what the remaining job said", props)
+	}
+	if props[0].Value != "acme.com" {
+		t.Errorf("props[0] = %+v, want the good job's value", props[0])
+	}
+}

@@ -214,6 +214,48 @@ CREATE TABLE IF NOT EXISTS relations (
 
 CREATE INDEX IF NOT EXISTS relations_to ON relations (to_id, kind, topic);
 
+-- What is known about an entity beyond its name: a person's role, a company's
+-- domain, a place's country.
+--
+-- The value is part of the key, so two sources that disagree are two rows with
+-- a count each rather than one row that flips depending on who was crawled
+-- last. This store records what was said and does not decide, which is the same
+-- reason a merge is a row rather than a rewrite: deciding is what a person does
+-- with the counts in front of them.
+CREATE TABLE IF NOT EXISTS properties (
+	entity     TEXT    NOT NULL REFERENCES entities (id) ON DELETE CASCADE,
+	name       TEXT    NOT NULL,
+	value      TEXT    NOT NULL,
+	first_seen INTEGER NOT NULL,
+	last_seen  INTEGER NOT NULL,
+	assertions INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (entity, name, value)
+);
+
+CREATE INDEX IF NOT EXISTS properties_name ON properties (name, value);
+
+-- Provenance for the table above, kept separately from the assertions table
+-- rather than sharing it.
+--
+-- Sharing would have meant a convention: a property row distinguished from an
+-- entity row by one of its columns happening to be empty. The count queries
+-- there are written against exactly those emptiness tests, so a property whose
+-- value happened to equal an entity id would have been counted as a relation.
+-- Unlikely is not impossible, and a graph that miscounts is a graph nobody can
+-- use as evidence.
+CREATE TABLE IF NOT EXISTS property_assertions (
+	job     TEXT    NOT NULL,
+	url     TEXT    NOT NULL,
+	spec    TEXT    NOT NULL DEFAULT '',
+	said_at INTEGER NOT NULL,
+	entity  TEXT    NOT NULL,
+	name    TEXT    NOT NULL,
+	value   TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS property_assertions_job ON property_assertions (job);
+CREATE INDEX IF NOT EXISTS property_assertions_entity ON property_assertions (entity);
+
 -- Every assertion, with who said it and on what evidence. This is the table
 -- that makes a wrong entity correctable: one job's contribution is one delete,
 -- and the counts above are rebuilt from what is left.
@@ -554,6 +596,7 @@ func (s *Store) Retract(ctx context.Context, job string) (int64, error) {
 	var removed int64
 	for _, statement := range []string{
 		`DELETE FROM assertions WHERE job = ?`,
+		`DELETE FROM property_assertions WHERE job = ?`,
 		`DELETE FROM aliases WHERE job = ?`,
 	} {
 		result, err := tx.ExecContext(ctx, statement, job)
@@ -572,8 +615,13 @@ func (s *Store) Retract(ctx context.Context, job string) (int64, error) {
 			(SELECT COUNT(*) FROM assertions a
 			  WHERE a.subject = relations.from_id AND a.object = relations.to_id
 			    AND a.kind = relations.kind AND a.topic = relations.topic)`,
+		`UPDATE properties SET assertions =
+			(SELECT COUNT(*) FROM property_assertions p
+			  WHERE p.entity = properties.entity AND p.name = properties.name
+			    AND p.value = properties.value)`,
 		// Then what nobody asserts any more.
 		`DELETE FROM relations WHERE assertions = 0`,
+		`DELETE FROM properties WHERE assertions = 0`,
 		`DELETE FROM entities WHERE assertions = 0
 		   AND id NOT IN (SELECT from_id FROM relations UNION SELECT to_id FROM relations)`,
 	} {
