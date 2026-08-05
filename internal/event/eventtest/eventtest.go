@@ -42,6 +42,8 @@ func Run(t *testing.T, open Open) {
 	t.Run("DeleteRemovesOneAndMissingIsNotAnError", func(t *testing.T) { testDelete(t, open) })
 	t.Run("OneJobsEventsAreOneDelete", func(t *testing.T) { testRetract(t, open) })
 	t.Run("AnEventNeedsANameAndATime", func(t *testing.T) { testRefusals(t, open) })
+	t.Run("TwoJobsOneObservationKeepBoth", func(t *testing.T) { testTwoJobsOneObservation(t, open) })
+	t.Run("ACorrectionStillOverwrites", func(t *testing.T) { testACorrectionStillOverwrites(t, open) })
 }
 
 func at(hour int) time.Time { return time.Date(2026, 8, 5, hour, 0, 0, 0, time.UTC) }
@@ -251,5 +253,81 @@ func testRefusals(t *testing.T, open Open) {
 	}
 	if _, err := l.Put(ctx, event.Event{Name: "price"}); err == nil {
 		t.Error("an event with no time was accepted, and now is not when it happened")
+	}
+}
+
+// testTwoJobsOneObservation: two jobs that measure the same instant keep both
+// their numbers, and neither takes the other's row.
+//
+// The identity is the observation, so two jobs CAN derive one id: same
+// measurement, same tags, same instant, different fields. Replacing meant the
+// second silently erased the first's numbers and took ownership, so Retract of
+// the first returned zero and could not take back what it had contributed,
+// which is the one promise this store makes.
+func testTwoJobsOneObservation(t *testing.T, open Open) {
+	ctx := context.Background()
+	l := open(t)
+
+	first := price("acme", "9.99", 9)
+	first.Job = "markets"
+
+	second := price("acme", "", 9)
+	second.Fields = map[string]string{"volume": "120"}
+	second.Job = "volumes"
+
+	a, err := l.Put(ctx, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := l.Put(ctx, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != b {
+		t.Fatalf("one observation got two ids: %s and %s", a, b)
+	}
+
+	one, err := l.Get(ctx, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one.Fields["value"] != "9.99" {
+		t.Errorf("the first job's number was erased: %+v", one.Fields)
+	}
+	if one.Fields["volume"] != "120" {
+		t.Errorf("the second job's number did not land: %+v", one.Fields)
+	}
+
+	// The job that recorded it first still owns it, so its Retract takes it
+	// back rather than reporting nothing to take.
+	removed, err := l.Retract(ctx, "markets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Errorf("Retract(markets) removed %d, want the point it recorded", removed)
+	}
+}
+
+// testACorrectionStillOverwrites: merging fields must not stop a re-crawl
+// fixing a number, which is the case the identity was designed around.
+func testACorrectionStillOverwrites(t *testing.T, open Open) {
+	ctx := context.Background()
+	l := open(t)
+
+	if _, err := l.Put(ctx, price("acme", "9.99", 9)); err != nil {
+		t.Fatal(err)
+	}
+	id, err := l.Put(ctx, price("acme", "10.50", 9))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	one, err := l.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one.Fields["value"] != "10.50" {
+		t.Errorf("value = %q, want the corrected one", one.Fields["value"])
 	}
 }

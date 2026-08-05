@@ -44,6 +44,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rangertaha/scour/internal/storage"
+
 	_ "modernc.org/sqlite" // the pure-Go driver, for the reasons the frontier gives
 )
 
@@ -108,7 +110,8 @@ var ErrNotFound = errors.New("event: no such event")
 
 // log is the SQLite implementation of [Store].
 type log struct {
-	db *sql.DB
+	db  *sql.DB
+	sql storage.Dialect
 }
 
 // anonymous numbers the in-memory stores, so each Open("") gets one of its own.
@@ -152,7 +155,7 @@ func Open(dir string) (Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &log{db: db}, nil
+	return &log{db: db, sql: storage.SQLite{}}, nil
 }
 
 func schema(db *sql.DB) error {
@@ -235,14 +238,21 @@ func (s *log) Put(ctx context.Context, e Event) (string, error) {
 		return "", err
 	}
 
-	if _, err := s.db.ExecContext(ctx, `
+	// Fields are merged, not replaced, and the provenance is left with whoever
+	// recorded the point first.
+	//
+	// Two jobs can derive one id, because the identity is the observation:
+	// same measurement, same tags, same instant. Replacing meant the second
+	// silently erased the first's numbers and took the row, so Retract of the
+	// first returned zero and could not take back what it had contributed,
+	// which is the one promise this store makes. Merging loses nothing: a job
+	// re-reading a corrected value still overwrites its own key, because the
+	// key is the same.
+	if _, err := s.db.ExecContext(ctx, s.sql.Rebind(`
 INSERT INTO events (id, name, tags, fields, at, job, url, spec)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (id) DO UPDATE SET
-	fields = excluded.fields,
-	job    = excluded.job,
-	url    = excluded.url,
-	spec   = excluded.spec`,
+	fields = `+s.sql.MergeJSON("events.fields", "excluded.fields")+``),
 		id, e.Name, tags, fields, e.At.UTC().UnixNano(), e.Job, e.URL, e.Spec); err != nil {
 		return "", fmt.Errorf("event: put %s: %w", e.Name, err)
 	}

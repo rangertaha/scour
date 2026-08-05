@@ -60,6 +60,14 @@ type Dialect interface {
 	Greatest(a, b string) string
 	Least(a, b string) string
 
+	// MergeJSON is the object made of two JSON objects, the second winning
+	// where they name the same key.
+	//
+	// SQLite spells it json_patch and Postgres spells it `||` on jsonb, and
+	// both mean the same thing for flat objects, which is all these stores
+	// hold.
+	MergeJSON(a, b string) string
+
 	// Rebind turns ? placeholders into whatever this database expects.
 	//
 	// Written in ? because that is what database/sql's own documentation uses
@@ -76,6 +84,8 @@ func (SQLite) Name() string { return "sqlite" }
 func (SQLite) Greatest(a, b string) string { return "MAX(" + a + ", " + b + ")" }
 func (SQLite) Least(a, b string) string    { return "MIN(" + a + ", " + b + ")" }
 
+func (SQLite) MergeJSON(a, b string) string { return "json_patch(" + a + ", " + b + ")" }
+
 // Rebind returns the query unchanged: SQLite takes ? as written.
 func (SQLite) Rebind(query string) string { return query }
 
@@ -90,6 +100,10 @@ func (Postgres) Name() string { return "postgres" }
 
 func (Postgres) Greatest(a, b string) string { return "GREATEST(" + a + ", " + b + ")" }
 func (Postgres) Least(a, b string) string    { return "LEAST(" + a + ", " + b + ")" }
+
+func (Postgres) MergeJSON(a, b string) string {
+	return "(" + a + "::jsonb || " + b + "::jsonb)::text"
+}
 
 // Rebind numbers the placeholders, which is what Postgres takes.
 //
