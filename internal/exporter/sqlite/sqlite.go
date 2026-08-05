@@ -35,7 +35,6 @@ package sqlite
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -83,13 +82,10 @@ type Config struct {
 // table writes one item's records.
 type table struct {
 	mu sync.Mutex
-	db *sql.DB
 
-	// tx is the batch in progress, nil between batches. Held open across Write
-	// calls because a run hands over whatever it has ready, which may be one
-	// record, and one record is not a transaction's worth of work.
-	tx      *sql.Tx
-	pending int
+	// file is the database, shared with every other exporter writing into it,
+	// and it owns the batch. See [file].
+	file *file
 
 	item string
 	path string
@@ -130,19 +126,13 @@ func open(ctx context.Context, cfg exporter.Config) (exporter.Exporter, error) {
 		}
 	}
 
-	db, err := sql.Open("sqlite", dsn(path))
+	f, err := acquire(path)
 	if err != nil {
-		return nil, fmt.Errorf("exporter/sqlite: %s: %w", path, err)
+		return nil, err
 	}
 
-	// One connection, following the frontier. Every statement here is a write,
-	// so pooling buys nothing and costs the whole class of "database is locked"
-	// failures that concurrent writers produce. WAL is what still lets somebody
-	// query the file while the crawl is running.
-	db.SetMaxOpenConns(1)
-
 	t := &table{
-		db:      db,
+		file:    f,
 		item:    cfg.Item,
 		path:    path,
 		layout:  layout,
@@ -151,7 +141,7 @@ func open(ctx context.Context, cfg exporter.Config) (exporter.Exporter, error) {
 	t.insert = insert(t.item, t.columns)
 
 	if err := t.schema(ctx); err != nil {
-		db.Close()
+		f.release()
 		return nil, err
 	}
 	return t, nil
@@ -192,10 +182,7 @@ func (t *table) schema(ctx context.Context) error {
 	}
 	b.WriteString("\n)")
 
-	if _, err := t.db.ExecContext(ctx, b.String()); err != nil {
-		return fmt.Errorf("exporter/sqlite: %s: %w", t.path, err)
-	}
-	return nil
+	return t.file.schema(ctx, b.String())
 }
 
 // insert is the upsert, built once.
@@ -240,14 +227,6 @@ func (t *table) Write(ctx context.Context, records ...*record.Record) error {
 	}
 
 	for _, r := range records {
-		if t.tx == nil {
-			tx, err := t.db.BeginTx(ctx, nil)
-			if err != nil {
-				return fmt.Errorf("exporter/sqlite: %s: %w", t.path, err)
-			}
-			t.tx, t.pending = tx, 0
-		}
-
 		values := t.row(r)
 		args := make([]any, 0, len(values)+1)
 		args = append(args, key(t.item, r.URL, t.columns, values))
@@ -255,15 +234,8 @@ func (t *table) Write(ctx context.Context, records ...*record.Record) error {
 			args = append(args, v)
 		}
 
-		if _, err := t.tx.ExecContext(ctx, t.insert, args...); err != nil {
-			return fmt.Errorf("exporter/sqlite: %s: %w", t.path, err)
-		}
-
-		t.pending++
-		if t.pending >= Batch {
-			if err := t.commit(); err != nil {
-				return err
-			}
+		if err := t.file.exec(ctx, t.insert, args...); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -321,19 +293,6 @@ func key(item, url string, cols, values []string) string {
 }
 
 // commit ends the batch in progress. The caller holds the lock.
-func (t *table) commit() error {
-	if t.tx == nil {
-		return nil
-	}
-
-	tx := t.tx
-	t.tx, t.pending = nil, 0
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("exporter/sqlite: %s: %w", t.path, err)
-	}
-	return nil
-}
 
 // Close commits what is left and shuts the database.
 //
@@ -348,11 +307,7 @@ func (t *table) Close() error {
 	}
 	t.closed = true
 
-	err := t.commit()
-	if closeErr := t.db.Close(); err == nil && closeErr != nil {
-		err = fmt.Errorf("exporter/sqlite: %s: %w", t.path, closeErr)
-	}
-	return err
+	return t.file.release()
 }
 
 // Path is where a block's database lives, which is what somebody asks before

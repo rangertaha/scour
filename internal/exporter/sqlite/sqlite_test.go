@@ -5,6 +5,7 @@ package sqlite_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -383,5 +384,71 @@ job "news" {
 	}
 	if !strings.Contains(err.Error(), "url") {
 		t.Errorf("the error does not say which property: %v", err)
+	}
+}
+
+// TestTwoExportersShareOneFile.
+//
+// One file for a job's items rather than one per item is what this format is
+// for, so two exporters on one database is the ordinary configuration and not
+// an unusual one. Each used to open a handle of its own, and each handle holds a
+// write transaction open across Write calls, because a run hands over whatever
+// it has ready and one record is not a transaction's worth of work.
+//
+// Two write transactions on one SQLite file do not both proceed. The first
+// writer left its transaction open, the second waited out busy_timeout and
+// failed with SQLITE_BUSY, the run reported failure, and the second item's
+// table was left empty: five seconds of stall per flush and then a lost export.
+func TestTwoExportersShareOneFile(t *testing.T) {
+	dir := t.TempDir()
+
+	set, err := exporter.New(context.Background(), job(t, `
+  item "price" {
+    property "value" {
+      type = str
+    }
+  }
+
+  exporter "sqlite" "article" {
+    dir = "`+dir+`"
+  }
+
+  exporter "sqlite" "price" {
+    dir = "`+dir+`"
+  }
+`), nil)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	var records []*record.Record
+	for i := range 40 {
+		records = append(records,
+			rec(fmt.Sprintf("https://example.com/a/%d", i), "One", "Alex"),
+			&record.Record{
+				Item: "price", URL: fmt.Sprintf("https://example.com/p/%d", i),
+				Spec: "abc123", Fetched: fetched,
+				Values: map[string]string{"value": "9.99"},
+			})
+	}
+
+	if err := set.Write(context.Background(), records...); err != nil {
+		t.Fatalf("two exporters on one file could not both write: %v", err)
+	}
+	if err := set.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	db := reopen(t, dir)
+	if got := count(t, db); got != 40 {
+		t.Errorf("article rows = %d, want 40", got)
+	}
+
+	var prices int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM price`).Scan(&prices); err != nil {
+		t.Fatalf("counting prices: %v", err)
+	}
+	if prices != 40 {
+		t.Errorf("price rows = %d, want 40: the second exporter's table was lost", prices)
 	}
 }

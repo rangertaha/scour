@@ -46,7 +46,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite" // the pure-Go driver, so this cross-compiles
@@ -132,6 +134,17 @@ type Store struct {
 // An empty directory opens an in-memory database, which is what a test wants
 // and what nothing else should use: the value of this store is that it
 // accumulates.
+// anonymous numbers the in-memory stores, so each Open("") gets one of its own.
+var anonymous atomic.Uint64
+
+// memoryName is a name no other store in this process is using.
+//
+// The cache stays shared because a store's own handle pool needs it, and only
+// the name keeps two stores apart.
+func memoryName() string {
+	return "entities-" + strconv.FormatUint(anonymous.Add(1), 10)
+}
+
 func Open(dir string) (*Store, error) {
 	if dir != "" {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -145,7 +158,19 @@ func Open(dir string) (*Store, error) {
 		"&_pragma=foreign_keys(on)" +
 		"&_txlock=immediate"
 
-	dsn := "file:entities?mode=memory&cache=shared&" + pragmas[1:]
+	// A name of its own for each in-memory store, so that two of them are two
+	// databases.
+	//
+	// They used to share one: the name was the constant "entities" and the
+	// cache was shared, so every Open("") in a process returned a handle on the
+	// same database. Two entities steps in one wave run in parallel goroutines
+	// with a handle each, and a shared-cache table lock is not what
+	// busy_timeout retries, so the second one failed at once with "database
+	// table is locked". A step error makes the pipeline return nothing, so the
+	// run discarded every record the crawl had produced. Two unrelated jobs in
+	// one process silently wrote into one graph and read each other's entities,
+	// which is the quieter half of the same mistake.
+	dsn := "file:" + memoryName() + "?mode=memory&cache=shared&" + pragmas[1:]
 	if dir != "" {
 		dsn = "file:" + filepath.Join(dir, File) + pragmas
 	}

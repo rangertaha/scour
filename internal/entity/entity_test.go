@@ -4,7 +4,9 @@ package entity_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -297,4 +299,68 @@ func names(entities []*entity.Entity) string {
 		out = append(out, one.Name)
 	}
 	return strings.Join(out, ", ")
+}
+
+// TestTwoInMemoryStoresAreTwoStores.
+//
+// They used to be one. The name was a constant and the cache was shared, so
+// every Open("") in a process was a handle on the same database. Two entities
+// steps in one wave run in parallel goroutines with a handle each, and a
+// shared-cache table lock is not what busy_timeout retries: the second failed
+// at once with "database table is locked", the pipeline returned nothing, and
+// the run discarded every record the crawl had produced.
+//
+// The quieter half of the same mistake is here too: two unrelated jobs in one
+// process wrote into one graph and read each other's entities.
+func TestTwoInMemoryStoresAreTwoStores(t *testing.T) {
+	ctx := context.Background()
+
+	first, err := entity.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+
+	second, err := entity.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+
+	if _, err := first.Assert(ctx, "person", "Alex Doe", entity.Provenance{
+		Job: "one", URL: "https://example.com/a",
+	}); err != nil {
+		t.Fatalf("assert: %v", err)
+	}
+
+	if found, err := second.Find(ctx, "person", "Alex Doe"); err == nil && found != nil {
+		t.Error("one job's entity was visible in another job's store")
+	}
+
+	// And the two can be written at the same time, which is what a wave does.
+	var wg sync.WaitGroup
+	problems := make([]error, 2)
+	for i, s := range []*entity.Store{first, second} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for n := range 40 {
+				_, err := s.Assert(ctx, "person", fmt.Sprintf("Person %d", n), entity.Provenance{
+					Job: fmt.Sprintf("job-%d", i),
+					URL: fmt.Sprintf("https://example.com/%d/%d", i, n),
+				})
+				if err != nil {
+					problems[i] = err
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	for i, err := range problems {
+		if err != nil {
+			t.Errorf("store %d could not be written while the other was: %v", i, err)
+		}
+	}
 }
