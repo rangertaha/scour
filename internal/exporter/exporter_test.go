@@ -19,6 +19,7 @@ import (
 	"github.com/rangertaha/scour/internal/record"
 
 	_ "github.com/rangertaha/scour/internal/exporter/files"
+	_ "github.com/rangertaha/scour/internal/exporter/parquet"
 )
 
 var fetched = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
@@ -253,14 +254,18 @@ func TestOneExporterPerItem(t *testing.T) {
 }
 
 // TestAFormatNothingWritesIsRefusedWhenBuilt, and all of them at once.
+//
+// avro is the stand-in for a format nobody has written: naming one this build
+// does have would make the test pass for the wrong reason the day somebody
+// writes it.
 func TestAFormatNothingWritesIsRefusedWhenBuilt(t *testing.T) {
 	_, err := exporter.New(context.Background(), job(t, `
-  exporter "parquet" "article" {}
+  exporter "avro" "article" {}
 `), nil)
 	if err == nil {
 		t.Fatal("built an exporter for a format nothing writes")
 	}
-	if !strings.Contains(err.Error(), "parquet") || !strings.Contains(err.Error(), "json") {
+	if !strings.Contains(err.Error(), "avro") || !strings.Contains(err.Error(), "json") {
 		t.Errorf("the error does not say what is missing or what there is: %v", err)
 	}
 }
@@ -273,7 +278,7 @@ func TestARefusedSetClosesWhatItOpened(t *testing.T) {
 	_, err := exporter.New(context.Background(), job(t, `
   exporter "jsonlines" "article" {}
 
-  exporter "parquet" "article" {}
+  exporter "avro" "article" {}
 `), map[string]io.WriteCloser{"jsonlines.article": opened})
 	if err == nil {
 		t.Fatal("built it anyway")
@@ -324,9 +329,10 @@ func TestAddressesAndRegistered(t *testing.T) {
 `, map[string]io.WriteCloser{"jsonlines.article": out})
 
 	// Closed already, so the set is empty; what matters is that Registered
-	// says what this build can do.
+	// says what this build can do, which is every format imported above and
+	// nothing else.
 	_ = set
-	if !exporter.Has("csv") || exporter.Has("parquet") {
+	if !exporter.Has("csv") || !exporter.Has("parquet") || exporter.Has("avro") {
 		t.Errorf("Registered() = %v", exporter.Registered())
 	}
 }

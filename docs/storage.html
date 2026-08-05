@@ -125,23 +125,6 @@
       reads from stdin rather than a flag, because a flag is in the shell history
       and in the process table. There is no <code>scour secret get</code>.</p>
 
-      <h2>What a plugin is, and what happens when one is forgotten</h2>
-
-      <p>Every extension point here is a registry filled by an <code>init</code>
-      in the implementation's own package, which is what keeps a build that
-      never wanted S3 from carrying its SDK. A plugin therefore exists only if
-      something imported it for its side effect.</p>
-
-      <p>That was a thing to remember, and nothing failed when it was forgotten.
-      The <code>topic</code> middleware was written, tested and committed, and
-      no binary could use it: a job naming it was refused with "nothing on this
-      node implements topic". Nothing was broken, so nothing complained.</p>
-
-      <p><code>internal/plugins</code> is the one list, and a test walks the
-      repository for packages whose <code>init</code> fills a registry and fails
-      if one is missing from it. Forgetting is a failing build rather than a
-      feature that quietly does not exist.</p>
-
       <h2>What is built</h2>
 
       <div class="tablewrap">
@@ -159,16 +142,16 @@
             <tr><td>The scheduler: scope, budget, politeness, <code>dupefilter</code></td><td>Built, tested</td></tr>
             <tr><td>The spider: four ways to find a value, link discovery</td><td>Built, tested</td></tr>
             <tr><td>The pipeline: waves, concurrency, four step kinds</td><td>Built, tested</td></tr>
-            <tr><td>Exporters: json, jsonlines, csv</td><td>Built, tested</td></tr>
+            <tr><td>Exporters: json, jsonlines, csv, parquet, nats, sqlite</td><td>Built, tested</td></tr>
             <tr><td>A whole crawl, and <code>scour try</code>, <code>run</code>, <code>train</code></td><td>Built, tested</td></tr>
             <tr><td>The bus: same job, same records, either wiring</td><td>Built, tested</td></tr>
             <tr><td>The cluster: two nodes, one job, work on both</td><td>Built, tested</td></tr>
             <tr><td>Secrets, sealed, resolved where a plugin is built</td><td>Built, tested</td></tr>
             <tr><td>Topic classification in the spider</td><td>Built, tested</td></tr>
             <tr><td>The entity store: typed entities, relations, provenance</td><td>Built, tested</td></tr>
-            <tr><td>Topic scoring in the scheduler, before a page is fetched</td><td>Built, tested</td></tr>
-            <tr><td>Exporters: nats and sqlite</td><td>Built, tested</td></tr>
-            <tr><td>Fill rates, measured and held to a floor</td><td>54.7% over a corpus of fifteen pages</td></tr>
+            <tr><td>Topic scoring in the scheduler, before a page is fetched</td><td>Not started</td></tr>
+            <tr><td>Entity identity resolution, and recognition</td><td>Designed, not started</td></tr>
+            <tr><td>Fill rates measured against a real corpus</td><td>The number this is judged by, and not yet taken</td></tr>
           </tbody>
         </table>
       </div>

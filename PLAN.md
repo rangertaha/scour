@@ -212,8 +212,8 @@ formats.
 *Proved by:* independent steps demonstrably running at once, and export output
 that round-trips.
 
-*Where it is:* built and tested, both proofs included. json, jsonlines and csv;
-parquet, nats and sqlite are not written.
+*Where it is:* built and tested, both proofs included. json, jsonlines, csv,
+parquet, nats and sqlite.
 
 **Phase 5.5. Secrets.** `SCOUR_SECRETS` sealed with a cluster key, `secret()`
 resolved when a plugin is built, and the S3 and GCS backends taught to accept

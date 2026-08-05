@@ -516,8 +516,7 @@ job "markets" {
   }
 
   exporter "parquet" "price" {
-    backend = "s3"
-    bucket  = "archive"
+    dir = "./archive"
   }
 
   exporter "nats" "price" {
@@ -542,7 +541,11 @@ what anybody queries. Correlating price series and counting distinct values per
 property become the same kind of scan over the same files.
 
 **On the storage backend the page cache already uses**, so local, S3 and GCS
-need nothing new, and where an export lands is a config line.
+need nothing new, and where an export lands is a config line. That part is the
+design and not yet the code: the exporter as built writes to a `dir` and a
+`file` like the other file formats, which is why the block above says `dir`. It
+also takes records rather than measurements, so the two-interface split below is
+still a design and the second interface has one implementation waiting for it.
 
 **And nothing has to be running.** DuckDB reads Parquet where it lies, so
 analytics is pointing something at files rather than importing into a database
@@ -1481,7 +1484,7 @@ four stages is the genuinely new distributed-systems problem here.
 | The `httperror` middleware | Built, tested |
 | `internal/record`: the flat form, and the measurement rendering | Built, tested |
 | The pipeline: waves, concurrency, clean, validate, dedupe, rank | Built, tested |
-| Exporters: the registry, json, jsonlines, csv | Built, tested |
+| Exporters: the registry, json, jsonlines, csv, parquet, nats, sqlite | Built, tested |
 | `internal/run`: the whole crawl, four stages wired directly | Built, tested |
 | `scour try` and `scour run` | Built, tested |
 | `internal/bus`: NATS, embedded or joined, downloader and spider as services | Built, tested |
@@ -1508,7 +1511,6 @@ four stages is the genuinely new distributed-systems problem here.
 | Entity identity resolution, and recognition | Designed, not started |
 | Events as items: tags, fields, time. Parquet archive | Designed. Schema built |
 | Plugin implementations, all of them | Not started |
-| Exporters: parquet, nats, sqlite | Not started |
 | Jobs and nodes in NATS KV, watched | Built, tested |
 | `internal/node`: join, watch, serve. Two nodes, one job, work on both | Built, tested |
 | `internal/train`: locators induced from the corpus, written back | Built, tested |
