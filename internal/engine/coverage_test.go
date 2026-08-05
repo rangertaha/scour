@@ -1068,7 +1068,6 @@ job "news" {
     property "author" {
       type   = entity
       entity = "person"
-      via    = "writes_for"
     }
   }
 }
@@ -1081,8 +1080,8 @@ job "news" {
 	if author.Type != string(engine.TypeEntity) {
 		t.Errorf("type = %q", author.Type)
 	}
-	if author.Entity != "person" || author.Via != "writes_for" {
-		t.Errorf("entity = %q via %q", author.Entity, author.Via)
+	if author.Entity != "person" {
+		t.Errorf("entity = %q", author.Entity)
 	}
 }
 
@@ -1106,14 +1105,6 @@ func TestEntityFieldsNeedAnEntityType(t *testing.T) {
   }
 `, "nothing would resolve it")
 
-	refuses(t, `
-  item "c" {
-    property "author" {
-      type = str
-      via  = "writes_for"
-    }
-  }
-`, "nothing for it to relate")
 }
 
 // TestEntityReferenceIsShape: unlike an example, which is evidence about how to
@@ -1141,8 +1132,4 @@ job "j" {
 		t.Error("turning a property into an entity reference did not change the shape")
 	}
 
-	viaOnly := shape(`type = entity` + "\n      " + `entity = "person"` + "\n      " + `via = "writes_for"`)
-	if linked.Fingerprint() == viaOnly.Fingerprint() {
-		t.Error("adding a relation did not change the shape")
-	}
 }

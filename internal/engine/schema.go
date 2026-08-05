@@ -209,13 +209,13 @@ type Property struct {
 	// Entity names the kind of thing this property refers to, for a property
 	// typed entity: "person", "organisation". What is extracted is a name;
 	// what is kept is a link to the thing that name refers to.
+	//
+	// The relation is the property's own name, so an author property on an
+	// article makes (article) --author--> (person). There is nothing else to
+	// write, which is deliberate: a relation name that each document chose for
+	// itself would give a shared graph two words for one thing and let it
+	// answer neither question properly.
 	Entity string `hcl:"entity,optional" json:"entity,omitempty"`
-
-	// Via names the relation from the item's own entity to this one, so an
-	// author is not merely a person who appeared on a page but a person who
-	// writes for the publisher it appeared on. A relation carries properties
-	// of its own, which is where the topic goes.
-	Via string `hcl:"via,optional" json:"via,omitempty"`
 
 	// Properties nest, so a property can be an object with fields of its own.
 	Properties []*Property `hcl:"property,block" json:"properties,omitempty"`

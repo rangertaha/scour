@@ -377,8 +377,7 @@ job "news" {
 
     property "author" {
       type   = entity
-      entity = "person"
-      via    = "writes_for"     # the relation back to the publisher
+      entity = "person"     # the relation back to the publisher
     }
   }
 }
@@ -437,14 +436,35 @@ are one, recording `same_as` beats rewriting rows: it is reversible, it keeps
 both provenance trails, and it does not destroy the fact that they were once
 thought distinct, which is the thing you need when the merge was wrong.
 
-### Relations carry properties
+### The relation is the property's name
 
-"Monbiot writes for the Guardian **about environment**" is an attribute of the
-relation rather than of either end. That is the difference between a table of
-pairs and a small graph, and it is much cheaper to decide now than later.
+`property "author"` on `item "article"` already says everything:
+`(article) --author--> (person)`. There is nothing else to write.
 
-So a relation has an identity of its own and can be the subject of assertions,
-the same way an entity can.
+Deliberately nothing. A relation name each document chose for itself would give
+a shared graph two words for one thing: one job writing `writes_for` and another
+`authored_by`, and neither question answerable without knowing both. Naming is a
+decision pushed onto whoever is least equipped to make it, so it is not asked
+for. It also lands on the vocabulary sites already publish, since the aliases
+are full of `datePublished` and `articleBody` and `author` is the same word
+schema.org uses.
+
+### The interesting relations are derived, not declared
+
+"Monbiot writes for the Guardian about environment" was never a fact for anybody
+to type. It is what forty articles whose `author` was him and whose `publisher`
+was them already imply, on topics the classifier scored while they were crawled.
+
+So it is a query over assertions, and it comes back with a count, a spread of
+topics and the pages that evidence it, rather than being asserted by whoever
+wrote a document and believed at face value afterwards. That is the database of
+publishers and their authors per topic: computed, evidenced, and never
+maintained.
+
+Which is what makes relations carrying properties matter. The topic on
+`writes_for` is not an attribute somebody set; it is an aggregate of the
+articles underneath it. A relation therefore has an identity of its own and can
+be the subject of assertions, the same as an entity.
 
 ### Explicit tables, not triples
 

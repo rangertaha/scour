@@ -187,11 +187,6 @@ func validateProperties(props []*Property, where string) []error {
 			problems = append(problems, fmt.Errorf(
 				"%s: names an entity kind but is typed %s, so nothing would resolve it", path, p.Type))
 		}
-		if p.Via != "" && Type(p.Type) != TypeEntity {
-			problems = append(problems, fmt.Errorf(
-				"%s: has a relation but is not an entity, so there is nothing for it to relate", path))
-		}
-
 		// A property with children describes an object, whatever it says. The
 		// mismatch is an error rather than an inference, because silently
 		// changing a declared type is how a document stops meaning what it

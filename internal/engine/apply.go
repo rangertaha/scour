@@ -351,8 +351,8 @@ func writeProperties(b *strings.Builder, props []*Property) {
 		// evidence about a shape rather than part of it, so adding one must
 		// not read as a schema change and force a re-extraction of records
 		// that are still correct.
-		fmt.Fprintf(b, "(%s:%s:%s:%s:%t:%s:%s:%s:%s:%s",
-			p.Name, p.Type, p.Entity, p.Via, p.Required,
+		fmt.Fprintf(b, "(%s:%s:%s:%t:%s:%s:%s:%s:%s",
+			p.Name, p.Type, p.Entity, p.Required,
 			strings.Join(p.Aliases, ","),
 			strings.Join(p.Regexes, ","),
 			strings.Join(p.Transforms, ","),

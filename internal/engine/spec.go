@@ -123,6 +123,7 @@ func writeProperty(b *strings.Builder, p *Property, depth int) {
 
 	fmt.Fprintf(b, "%sproperty %q {\n", pad, p.Name)
 	writeAttr(b, depth+1, "type", p.Type)
+	writeAttr(b, depth+1, "entity", p.Entity)
 	writeAttr(b, depth+1, "description", p.Description)
 	if p.Required {
 		fmt.Fprintf(b, "%s  required = true\n", pad)
