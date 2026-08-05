@@ -34,6 +34,7 @@ package bus
 import (
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/nats-io/nats-server/v2/server"
@@ -86,7 +87,8 @@ var ErrNoStage = errors.New("bus: nothing is serving that stage")
 // Conn is a connection to the bus, and the embedded server if this started one.
 type Conn struct {
 	*nats.Conn
-	embedded *server.Server
+	embedded  *server.Server
+	temporary string // a store directory this made, and so has to remove
 }
 
 // Options are how a node reaches the bus.
@@ -99,6 +101,16 @@ type Options struct {
 	// Name identifies this node in the server's own reporting, which is most
 	// of what makes a cluster debuggable.
 	Name string
+
+	// StoreDir is where an embedded server keeps JetStream's state: the jobs,
+	// the node registry, and anything else the cluster remembers.
+	//
+	// Empty gets a temporary directory that is removed when the server stops,
+	// which is what a test wants and what nothing durable should use. It is
+	// not left to NATS's own default on purpose: that default is shared
+	// between servers, so two embedded ones on a machine would silently see
+	// each other's jobs.
+	StoreDir string
 
 	// Ready is how long to wait for an embedded server to come up.
 	Ready time.Duration
@@ -121,6 +133,15 @@ func Connect(opts Options) (*Conn, error) {
 		return &Conn{Conn: conn}, nil
 	}
 
+	store, temporary := opts.StoreDir, ""
+	if store == "" {
+		made, err := os.MkdirTemp("", "scour-bus-")
+		if err != nil {
+			return nil, fmt.Errorf("bus: %w", err)
+		}
+		store, temporary = made, made
+	}
+
 	// Port -1 asks the operating system for one, so two embedded servers on a
 	// machine do not fight over a number.
 	embedded, err := server.NewServer(&server.Options{
@@ -129,27 +150,30 @@ func Connect(opts Options) (*Conn, error) {
 		NoLog:              true,
 		NoSigs:             true,
 		JetStream:          true,
-		StoreDir:           "",
+		StoreDir:           store,
 		DontListen:         false,
 		MaxPayload:         8 << 20,
 		JetStreamMaxMemory: 256 << 20,
 	})
 	if err != nil {
+		cleanup(temporary)
 		return nil, fmt.Errorf("bus: embedded server: %w", err)
 	}
 
 	go embedded.Start()
 	if !embedded.ReadyForConnections(opts.Ready) {
 		embedded.Shutdown()
+		cleanup(temporary)
 		return nil, errors.New("bus: the embedded server did not come up")
 	}
 
 	conn, err := nats.Connect(embedded.ClientURL(), nats.Name(opts.Name))
 	if err != nil {
 		embedded.Shutdown()
+		cleanup(temporary)
 		return nil, fmt.Errorf("bus: embedded server: %w", err)
 	}
-	return &Conn{Conn: conn, embedded: embedded}, nil
+	return &Conn{Conn: conn, embedded: embedded, temporary: temporary}, nil
 }
 
 // Address is where this connection points, which is what a node tells another
@@ -188,8 +212,15 @@ func (c *Conn) Close() error {
 	if c.embedded != nil {
 		c.embedded.Shutdown()
 		c.embedded.WaitForShutdown()
+		cleanup(c.temporary)
 	}
 	return errors.Join(problems...)
+}
+
+func cleanup(dir string) {
+	if dir != "" {
+		_ = os.RemoveAll(dir)
+	}
 }
 
 // noResponders turns NATS's own answer into ours, because "nothing is serving

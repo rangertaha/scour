@@ -1450,11 +1450,11 @@ four stages is the genuinely new distributed-systems problem here.
 | Events as items: tags, fields, time. Parquet archive | Designed. Schema built |
 | Plugin implementations, all of them | Not started |
 | Exporters: parquet, nats, sqlite | Not started |
-| Cluster join, distributed jobs | Queue groups work. `--join` not started |
-| Jobs in a KV bucket, server-side writes | Decided, not started |
+| Jobs and nodes in NATS KV, watched | Built, tested |
+| `internal/node`: join, watch, serve. Two nodes, one job, work on both | Built, tested |
 | Frontier in SQLite, one shared database | Built, tested, benchmarked |
 | Records in SQLite, one database per job | Decided. The piece most likely to move |
-| Run state and nodes in KV buckets of their own | Decided, not started |
+| Run state in a KV bucket of its own | Decided, not started |
 
 `internal/engine/notes_test.go` reads this file. It parses and validates the job
 documents in it, and compares every number in the catalogue tables with the
