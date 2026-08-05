@@ -219,10 +219,21 @@ func fit(b *Bayes, docs []Document) (midpoint, scale float64) {
 // Divided by the length of the document, because a long page about the subject
 // and a short one are both about the subject: without this, evidence grows with
 // word count and every long page scores high whatever it says.
+// # What "nothing to say" is worth
+//
+// [Bayes.Midpoint] and not zero. The two are the same number only on a
+// perfectly balanced corpus, and reading zero as neutral is what this did until
+// the midpoint existed: a page whose every word was unseen in training then
+// scored 0.96, higher than the classifier's own positive examples, because zero
+// sat above a midpoint the corpus had pulled down to -1.66. A focused crawl
+// therefore kept every off-vocabulary page and, in the scheduler, put them at
+// the front of the frontier: it prioritised exactly the pages it knew nothing
+// about. The midpoint is the point that scores a half, so it is what "I
+// recognise nothing here" has to return.
 func (b *Bayes) evidence(text string) float64 {
 	tokens := classify.Tokens(text)
 	if len(tokens) == 0 {
-		return 0
+		return b.Midpoint
 	}
 
 	var sum float64
@@ -238,7 +249,7 @@ func (b *Bayes) evidence(text string) float64 {
 		seen++
 	}
 	if seen == 0 {
-		return 0
+		return b.Midpoint
 	}
 	return b.Prior + sum/math.Sqrt(float64(seen))
 }

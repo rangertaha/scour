@@ -352,3 +352,60 @@ func TestParseRefRefusesAVersionWithSomethingAfterIt(t *testing.T) {
 		t.Errorf("ParseRef(\"climate@7\") = %v, %v", ref, err)
 	}
 }
+
+// TestBayesSaysHalfWhenItRecognisesNothing.
+//
+// A page whose every word is unseen in training is one the classifier has
+// nothing to say about, and the honest answer is the middle. `evidence`
+// returned a bare zero for it, which was the middle only while the middle was
+// zero: once a lopsided corpus pulled the midpoint down to -1.66, an
+// unrecognisable page scored 0.96, above the classifier's own positive
+// examples. `least` then kept every off-vocabulary page, and the scheduler's
+// topic middleware put them at the FRONT of the frontier, so a focused crawl
+// prioritised exactly the pages it knew nothing about.
+//
+// The corpus here is the lopsided one, because on a balanced corpus the
+// midpoint is near zero and the defect is invisible, which is how it shipped.
+func TestBayesSaysHalfWhenItRecognisesNothing(t *testing.T) {
+	docs := []bayes.Document{
+		{Text: "The climate committee criticised the pace of decarbonisation.", About: true},
+	}
+	for _, text := range []string{
+		"The manager named an unchanged squad for the cup fixture.",
+		"Shares fell after the company cut its quarterly guidance.",
+		"The film won three awards including best original screenplay.",
+		"The transfer window closed with no signings at all.",
+		"Quarterly revenue beat guidance and the shares rose.",
+		"A sequel was announced at the festival on Friday.",
+		"The squad travelled without three injured players.",
+		"Investors welcomed the dividend and the buyback.",
+		"The director thanked the crew in a short speech.",
+		"The league confirmed the fixture would be replayed.",
+	} {
+		docs = append(docs, bayes.Document{Text: text, About: false})
+	}
+
+	b, err := bayes.Train("climate", 1, docs)
+	if err != nil {
+		t.Fatalf("train: %v", err)
+	}
+
+	for _, text := range []string{
+		"zzzz qqqq wwww vvvv",
+		"12345 67890",
+		"περιβάλλον και κλίμα στην Ευρώπη",
+	} {
+		got := score(t, b, text)
+		if got < 0.4 || got > 0.6 {
+			t.Errorf("a page of nothing it has seen scored %.2f, and it knows nothing about it: %q", got, text)
+		}
+	}
+
+	// And it still separates what it does recognise, so this is not satisfied
+	// by a classifier that says a half to everything.
+	on := score(t, b, "The climate committee criticised the pace of decarbonisation.")
+	off := score(t, b, "The manager named an unchanged squad for the cup fixture.")
+	if on < 0.5 || off > 0.5 {
+		t.Errorf("scores no longer straddle the middle: %.2f and %.2f", on, off)
+	}
+}
