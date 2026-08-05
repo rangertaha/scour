@@ -5,6 +5,7 @@ package pipeline_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -624,13 +625,14 @@ func TestTwoStepsEditingOneRecordResolveTheSameWayEveryRun(t *testing.T) {
 	}
 }
 
-// TestTwoRecordsWithOneIdentityAreRefusedLoudly.
+// TestARedirectDuplicateIsCollapsedRatherThanFatal.
 //
-// Extraction cannot produce this, since one page yields at most one record per
-// item. A step that invented a second could, and then the merge would have to
-// guess which of them a later step's output referred to. Refusing beats
-// guessing, which is the lesson of the bug the merge was rewritten for.
-func TestTwoRecordsWithOneIdentityAreRefusedLoudly(t *testing.T) {
+// Two frontier URLs that redirect to one page are two entries and one fetched
+// page, so the same item is extracted from it twice and two records with one
+// identity reach the pipeline. That is a crawl doing its job, not a bug, and it
+// used to abort the run and throw away every record the crawl had produced.
+// They are the same page, so the first one stands.
+func TestARedirectDuplicateIsCollapsedRatherThanFatal(t *testing.T) {
 	p, err := pipeline.New(context.Background(), job(t, `
   pipeline {
     step "clean" "article" {}
@@ -641,15 +643,59 @@ func TestTwoRecordsWithOneIdentityAreRefusedLoudly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = p.Run(context.Background(), []*record.Record{
+	out, err := p.Run(context.Background(), []*record.Record{
 		rec("https://example.com/a", map[string]string{"title": "One"}),
 		rec("https://example.com/a", map[string]string{"title": "Two"}),
 	})
+	if err != nil {
+		t.Fatalf("a page reached twice by two URLs killed the run: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("len(out) = %d, want the two to be one record", len(out))
+	}
+	if got := out[0].Values["title"]; got != "One" {
+		t.Errorf("title = %q, want the first of the two", got)
+	}
+}
+
+// TestAStepThatInventsADuplicateIsRefusedLoudly.
+//
+// Uniqueness after a wave is the pipeline's own invariant rather than the
+// crawl's: a step that invented a second record for one item on one page leaves
+// the merge guessing which of them a later step's output referred to, and an
+// exporter two rows nobody can tell apart. Refusing beats guessing, which is the
+// lesson of the bug the merge was rewritten for.
+func TestAStepThatInventsADuplicateIsRefusedLoudly(t *testing.T) {
+	pipeline.Register("test-twin", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+		return pipeline.Func(func(_ context.Context, records []*record.Record) ([]*record.Record, error) {
+			out := make([]*record.Record, 0, len(records)*2)
+			for _, r := range records {
+				out = append(out, r, r.Clone())
+			}
+			return out, nil
+		}), nil
+	})
+
+	p, err := pipeline.New(context.Background(), job(t, `
+  pipeline {
+    step "test-twin" "article" {}
+  }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = p.Run(context.Background(), []*record.Record{
+		rec("https://example.com/a", map[string]string{"title": "One"}),
+	})
 	if err == nil {
-		t.Fatal("two records with one identity were merged rather than refused")
+		t.Fatal("a step that invented a duplicate was merged rather than refused")
 	}
 	if !strings.Contains(err.Error(), "identity") {
 		t.Errorf("the error does not say what is wrong: %v", err)
+	}
+	if !strings.Contains(err.Error(), "test-twin") {
+		t.Errorf("the error does not say which step: %v", err)
 	}
 }
 
@@ -666,5 +712,84 @@ func TestIdentityIsStableUnderTransformation(t *testing.T) {
 	other := rec("https://example.com/b", map[string]string{"title": "One"})
 	if before.Identity() == other.Identity() {
 		t.Error("two records from different pages share an identity")
+	}
+}
+
+// TestRankKeepsItsOrderingWhenItSharesAWave.
+//
+// A step that reorders is a step whose entire output is its ordering, and the
+// merge used to take the order from the wave's input unconditionally: every
+// `rank` that shared a wave with anything was silently undone, and with a limit
+// set it kept an arbitrary n records rather than the top n. Nothing failed and
+// nothing was logged; the exported file was just in the wrong order.
+func TestRankKeepsItsOrderingWhenItSharesAWave(t *testing.T) {
+	p, err := pipeline.New(context.Background(), job(t, `
+  pipeline {
+    step "rank" "article" {
+      by         = "score"
+      descending = true
+    }
+    step "validate" "article" {}
+  }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := p.Run(context.Background(), []*record.Record{
+		rec("https://example.com/a", map[string]string{"title": "A", "score": "2"}),
+		rec("https://example.com/b", map[string]string{"title": "B", "score": "9"}),
+		rec("https://example.com/c", map[string]string{"title": "C", "score": "5"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	for _, r := range out {
+		got = append(got, r.Values["score"])
+	}
+	if want := []string{"9", "5", "2"}; !slices.Equal(got, want) {
+		t.Errorf("scores in order = %v, want %v: the rank was undone by its wave", got, want)
+	}
+}
+
+// TestARecordAStepAddedSurvivesItsWave.
+//
+// The merge keeps a record only if every step kept it, which is what makes two
+// filters in one wave behave like the same two in sequence. A record one step
+// invented was held to that rule too, and the other steps of the wave had never
+// seen it, so it was always dropped: the same step alone in its own wave kept
+// it, and nothing said why.
+func TestARecordAStepAddedSurvivesItsWave(t *testing.T) {
+	pipeline.Register("test-invent", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+		return pipeline.Func(func(_ context.Context, records []*record.Record) ([]*record.Record, error) {
+			extra := records[0].Clone()
+			extra.URL = "https://example.com/invented"
+			return append(slices.Clone(records), extra), nil
+		}), nil
+	})
+
+	p, err := pipeline.New(context.Background(), job(t, `
+  pipeline {
+    step "test-invent" "article" {}
+    step "validate" "article" {}
+  }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := p.Run(context.Background(), []*record.Record{
+		rec("https://example.com/a", map[string]string{"title": "A"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("len(out) = %d, want the invented record to have survived", len(out))
+	}
+	if out[1].URL != "https://example.com/invented" {
+		t.Errorf("out[1].URL = %q, want the invented one", out[1].URL)
 	}
 }

@@ -162,18 +162,32 @@ func New(ctx context.Context, job *engine.Job) (*Pipeline, error) {
 func (p *Pipeline) Run(ctx context.Context, records []*record.Record) ([]*record.Record, error) {
 	current := records
 
+	// A crawl can hand in two records with one identity, and it is not a bug
+	// when it does: two URLs that redirect to one page are two frontier entries
+	// and one fetched page, so the same item is extracted from it twice. The
+	// merge cannot carry a duplicate through a wave, and this used to abort the
+	// whole run rather than say so, throwing away every record the crawl had
+	// produced because a site had a trailing-slash redirect. They are the same
+	// page, so collapsing them is not a loss; the first is kept, which is
+	// deterministic because the crawl order is.
+	current = collapse(current)
+
 	for _, wave := range p.waves {
 		if len(wave) == 1 {
 			out, err := p.runOne(ctx, wave[0], current)
 			if err != nil {
 				return nil, err
 			}
+			// After a wave the uniqueness is the pipeline's own invariant
+			// rather than the crawl's, so a step that invented a duplicate is a
+			// step bug and is refused. Checked after every wave and not only
+			// before a merge, because a duplicate that reaches an exporter is
+			// two rows nobody can tell apart.
+			if err := unique(out); err != nil {
+				return nil, fmt.Errorf("pipeline: job %q: step %s.%s: %w", p.job, wave[0].Kind, wave[0].Name, err)
+			}
 			current = out
 			continue
-		}
-
-		if err := unique(current); err != nil {
-			return nil, fmt.Errorf("pipeline: job %q: %w", p.job, err)
 		}
 
 		results := make([][]*record.Record, len(wave))
@@ -193,8 +207,25 @@ func (p *Pipeline) Run(ctx context.Context, records []*record.Record) ([]*record
 			return nil, err
 		}
 		current = merge(current, results)
+		if err := unique(current); err != nil {
+			return nil, fmt.Errorf("pipeline: job %q: %w", p.job, err)
+		}
 	}
 	return current, nil
+}
+
+// collapse drops all but the first record of any identity.
+func collapse(records []*record.Record) []*record.Record {
+	seen := make(map[string]bool, len(records))
+	out := make([]*record.Record, 0, len(records))
+	for _, r := range records {
+		if seen[r.Identity()] {
+			continue
+		}
+		seen[r.Identity()] = true
+		out = append(out, r)
+	}
+	return out
 }
 
 func (p *Pipeline) runOne(ctx context.Context, declared *engine.Step, records []*record.Record) ([]*record.Record, error) {
@@ -248,6 +279,13 @@ func (p *Pipeline) Order() []string {
 // **A record is kept if every step kept it**, which is what makes two filters
 // in one wave behave like the same two in sequence.
 //
+// **The order taken is the one that changed**, for the same reason. A step
+// that reorders is a step whose entire output is its ordering: taking the
+// input's order back off it silently undid every `rank` that shared a wave,
+// and with a limit set it kept an arbitrary N records rather than the top N.
+// A step that merely dropped records is not reordering, so what counts as a
+// change is an output that is not a subsequence of the input.
+//
 // **The version taken is the one that changed**, because a step is named for
 // the item it works on and leaves the others alone: of the copies handed out,
 // at most one has been edited. If more than one was, the earlier step in wave
@@ -261,12 +299,36 @@ func merge(before []*record.Record, results [][]*record.Record) []*record.Record
 		return nil
 	}
 
-	// The order to return them in, and what each looked like going in.
-	order := make([]string, 0, len(before))
+	// What each record looked like going in, and which of them were there at
+	// all. The second is not the same question as the first once a step can add
+	// one, and conflating them is what made an added record unkeepable.
 	original := make(map[string]*record.Record, len(before))
+	wasThere := make(map[string]bool, len(before))
 	for _, r := range before {
-		order = append(order, r.Identity())
 		original[r.Identity()] = r
+		wasThere[r.Identity()] = true
+	}
+
+	// The order to return them in: the input's, unless a step reordered, in
+	// which case the earliest such step in wave order says what the order is.
+	order := identities(before)
+	for _, list := range results {
+		if !subsequence(order, list) {
+			order = identities(list)
+			break
+		}
+	}
+	// Anything the ordering step did not mention still needs a place, so that
+	// the kept rule below is what decides its fate and not the ordering.
+	inOrder := make(map[string]bool, len(order))
+	for _, id := range order {
+		inOrder[id] = true
+	}
+	for _, r := range before {
+		if !inOrder[r.Identity()] {
+			inOrder[r.Identity()] = true
+			order = append(order, r.Identity())
+		}
 	}
 
 	kept := map[string]int{}
@@ -283,10 +345,16 @@ func merge(before []*record.Record, results [][]*record.Record) []*record.Record
 			kept[id]++
 
 			// A record this step never had is one it added. Keep it at the end
-			// rather than dropping it, and count it like any other.
-			if _, known := original[id]; !known {
-				original[id] = r
-				order = append(order, id)
+			// rather than dropping it. It cannot be held to "every step kept
+			// it", because the other steps of this wave never saw it.
+			if !wasThere[id] {
+				if _, already := original[id]; !already {
+					original[id] = r
+					if !inOrder[id] {
+						inOrder[id] = true
+						order = append(order, id)
+					}
+				}
 				continue
 			}
 			if _, already := changed[id]; !already && !same(original[id], r) {
@@ -297,7 +365,11 @@ func merge(before []*record.Record, results [][]*record.Record) []*record.Record
 
 	out := make([]*record.Record, 0, len(order))
 	for _, id := range order {
-		if kept[id] != len(results) {
+		if wasThere[id] {
+			if kept[id] != len(results) {
+				continue
+			}
+		} else if kept[id] == 0 {
 			continue
 		}
 		if edited, ok := changed[id]; ok {
@@ -321,6 +393,44 @@ func same(before, after *record.Record) bool {
 	}
 	return before.Item == after.Item && before.URL == after.URL &&
 		before.Spec == after.Spec && before.Fetched.Equal(after.Fetched)
+}
+
+// identities is the identity of each record, in order.
+func identities(records []*record.Record) []string {
+	out := make([]string, len(records))
+	for i, r := range records {
+		out[i] = r.Identity()
+	}
+	return out
+}
+
+// subsequence reports whether the records appear in the given order, possibly
+// with gaps. Dropping records keeps a subsequence; moving one does not, which
+// is the difference between a step that filtered and a step that reordered.
+//
+// Records the order does not mention at all are ignored here: they are ones the
+// step added, and the caller decides where those go.
+func subsequence(order []string, records []*record.Record) bool {
+	known := make(map[string]bool, len(order))
+	for _, id := range order {
+		known[id] = true
+	}
+
+	at := 0
+	for _, r := range records {
+		id := r.Identity()
+		if !known[id] {
+			continue
+		}
+		for at < len(order) && order[at] != id {
+			at++
+		}
+		if at == len(order) {
+			return false
+		}
+		at++
+	}
+	return true
 }
 
 // unique refuses a set of records in which two share an identity.
