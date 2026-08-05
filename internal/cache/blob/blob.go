@@ -49,17 +49,28 @@ func Open(ctx context.Context, bucketURL, prefix string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cache/blob: open %s: %w", bucketURL, err)
 	}
+	return Wrap(b, prefix), nil
+}
 
-	s := &Store{bucket: b, underlying: b}
+// Wrap returns a store over a bucket somebody else opened.
+//
+// It exists because a bucket opened with an explicit credential cannot be
+// opened from a URL: putting a secret key in one would put it in the error
+// message the moment the open failed, which is the one place a credential is
+// most likely to be read by somebody who should not have it. So the cloud
+// backends build their own client when a job supplies a credential, and hand
+// the bucket here rather than reimplementing the prefixing and the closing.
+func Wrap(bucket *gcblob.Bucket, prefix string) *Store {
+	s := &Store{bucket: bucket, underlying: bucket}
 	if prefix != "" {
 		// A prefix that does not end in a separator would silently merge with
 		// the first characters of every key.
 		if prefix[len(prefix)-1] != '/' {
 			prefix += "/"
 		}
-		s.bucket = gcblob.PrefixedBucket(b, prefix)
+		s.bucket = gcblob.PrefixedBucket(bucket, prefix)
 	}
-	return s, nil
+	return s
 }
 
 // Put implements [cache.Store].

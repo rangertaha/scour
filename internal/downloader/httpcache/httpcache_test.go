@@ -23,6 +23,7 @@ import (
 	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/downloader"
 	"github.com/rangertaha/scour/internal/engine"
+	"github.com/rangertaha/scour/internal/secret"
 
 	_ "github.com/rangertaha/scour/internal/cache/local"
 	_ "github.com/rangertaha/scour/internal/downloader/httpcache"
@@ -786,3 +787,125 @@ func (m memory) Keys(context.Context) iter.Seq2[string, error] {
 }
 
 func (m memory) Close() error { return nil }
+
+// TestACredentialTravelsAsACallAndArrivesAsAValue.
+//
+// The end of the chain the secret store starts: a job document holds
+// secret("name"), the call is unevaluated everywhere it travels, and the
+// backend is handed a credential. This is where those two halves meet, so it is
+// where the claim is worth checking.
+//
+// The values here are obvious placeholders. A test carrying a real-looking key
+// is a test somebody eventually copies into a document.
+func TestACredentialTravelsAsACallAndArrivesAsAValue(t *testing.T) {
+	var given cache.Config
+
+	cache.Register("test-credentials", func(ctx context.Context, cfg cache.Config) (cache.Store, error) {
+		given = cfg
+		return memory{}, nil
+	})
+
+	src := `
+job "news" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+
+  downloader {
+    plugin "cache" {
+      backend    = "test-credentials"
+      bucket     = "pages"
+      access_key = secret("acme-key")
+      secret_key = secret("acme-secret")
+    }
+  }
+}
+`
+	doc, err := engine.Parse([]byte(src), "job.hcl")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+
+	// The document parses and validates with the calls unevaluated: nothing
+	// before the plugin is built has any business resolving them.
+	stored := string(src)
+	for _, leaked := range []string{"PLACEHOLDER-ACCESS-KEY", "PLACEHOLDER-SECRET-KEY"} {
+		if strings.Contains(stored, leaked) {
+			t.Fatal("the fixture itself carries a value, which is not the case under test")
+		}
+	}
+
+	eval := secret.Eval(context.Background(), fakeSecrets{
+		"acme-key":    "PLACEHOLDER-ACCESS-KEY",
+		"acme-secret": "PLACEHOLDER-SECRET-KEY",
+	})
+
+	stage, err := downloader.New(context.Background(), doc.Jobs[0], downloader.Options{Eval: eval})
+	if err != nil {
+		t.Fatalf("new downloader: %v", err)
+	}
+	defer stage.Close()
+
+	if given.AccessKey != "PLACEHOLDER-ACCESS-KEY" || given.SecretKey != "PLACEHOLDER-SECRET-KEY" {
+		t.Errorf("the backend was given %v", given)
+	}
+	if !given.Secret() {
+		t.Error("the config does not report that it carries a credential")
+	}
+}
+
+// TestWithoutAWayToResolveOneTheChainIsRefused, rather than the backend being
+// handed an empty credential and failing later with a message about
+// authentication.
+func TestWithoutAWayToResolveOneTheChainIsRefused(t *testing.T) {
+	src := `
+job "news" {
+  start = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+
+  downloader {
+    plugin "cache" {
+      bucket     = "pages"
+      access_key = secret("acme-key")
+    }
+  }
+}
+`
+	doc, err := engine.Parse([]byte(src), "job.hcl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = downloader.New(context.Background(), doc.Jobs[0],
+		downloader.Options{Eval: secret.Missing(context.Background())})
+	if err == nil {
+		t.Fatal("a node with no secrets built a cache that wanted one")
+	}
+	if !strings.Contains(err.Error(), "acme-key") {
+		t.Errorf("the error does not say which secret: %v", err)
+	}
+}
+
+// fakeSecrets answers without a cluster, which is what [secret.Resolver] is an
+// interface for.
+type fakeSecrets map[string]string
+
+func (f fakeSecrets) Resolve(_ context.Context, name string) ([]byte, error) {
+	value, ok := f[name]
+	if !ok {
+		return nil, fmt.Errorf("no such secret %q", name)
+	}
+	return []byte(value), nil
+}

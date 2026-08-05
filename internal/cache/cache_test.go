@@ -5,6 +5,7 @@ package cache_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"strings"
@@ -190,5 +191,69 @@ func TestNewRefusesAnUnknownBackend(t *testing.T) {
 func TestDefaultBackendIsLocal(t *testing.T) {
 	if cache.DefaultBackend != "local" {
 		t.Errorf("DefaultBackend = %q, want local so a laptop needs nothing installed", cache.DefaultBackend)
+	}
+}
+
+// TestAConfigDoesNotPrintItsCredentials.
+//
+// A config is exactly the sort of thing that ends up in a log line, an error
+// message or a debugger's output, and the default formatting of a struct prints
+// every field. This is the guard that makes the wrong thing not merely
+// discouraged but not what happens.
+func TestAConfigDoesNotPrintItsCredentials(t *testing.T) {
+	// Obvious placeholders. A test that carried a real-looking key would be a
+	// test somebody eventually copies.
+	cfg := cache.Config{
+		Backend:      "s3",
+		Bucket:       "pages",
+		Region:       "eu-west-2",
+		AccessKey:    "PLACEHOLDER-ACCESS-KEY",
+		SecretKey:    "PLACEHOLDER-SECRET-KEY",
+		SessionToken: "PLACEHOLDER-SESSION-TOKEN",
+		Credentials:  `{"type":"service_account","private_key":"PLACEHOLDER-PRIVATE-KEY"}`,
+	}
+
+	for name, printed := range map[string]string{
+		"%v":                fmt.Sprintf("%v", cfg),
+		"%s":                fmt.Sprintf("%s", cfg),
+		"%+v":               fmt.Sprintf("%+v", cfg),
+		"%#v":               fmt.Sprintf("%#v", cfg),
+		"String":            cfg.String(),
+		"in a slog message": fmt.Sprint(cfg),
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, secret := range []string{
+				"PLACEHOLDER-ACCESS-KEY", "PLACEHOLDER-SECRET-KEY",
+				"PLACEHOLDER-SESSION-TOKEN", "PLACEHOLDER-PRIVATE-KEY",
+			} {
+				if strings.Contains(printed, secret) {
+					t.Errorf("a credential was printed:\n%s", printed)
+				}
+			}
+			// And what is safe is still there, or the redaction would have
+			// made the config useless to debug with.
+			for _, want := range []string{"s3", "pages", "eu-west-2"} {
+				if !strings.Contains(printed, want) {
+					t.Errorf("%q was redacted along with the credentials:\n%s", want, printed)
+				}
+			}
+		})
+	}
+}
+
+// TestAConfigKnowsWhetherItCarriesACredential, which is what decides whether a
+// backend builds its own client or lets the SDK find one.
+func TestAConfigKnowsWhetherItCarriesACredential(t *testing.T) {
+	if (cache.Config{Bucket: "pages", Region: "eu-west-2"}).Secret() {
+		t.Error("a config with no credential says it has one")
+	}
+	for name, cfg := range map[string]cache.Config{
+		"an access key": {AccessKey: "PLACEHOLDER"},
+		"a secret key":  {SecretKey: "PLACEHOLDER"},
+		"a google key":  {Credentials: "PLACEHOLDER"},
+	} {
+		if !cfg.Secret() {
+			t.Errorf("a config with %s says it has none", name)
+		}
 	}
 }

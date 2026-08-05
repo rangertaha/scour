@@ -1448,6 +1448,7 @@ four stages is the genuinely new distributed-systems problem here.
 | `internal/classify/store`: shared, versioned, one file per training | Built, tested |
 | The `topic` middleware in the spider | Built, tested |
 | Secrets in a sealed KV bucket, resolved at plugin build | Built, tested |
+| S3 and GCS taking an explicit credential from one | Built, tested |
 | Entity store: typed entities, relations, assertions with provenance | Built, tested |
 | Entity identity resolution, and recognition | Designed, not started |
 | Events as items: tags, fields, time. Parquet archive | Designed. Schema built |

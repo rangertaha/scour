@@ -89,6 +89,19 @@ type Config struct {
 	Endpoint string `hcl:"endpoint,optional"`
 	Profile  string `hcl:"profile,optional"`
 
+	// The credentials, for a job that supplies its own rather than relying on
+	// the environment. Written as `access_key = secret("name")`: the call is
+	// unevaluated everywhere the document travels and becomes a value only
+	// here, on the node building this plugin.
+	//
+	// Nothing stops somebody writing a literal, and nothing can. What the
+	// design can do is make the safe way the easy way and say so, which is why
+	// these are documented as secrets rather than as strings.
+	AccessKey    string `hcl:"access_key,optional"`
+	SecretKey    string `hcl:"secret_key,optional"`
+	SessionToken string `hcl:"session_token,optional"`
+	Credentials  string `hcl:"credentials,optional"`
+
 	// TTL makes a hit older than this a miss. Empty never expires, which is
 	// what an archive wants and what a monitor does not.
 	TTL string `hcl:"ttl,optional"`
@@ -111,13 +124,17 @@ func New(ctx context.Context, cfg plugin.Config) (downloader.Wrapper, error) {
 	}
 
 	store, err := cache.New(ctx, cache.Config{
-		Backend:  c.Backend,
-		Dir:      c.Dir,
-		Bucket:   c.Bucket,
-		Prefix:   c.Prefix,
-		Region:   c.Region,
-		Endpoint: c.Endpoint,
-		Profile:  c.Profile,
+		Backend:      c.Backend,
+		Dir:          c.Dir,
+		Bucket:       c.Bucket,
+		Prefix:       c.Prefix,
+		Region:       c.Region,
+		Endpoint:     c.Endpoint,
+		Profile:      c.Profile,
+		AccessKey:    c.AccessKey,
+		SecretKey:    c.SecretKey,
+		SessionToken: c.SessionToken,
+		Credentials:  c.Credentials,
 	})
 	if err != nil {
 		return nil, err

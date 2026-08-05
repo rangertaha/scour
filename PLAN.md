@@ -220,10 +220,15 @@ credential chain stays as the fallback, so a laptop is unaffected.
 with no cloud credentials in its environment; and the value appearing in neither
 the stored job, a plan, nor `scour show`.
 
-*Where it is:* the store and the resolution are built and tested, including that
-the call resolves in one evaluation context and nowhere else. Teaching the S3
-and GCS backends to take an explicit credential is not done, so a secret can be
-resolved and there is not yet a backend that wants one.
+*Where it is:* built and tested. The store, the resolution, and both cloud
+backends taking a credential from it. The ambient chain stays the default, so a
+laptop and a machine with a role are unaffected.
+
+One thing came out of building it that the plan did not anticipate: an explicit
+credential cannot go in a gocloud bucket URL, because a URL carrying a secret
+key is a secret key in the error message the moment the open fails. So the
+backends build their client directly and hand the bucket to the shared blob
+store, and the URL path is used only when there is nothing to hide.
 
 **Phase 5.75. The entity store.** Typed entities and typed relations, both
 carrying properties, every fact an assertion with provenance, behind a service

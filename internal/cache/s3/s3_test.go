@@ -79,3 +79,44 @@ func TestWithABucketReachesTheOpener(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 }
+
+// TestHalfACredentialIsRefused.
+//
+// An access key with no secret key would otherwise fall through to the ambient
+// chain and succeed or fail for reasons that have nothing to do with what the
+// job asked for, which is the worst kind of failure to debug: it works on the
+// developer's laptop, where a shared config exists, and not in production.
+func TestHalfACredentialIsRefused(t *testing.T) {
+	for name, cfg := range map[string]cache.Config{
+		"no secret key": {Bucket: "pages", AccessKey: "PLACEHOLDER-ACCESS-KEY"},
+		"no access key": {Bucket: "pages", SecretKey: "PLACEHOLDER-SECRET-KEY"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Open(context.Background(), cfg)
+			if err == nil {
+				t.Fatal("half a credential was accepted")
+			}
+			if !strings.Contains(err.Error(), "access key") {
+				t.Errorf("the error does not say what is missing: %v", err)
+			}
+		})
+	}
+}
+
+// TestAnErrorNeverCarriesTheCredential.
+//
+// An error is the most likely thing to be pasted into an issue, and the config
+// that produced it holds a secret key. Wrapping it would be the natural thing
+// to write and exactly the wrong one.
+func TestAnErrorNeverCarriesTheCredential(t *testing.T) {
+	_, err := Open(context.Background(), cache.Config{
+		Bucket:    "pages",
+		AccessKey: "PLACEHOLDER-ACCESS-KEY",
+	})
+	if err == nil {
+		t.Fatal("expected a failure to inspect")
+	}
+	if strings.Contains(err.Error(), "PLACEHOLDER-ACCESS-KEY") {
+		t.Errorf("the error carries the credential: %v", err)
+	}
+}

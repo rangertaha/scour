@@ -52,3 +52,21 @@ func TestWithABucketReachesTheOpener(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 }
+
+// TestCredentialsThatAreNotAServiceAccountKeyAreRefused, and the message does
+// not carry them: an error is the most likely thing to be pasted into an issue.
+func TestCredentialsThatAreNotAServiceAccountKeyAreRefused(t *testing.T) {
+	_, err := Open(context.Background(), cache.Config{
+		Bucket:      "pages",
+		Credentials: "PLACEHOLDER-NOT-A-KEY",
+	})
+	if err == nil {
+		t.Fatal("something that is not a service account key was accepted")
+	}
+	if strings.Contains(err.Error(), "PLACEHOLDER-NOT-A-KEY") {
+		t.Errorf("the error carries the credentials: %v", err)
+	}
+	if !strings.Contains(err.Error(), "service account key") {
+		t.Errorf("the error does not say what was expected: %v", err)
+	}
+}

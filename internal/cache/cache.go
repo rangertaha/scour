@@ -93,6 +93,60 @@ type Config struct {
 	// Profile names an AWS credentials profile. Empty leaves it to the
 	// environment.
 	Profile string
+
+	// AccessKey, SecretKey and SessionToken are an explicit S3 credential.
+	//
+	// Empty leaves it to the SDK's own chain: environment, shared config,
+	// instance role. That is what a laptop and a machine with a role both
+	// want, and it stays the default.
+	//
+	// A job supplies these as `secret("name")`, which is an unevaluated call
+	// everywhere the document travels and becomes a value only on the node
+	// building the plugin. There is deliberately no way to write one as a
+	// literal that is any easier than that: a credential in a config file is a
+	// credential in a backup, in a bug report and in a repository.
+	AccessKey    string
+	SecretKey    string
+	SessionToken string
+
+	// Credentials is an explicit Google credential, as the JSON of a service
+	// account key. Empty leaves it to the application default chain.
+	Credentials string
+}
+
+// Secret reports whether this config carries an explicit credential, which is
+// what decides whether a backend builds its own client or lets the SDK find
+// one.
+func (c Config) Secret() bool {
+	return c.AccessKey != "" || c.SecretKey != "" || c.Credentials != ""
+}
+
+// String redacts the credentials.
+//
+// A config is exactly the sort of thing that ends up in a log line, an error
+// message or a debugger's output, and the default formatting of a struct
+// prints every field. Implementing String and GoString means the wrong thing
+// is not merely discouraged, it is not what happens: `%v`, `%s` and `%#v` all
+// go through here.
+func (c Config) String() string {
+	c.AccessKey, c.SecretKey, c.SessionToken, c.Credentials =
+		redact(c.AccessKey), redact(c.SecretKey), redact(c.SessionToken), redact(c.Credentials)
+
+	return fmt.Sprintf(
+		"cache.Config{Backend:%q Dir:%q Bucket:%q Prefix:%q Region:%q Endpoint:%q Profile:%q "+
+			"AccessKey:%s SecretKey:%s SessionToken:%s Credentials:%s}",
+		c.Backend, c.Dir, c.Bucket, c.Prefix, c.Region, c.Endpoint, c.Profile,
+		c.AccessKey, c.SecretKey, c.SessionToken, c.Credentials)
+}
+
+// GoString is String, so that %#v does not print what %v was careful to hide.
+func (c Config) GoString() string { return c.String() }
+
+func redact(value string) string {
+	if value == "" {
+		return `""`
+	}
+	return "[redacted]"
 }
 
 // DefaultBackend is what an empty [Config.Backend] means. It is the local
