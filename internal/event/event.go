@@ -106,8 +106,8 @@ const DefaultLimit = 1000
 // ErrNotFound is what a read returns for an event that is not there.
 var ErrNotFound = errors.New("event: no such event")
 
-// Store is the event log.
-type Store struct {
+// log is the SQLite implementation of [Store].
+type log struct {
 	db *sql.DB
 }
 
@@ -124,7 +124,7 @@ var anonymous atomic.Uint64
 // An empty directory opens an in-memory store, which is what a test wants and
 // what nothing else should use: an event log that disappears when the process
 // does is one every writer believes it wrote to.
-func Open(dir string) (*Store, error) {
+func Open(dir string) (Store, error) {
 	if dir != "" {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, fmt.Errorf("event: %w", err)
@@ -152,7 +152,7 @@ func Open(dir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	return &log{db: db}, nil
 }
 
 func schema(db *sql.DB) error {
@@ -216,7 +216,7 @@ func ID(name string, tags map[string]string, at time.Time) string {
 // whether a point already existed would have to read before every write, and a
 // crawl re-reading a page is the ordinary case rather than the exception. The
 // id is returned so a caller can read it back.
-func (s *Store) Put(ctx context.Context, e Event) (string, error) {
+func (s *log) Put(ctx context.Context, e Event) (string, error) {
 	if strings.TrimSpace(e.Name) == "" {
 		return "", errors.New("event: an event needs a name")
 	}
@@ -250,7 +250,7 @@ ON CONFLICT (id) DO UPDATE SET
 }
 
 // Get reads one event.
-func (s *Store) Get(ctx context.Context, id string) (*Event, error) {
+func (s *log) Get(ctx context.Context, id string) (*Event, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, name, tags, fields, at, job, url, spec FROM events WHERE id = ?`, id)
 
@@ -269,7 +269,7 @@ func (s *Store) Get(ctx context.Context, id string) (*Event, error) {
 // Newest first because that is what somebody looking at a series wants without
 // asking, and because a bounded query that returned the oldest would answer
 // "what happened when this started" to a question about now.
-func (s *Store) List(ctx context.Context, q Query) ([]*Event, error) {
+func (s *log) List(ctx context.Context, q Query) ([]*Event, error) {
 	where := []string{"1 = 1"}
 	var args []any
 
@@ -333,7 +333,7 @@ SELECT id, name, tags, fields, at, job, url, spec
 
 // Delete removes one event. Removing one that is not there is not an error: the
 // caller wanted it gone and it is.
-func (s *Store) Delete(ctx context.Context, id string) error {
+func (s *log) Delete(ctx context.Context, id string) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM events WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("event: delete %s: %w", id, err)
 	}
@@ -345,7 +345,7 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 // The same promise the entity graph makes: one job's contribution is one
 // delete. A job that turns out to have been reading a page wrongly is removed
 // without rebuilding the store or reasoning about which points it touched.
-func (s *Store) Retract(ctx context.Context, job string) (int64, error) {
+func (s *log) Retract(ctx context.Context, job string) (int64, error) {
 	if job == "" {
 		return 0, errors.New("event: retract needs a job")
 	}
@@ -362,7 +362,7 @@ func (s *Store) Retract(ctx context.Context, job string) (int64, error) {
 //
 // The way in for somebody who has an event store and does not know what is in
 // it, which is the same thing [entity.Store.Kinds] is for the graph.
-func (s *Store) Names(ctx context.Context) ([]Series, error) {
+func (s *log) Names(ctx context.Context) ([]Series, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT name, COUNT(*), MIN(at), MAX(at)
   FROM events
@@ -399,7 +399,7 @@ type Series struct {
 }
 
 // Close releases the store.
-func (s *Store) Close() error { return s.db.Close() }
+func (s *log) Close() error { return s.db.Close() }
 
 // matches reports whether every wanted tag is present with that value.
 func matches(have, want map[string]string) bool {

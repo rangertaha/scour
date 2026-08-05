@@ -96,7 +96,7 @@ func runService(ctx context.Context, a *App, path, join string) error {
 	}
 
 	if c := doc.Event; c != nil {
-		store, err := event.Open(c.Dir)
+		store, err := event.New(ctx, event.Config{Dir: c.Dir})
 		if err != nil {
 			return Failedf("%v", err)
 		}

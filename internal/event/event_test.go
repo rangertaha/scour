@@ -6,13 +6,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/rangertaha/scour/internal/event"
+	"github.com/rangertaha/scour/internal/event/eventtest"
 )
 
-func store(t *testing.T) *event.Store {
+func store(t *testing.T) event.Store {
 	t.Helper()
 
 	s, err := event.Open("")
@@ -362,5 +364,41 @@ func TestTwoInMemoryStoresAreTwoStores(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("one store's events were visible in another: %+v", got)
+	}
+}
+
+// TestEveryRegisteredBackendKeepsTheContract.
+//
+// It walks what this build has registered rather than naming them, so a backend
+// somebody adds later is held to the contract by existing. See [eventtest], and
+// the same test in internal/entity.
+func TestEveryRegisteredBackendKeepsTheContract(t *testing.T) {
+	backends := event.Backends()
+	if len(backends) == 0 {
+		t.Fatal("no backend is registered, so this asserts nothing")
+	}
+
+	for _, name := range backends {
+		t.Run(name, func(t *testing.T) {
+			eventtest.Run(t, func(t *testing.T) eventtest.Log {
+				s, err := event.New(context.Background(), event.Config{Backend: name})
+				if err != nil {
+					t.Fatalf("open %s: %v", name, err)
+				}
+				t.Cleanup(func() { s.Close() })
+				return s
+			})
+		})
+	}
+}
+
+// TestAnUnknownBackendIsRefusedByName.
+func TestAnUnknownBackendIsRefusedByName(t *testing.T) {
+	_, err := event.New(context.Background(), event.Config{Backend: "nosuchdb"})
+	if err == nil {
+		t.Fatal("a backend nobody registered was opened")
+	}
+	if !strings.Contains(err.Error(), "nosuchdb") || !strings.Contains(err.Error(), event.Backend) {
+		t.Errorf("the refusal does not name what was asked for and what there is: %v", err)
 	}
 }
