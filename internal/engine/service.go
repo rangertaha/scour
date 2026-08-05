@@ -31,6 +31,7 @@ import (
 type Service struct {
 	Entity *EntityService `hcl:"entity,block" json:"entity,omitempty"`
 	Event  *EventService  `hcl:"event,block" json:"event,omitempty"`
+	Topic  *TopicService  `hcl:"topic,block" json:"topic,omitempty"`
 }
 
 // EntityService configures the entity graph and the service in front of it.
@@ -84,6 +85,41 @@ func (e *EventService) Wait() (time.Duration, error) {
 	}
 	if d <= 0 {
 		return 0, fmt.Errorf("event: timeout: %s is not a length of time to wait", e.Timeout)
+	}
+	return d, nil
+}
+
+// TopicService configures the trained topics a cluster shares.
+//
+// A topic is what makes a focused crawl focused, and two nodes working one job
+// have to agree about what the job is looking for. A node with an older
+// training would score the same page differently and put it somewhere else in
+// the frontier, which reads as the crawl being unlucky rather than as the nodes
+// disagreeing.
+type TopicService struct {
+	// Dir is where the trained topics live.
+	Dir string `hcl:"dir" json:"dir"`
+
+	// URL is the bus to answer on. Empty starts one in this process.
+	URL string `hcl:"url,optional" json:"url,omitempty"`
+
+	// Timeout is how long one request may take. Empty means
+	// [DefaultServiceTimeout].
+	Timeout string `hcl:"timeout,optional" json:"timeout,omitempty"`
+}
+
+// Wait is how long one request to the topic service may take.
+func (t *TopicService) Wait() (time.Duration, error) {
+	if t == nil || t.Timeout == "" {
+		return DefaultServiceTimeout, nil
+	}
+
+	d, err := time.ParseDuration(t.Timeout)
+	if err != nil {
+		return 0, fmt.Errorf("topic: timeout: %w", err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("topic: timeout: %s is not a length of time to wait", t.Timeout)
 	}
 	return d, nil
 }
@@ -149,9 +185,9 @@ func ParseService(src []byte, filename string) (*Service, error) {
 func (s *Service) Validate() error {
 	var problems []error
 
-	if s.Entity == nil && s.Event == nil {
+	if s.Entity == nil && s.Event == nil && s.Topic == nil {
 		problems = append(problems, fmt.Errorf(
-			"a service document configures nothing. Add an `entity` or an `event` block saying where the store lives"))
+			"a service document configures nothing. Add an `entity`, an `event` or a `topic` block saying where the store lives"))
 	}
 	if s.Entity != nil {
 		if s.Entity.Dir == "" {
@@ -166,6 +202,14 @@ func (s *Service) Validate() error {
 			problems = append(problems, fmt.Errorf("event: no dir, and events have to live somewhere"))
 		}
 		if _, err := s.Event.Wait(); err != nil {
+			problems = append(problems, err)
+		}
+	}
+	if s.Topic != nil {
+		if s.Topic.Dir == "" {
+			problems = append(problems, fmt.Errorf("topic: no dir, and trained topics have to live somewhere"))
+		}
+		if _, err := s.Topic.Wait(); err != nil {
 			problems = append(problems, err)
 		}
 	}

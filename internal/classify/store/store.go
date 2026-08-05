@@ -70,9 +70,13 @@ func Open(dir string) (*Store, error) {
 	return &Store{dir: dir, loaded: map[string]classify.Classifier{}}, nil
 }
 
-// saved is what a file holds: enough to rebuild the classifier, and enough for
+// Topic is what a file holds: enough to rebuild the classifier, and enough for
 // a person opening it to know what they are looking at.
-type saved struct {
+//
+// Exported because it is what travels when a store is reached over a bus. A
+// [classify.Classifier] cannot: it is behaviour, and the thing a caller
+// actually needs is the model, so that scoring happens where the pages are.
+type Topic struct {
 	Kind    string             `json:"kind"`
 	Name    string             `json:"name"`
 	Version int                `json:"version"`
@@ -92,12 +96,19 @@ func (s *Store) Put(kind string, cfg classify.Config) error {
 		return err
 	}
 
-	path := s.path(ref)
-	if _, err := os.Stat(path); err == nil {
+	if _, err := os.Stat(s.path(ref)); err == nil {
 		return fmt.Errorf("classify: %s already exists. Train a new version rather than replacing one", ref)
 	}
+	return s.write(kind, cfg)
+}
 
-	body, err := json.MarshalIndent(saved{
+// write puts a topic on disk, whether or not one was there.
+//
+// Shared by [Store.Put] and [Store.Replace] so the two cannot drift into
+// writing different files: the difference between them is the check above and
+// nothing else.
+func (s *Store) write(kind string, cfg classify.Config) error {
+	body, err := json.MarshalIndent(Topic{
 		Kind:    kind,
 		Name:    cfg.Name,
 		Version: cfg.Version,
@@ -109,7 +120,8 @@ func (s *Store) Put(kind string, cfg classify.Config) error {
 		return fmt.Errorf("classify: %w", err)
 	}
 
-	if err := os.WriteFile(path, body, 0o640); err != nil {
+	ref := classify.Ref{Name: cfg.Name, Version: cfg.Version}
+	if err := os.WriteFile(s.path(ref), body, 0o640); err != nil {
 		return fmt.Errorf("classify: %w", err)
 	}
 	return nil
@@ -140,7 +152,7 @@ func (s *Store) Get(ctx context.Context, ref classify.Ref) (classify.Classifier,
 		return nil, fmt.Errorf("classify: %w", err)
 	}
 
-	var from saved
+	var from Topic
 	if err := json.Unmarshal(body, &from); err != nil {
 		return nil, fmt.Errorf("classify: %s: %w", ref, err)
 	}
@@ -158,6 +170,80 @@ func (s *Store) Get(ctx context.Context, ref classify.Ref) (classify.Classifier,
 
 	s.loaded[ref.String()] = built
 	return built, nil
+}
+
+// Load reads what a file holds, without building a classifier from it.
+//
+// This is what crosses a bus. Scoring does not: the scheduler scores every URL
+// it is offered and the spider every page it reads, so a request per page would
+// put the network in the middle of the hottest loop there is. The model goes to
+// the pages, the same rule that keeps a fetched body out of the bus and sends a
+// cache key instead.
+func (s *Store) Load(ref classify.Ref) (Topic, error) {
+	if err := check(ref); err != nil {
+		return Topic{}, err
+	}
+
+	body, err := os.ReadFile(s.path(ref))
+	switch {
+	case os.IsNotExist(err):
+		return Topic{}, fmt.Errorf("%w: %s", ErrNotTrained, ref)
+	case err != nil:
+		return Topic{}, fmt.Errorf("classify: %w", err)
+	}
+
+	var from Topic
+	if err := json.Unmarshal(body, &from); err != nil {
+		return Topic{}, fmt.Errorf("classify: %s: %w", ref, err)
+	}
+	return from, nil
+}
+
+// Replace overwrites a version that is already there.
+//
+// The update of CRUD, and the one operation here that can break a promise: a
+// job pins climate@7 precisely so that somebody else retraining cannot change
+// what it does, and this changes what climate@7 means. [Store.Put] refuses for
+// that reason and is what ordinary retraining uses, by writing the next
+// version.
+//
+// It exists anyway because the alternative is worse. A model trained on a
+// corpus that turned out to be mislabelled is wrong, and without this the only
+// ways to correct it are to delete and re-put, which is the same thing with a
+// gap in the middle where a node reads a topic that is not there, or to leave
+// it and let every job pinning it stay wrong.
+func (s *Store) Replace(kind string, cfg classify.Config) error {
+	ref := classify.Ref{Name: cfg.Name, Version: cfg.Version}
+	if err := check(ref); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	delete(s.loaded, ref.String())
+	s.mu.Unlock()
+
+	return s.write(kind, cfg)
+}
+
+// Delete removes one trained version.
+//
+// One version and never a name: deleting every training of a subject would
+// break each job that pinned any of them, and a job pins a version precisely so
+// that somebody else's tidying cannot change what it does. Removing what is not
+// there is not an error, because the caller wanted it gone and it is.
+func (s *Store) Delete(ref classify.Ref) error {
+	if err := check(ref); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.loaded, ref.String())
+
+	if err := os.Remove(s.path(ref)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("classify: %w", err)
+	}
+	return nil
 }
 
 // Names lists what has been trained, as jobs would write it.

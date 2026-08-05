@@ -11,6 +11,7 @@ import (
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/bus"
+	"github.com/rangertaha/scour/internal/classify/store"
 	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/entity"
 	"github.com/rangertaha/scour/internal/event"
@@ -109,6 +110,21 @@ func runService(ctx context.Context, a *App, path, join string) error {
 		stop = append(stop, service.Close)
 
 		a.Warnf("events: serving %s on %s\n", c.Dir, bus.EventSubject("*"))
+	}
+
+	if c := doc.Topic; c != nil {
+		topics, err := store.Open(c.Dir)
+		if err != nil {
+			return Failedf("%v", err)
+		}
+
+		service, err := conn.ServeTopics(topics)
+		if err != nil {
+			return Failedf("%v", err)
+		}
+		stop = append(stop, service.Close)
+
+		a.Warnf("topics: serving %s on %s\n", c.Dir, bus.TopicSubject("*"))
 	}
 
 	if conn.Embedded() {

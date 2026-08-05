@@ -559,7 +559,7 @@ asymmetry is the politeness rule rather than a limitation to be lifted.
 ### Running the shared stores
 
 ```
-scour service <file.hcl>    Run the entity graph and the event store
+scour service <file.hcl>    Run the entity graph, the event store and the topics
 ```
 
 #### `scour service <file.hcl>`
@@ -587,6 +587,10 @@ entity {
 event {
   dir = "./events"
 }
+
+topic {
+  dir = "./topics"
+}
 ```
 
 | Field | Effect |
@@ -599,9 +603,16 @@ event {
 $ scour service service.hcl
 entities: serving ./graph on scour.entity.*
 events: serving ./events on scour.event.*
+topics: serving ./topics on scour.topic.*
 listening on nats://127.0.0.1:41923
 ready. Interrupt to stop
 ```
+
+**A topic travels; a page does not.** A client fetches a trained topic once,
+when the chain is built, and scores locally from then on. The scheduler scores
+every URL it is offered and the spider every page it reads, so a request per
+page would put the network in the hottest loop in the crawl, which is the same
+reason a fetched body never crosses the bus and a cache key goes instead.
 
 **Both stores have one writer**, because both are SQLite. That is why they are
 behind a service rather than a file each node opens: a cluster where every node
