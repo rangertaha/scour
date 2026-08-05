@@ -41,6 +41,7 @@ func root(a *cli.App) *ucli.Command {
 			cli.Spec(a),
 			cli.Try(a),
 			cli.Crawl(a),
+			cli.Train(a),
 			cli.Defaults(a),
 			cli.Serve(a),
 			cli.Secret(a),

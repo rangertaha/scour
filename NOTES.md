@@ -1055,7 +1055,7 @@ worth being able to read at once.
 | Nodes | NATS KV, `SCOUR_NODES`, with a TTL | Not durable state. A row outliving its process is a lie |
 | Frontier and hosts | SQLite, one shared database | Politeness is shared, so this cannot be partitioned |
 | Records and marks | SQLite, one database per job | Unbounded, unshared, and deleted by unlinking |
-| Learned locators | The job document itself | A guess should be readable and correctable |
+| Learned locators | The job document itself, marked | A guess should be readable and correctable |
 | Exports | Whatever the exporters write | Copies. Not the record of truth |
 
 ### What that buys
@@ -1452,6 +1452,8 @@ four stages is the genuinely new distributed-systems problem here.
 | Exporters: parquet, nats, sqlite | Not started |
 | Jobs and nodes in NATS KV, watched | Built, tested |
 | `internal/node`: join, watch, serve. Two nodes, one job, work on both | Built, tested |
+| `internal/train`: locators induced from the corpus, written back | Built, tested |
+| `scour serve`, `scour secret`, `scour train` | Built, tested |
 | Frontier in SQLite, one shared database | Built, tested, benchmarked |
 | Records in SQLite, one database per job | Decided. The piece most likely to move |
 | Run state in a KV bucket of its own | Decided, not started |

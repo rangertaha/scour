@@ -333,30 +333,39 @@ writes the locators back into the document.
 
 **The locators go into the document, as text.** Not into a model file, not into
 a database. The reason is that induction is a guess and a guess should be
-readable: `xpath = ["//h1[@class='headline']"]` is something a person can look
-at, disagree with, correct, and commit. A binary model can only be trusted or
-retrained.
+readable: `css = [".article-body h1"]` is something a person can look at,
+disagree with, correct, and commit. A binary model can only be trusted or
+retrained. It also means the crawl has no runtime dependency on anything
+training produced: the document is complete.
+
+**It reads the cache and never the network,** so training is free, repeatable
+and offline. The same corpus produces the same locators, which is what makes a
+change to induction measurable rather than merely different.
 
 ```console
 $ scour train news.hcl
-read 312 pages from the cache
-
-article
-  title      //h1[@class='headline']         308/312 pages
-  published  //time/@datetime                295/312
-  body       //div[@class='article-body']    311/312
-  author     //span[@class='byline']          97/312   weak
-
-Writing to news.hcl would change 4 properties. Pass --write to do it.
+read 312 cached pages
+  article.title                .headline                    308/312 pages  "Something happened yesterday"
+  article.published_time       time[itemprop="datePublished"] 295/312 pages  "2026-08-04T09:15:00Z"
+  article.body                 .article-body                311/312 pages  4812 characters
+  article.author               kept, and never replaced
+nothing written. Pass --write to edit news.hcl
 ```
 
 | Flag | Effect |
 | --- | --- |
-| `-i`, `--example <address>=<value>` | Teach it one answer. Repeatable |
-| `--url <url>` | Which cached page the examples are from |
-| `--write` | Edit the document in place instead of printing what would change |
+| `--job <name>` | Which job, if the document holds several |
 | `--item <name>` | Only this shape |
+| `--dir <path>` | Where the cache is |
+| `--pages <n>` | How many cached pages to learn from |
 | `--min <n>` | Ignore a locator matching fewer than this share of pages, as a percentage |
+| `--write` | Edit the document instead of printing what would change |
+
+**Teaching by example goes in the document,** not on the command line. A
+property's `examples` are values it is known to have taken, and given the answer
+induction can look for the node that produces it and generalise across the
+corpus. Written down, an example survives; typed into a shell, it is gone when
+the terminal is.
 | `--replace` | Also replace locators that are already there |
 
 ##### Teaching it an answer

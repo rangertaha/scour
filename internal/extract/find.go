@@ -103,6 +103,12 @@ func (p *propPlan) semantic(page *page, within *html.Node) *Value {
 
 // byWellKnownElement covers the elements that mean something without anybody
 // having said so: a page's `<title>`, its `<h1>`, its `<time>`.
+//
+// Inside the article first, where there is one. Nearly every page has a second
+// `<h1>` in its masthead, and taking the first one in document order finds the
+// name of the site rather than the name of the story. That was not a
+// hypothetical: induction learned it, froze it into a selector, and the test
+// that caught it was about the selector.
 func (p *propPlan) byWellKnownElement(within *html.Node) *html.Node {
 	var tags []string
 
@@ -115,6 +121,21 @@ func (p *propPlan) byWellKnownElement(within *html.Node) *html.Node {
 		tags = []string{"article", "main"}
 	default:
 		return nil
+	}
+
+	for _, container := range []string{"article", "main"} {
+		inside := firstElement(within, container)
+		if inside == nil {
+			continue
+		}
+		for _, tag := range tags {
+			if tag == container {
+				continue
+			}
+			if node := firstElement(inside, tag); node != nil {
+				return node
+			}
+		}
 	}
 
 	for _, tag := range tags {

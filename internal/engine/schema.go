@@ -243,9 +243,18 @@ type Property struct {
 	// Transforms are registered functions applied to what was found, in order.
 	Transforms []string `hcl:"transforms,optional" json:"transforms,omitempty"`
 
-	// XPath and CSS are locators taught rather than induced.
+	// XPath and CSS are locators. They may be taught or induced, and which one
+	// they are decides whether `scour train` may replace them.
 	XPath []string `hcl:"xpath,optional" json:"xpath,omitempty"`
 	CSS   []string `hcl:"css,optional" json:"css,omitempty"`
+
+	// Induced marks a locator this wrote rather than a person.
+	//
+	// It is the rule that makes training converge instead of going in circles:
+	// only what training wrote is ever replaced, so a correction survives
+	// every later guess. In the document it is a comment beside the locator,
+	// which is why it is not an attribute somebody has to maintain.
+	Induced bool `json:"induced,omitempty"`
 
 	// Entity names the kind of thing this property refers to, for a property
 	// typed entity: "person", "organisation". What is extracted is a name;
