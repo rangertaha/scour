@@ -78,6 +78,8 @@ func Run(t *testing.T, open Open) {
 	t.Run("OneJobsContributionIsOneDelete", func(t *testing.T) { testRetract(t, open) })
 	t.Run("TypesAndEntitiesCarryTopics", func(t *testing.T) { testTopics(t, open) })
 	t.Run("AMergeIsProposedRecordedAndUndoable", func(t *testing.T) { testResolution(t, open) })
+	t.Run("AProposedMergeIsAcceptedByTheStore", func(t *testing.T) { testAProposedMergeIsAcceptedByTheStore(t, open) })
+	t.Run("RetractKeepsWhatIsStillAsserted", func(t *testing.T) { testRetractKeepsWhatIsStillAsserted(t, open) })
 }
 
 func said(job, url string) entity.Provenance {
@@ -531,5 +533,123 @@ func testResolution(t *testing.T, open Open) {
 	}
 	if one.Name != "A. Doe" {
 		t.Errorf("Get(initial) = %+v, want it back as itself", one)
+	}
+}
+
+// testRetractKeepsWhatIsStillAsserted: the sweeps take what nobody says any
+// more, and nothing else.
+//
+// Three ways that went wrong, all of them silent. A topic on a type was deleted
+// by the next Retract of any job at all, because a type has no row of its own
+// and the sweep looked for one. A property whose entity was removed in the same
+// Retract survived as an orphan, still readable, and reattached itself if the
+// same name was asserted again, since ids come from the name. And a merge the
+// store had proposed itself was refused, because the proposal counted people
+// and the check counted spellings.
+func testRetractKeepsWhatIsStillAsserted(t *testing.T, open Open) {
+	ctx := context.Background()
+	g := open(t)
+
+	keep := said("keep", "https://a.example/1")
+	drop := said("drop", "https://b.example/2")
+
+	acme, err := g.Assert(ctx, "company", "Acme", keep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Tag(ctx, entity.KindID("company"), "markets@1", keep); err != nil {
+		t.Fatal(err)
+	}
+
+	// An entity only the withdrawn job asserted, described by the job that
+	// stays: the property has to go with the entity.
+	ghost, err := g.Assert(ctx, "company", "Ghost", drop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Describe(ctx, ghost, "domain", "ghost.example", 0, keep); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := g.Retract(ctx, "drop"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The type's topic is still there. Nothing said otherwise.
+	topics, err := g.Topics(ctx, entity.KindID("company"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topics) != 1 || topics[0].Value != "markets@1" {
+		t.Errorf("the type's topic = %+v, want it kept: no job withdrew it", topics)
+	}
+
+	// The withdrawn entity is gone, and so is what was said about it.
+	if _, err := g.Get(ctx, ghost); err == nil {
+		t.Error("an entity only the withdrawn job asserted is still there")
+	}
+	if orphans, err := g.Properties(ctx, ghost); err != nil {
+		t.Fatal(err)
+	} else if len(orphans) != 0 {
+		t.Errorf("a property outlived the entity it described: %+v", orphans)
+	}
+
+	// And what the remaining job said is untouched.
+	if _, err := g.Get(ctx, acme); err != nil {
+		t.Errorf("the remaining job's entity was swept: %v", err)
+	}
+
+	// Retracting a job that never existed changes nothing, which is what makes
+	// the sweeps safe to run every time.
+	if _, err := g.Retract(ctx, "nosuchjob"); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := g.Topics(ctx, entity.KindID("company")); err != nil {
+		t.Fatal(err)
+	} else if len(again) != 1 {
+		t.Errorf("retracting a job that never existed deleted a topic: %+v", again)
+	}
+}
+
+// testAProposedMergeIsAcceptedByTheStore.
+//
+// The proposal and the check have to count the same things. They did not: the
+// proposal counted people, resolving merges, and the check counted spellings,
+// so a graph with one already-merged pair made the store refuse a merge it had
+// itself just proposed, and say something had changed since when nothing had.
+func testAProposedMergeIsAcceptedByTheStore(t *testing.T, open Open) {
+	ctx := context.Background()
+	g := open(t)
+	from := said("news", "https://a.example/1")
+
+	full, err := g.Assert(ctx, "person", "Alex Doe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	longer, err := g.Assert(ctx, "person", "Alexander Doe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Assert(ctx, "person", "A. Doe", from); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two spellings of one person, said so by hand.
+	if err := g.Merge(ctx, longer, full, entity.RuleManual, from); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now there is one person the initial could be, so it is proposed.
+	proposed, err := g.Candidates(ctx, "person", "A. Doe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposed) != 1 {
+		t.Fatalf("Candidates = %+v, want the one proposal", proposed)
+	}
+
+	// And what the store proposed, the store accepts.
+	if err := g.Merge(ctx, proposed[0].From, proposed[0].To, proposed[0].Rule, from); err != nil {
+		t.Fatalf("the store refused a merge it proposed itself: %v", err)
 	}
 }

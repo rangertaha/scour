@@ -204,8 +204,19 @@ func unambiguous(ctx context.Context, tx *sql.Tx, kind, loser, keeper string) (b
 		return true, nil
 	}
 
-	rows, err := tx.QueryContext(ctx,
-		`SELECT id, name FROM entities WHERE kind = ?`, kind)
+	// Canonical rows, not raw ones, because that is what [Store.Candidates]
+	// counted when it proposed the merge. Counting raw rows here meant the
+	// store refused a merge it had proposed itself, and said something had
+	// been asserted since when nothing had: three spellings where two are
+	// already merged look like one full name to Candidates and two to this.
+	// With `merge = true` the step turned that refusal into an error, the wave
+	// aborted, and the crawl discarded every record it had produced.
+	rows, err := tx.QueryContext(ctx, `
+SELECT DISTINCT c.id, c.name
+  FROM entities e
+  JOIN resolved r ON r.id = e.id
+  JOIN entities c ON c.id = r.canonical
+ WHERE e.kind = ?`, kind)
 	if err != nil {
 		return false, fmt.Errorf("entity: merge: %w", err)
 	}

@@ -682,13 +682,25 @@ func (s *graph) Retract(ctx context.Context, job string) (int64, error) {
 		// Then what nobody asserts any more.
 		`DELETE FROM relations WHERE assertions = 0`,
 		`DELETE FROM properties WHERE assertions = 0`,
-		// And what has lost its subject. The subject is an entity or a
-		// relation and SQLite cannot express a foreign key to either, so the
-		// sweep is here rather than in a cascade.
-		`DELETE FROM properties WHERE subject NOT IN (
-			SELECT id FROM entities UNION SELECT id FROM relations)`,
 		`DELETE FROM entities WHERE assertions = 0
 		   AND id NOT IN (SELECT from_id FROM relations UNION SELECT to_id FROM relations)`,
+		// And last, what has lost its subject.
+		//
+		// Last, because the entity delete above is what makes a subject
+		// disappear: sweeping first left a property whose entity was removed in
+		// the same Retract, still readable, and reattaching silently if the
+		// same name was asserted again, since ids are derived from the name.
+		//
+		// A subject is an entity, a relation, or a type, and SQLite cannot
+		// express a foreign key to one of three, so the sweep is here rather
+		// than in a cascade. A type is the one that has no row of its own: it
+		// is a `kind:` id, so the check is that some entity still has that
+		// kind. Without that clause every topic anybody put on a type was
+		// deleted by the next Retract of any job at all, while the assertion
+		// that made it survived, so nothing could ever restore it.
+		`DELETE FROM properties
+		  WHERE subject NOT IN (SELECT id FROM entities UNION SELECT id FROM relations)
+		    AND subject NOT IN (SELECT ` + "'" + KindPrefix + `' || kind FROM entities)`,
 	} {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return 0, fmt.Errorf("entity: retract %s: %w", job, err)
