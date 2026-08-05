@@ -62,10 +62,21 @@ indexes:
 Postgres needs the day sharding is not enough. Writing it in from the start
 makes that a dialect change rather than a rewrite.
 
-*Proved by:* a recorded frontier handed out in the order each policy claims; a
-lease that expires and is handed out again; a host that has just been fetched
-being skipped until it is due; and two jobs on one host sharing its allowance
-rather than each getting one.
+*Proved by:* `internal/frontier/frontiertest`, which every implementation runs.
+The order each policy claims; a lease that expires and is handed out again; a
+host skipped until it is due; a slow host not stalling a fast one; and a failure
+retried three times and then abandoned.
+
+**And measured by the same package.** A crawl leases once per page, so lease
+cost is the ceiling on how fast anything downstream can go, and two
+implementations are compared on identical workloads rather than on whatever
+each author found convenient.
+
+The in-memory reference is deliberately naive: it scans, so a lease is O(n) and
+costs 45µs over a thousand URLs and 4.3ms over a hundred thousand. That is the
+bar rather than the target. A durable frontier ordering by an index should be
+roughly flat across both, and if it is not, the index is wrong — which is a
+thing to find out in a benchmark rather than at two hundred thousand pages.
 
 **Phase 3.5. `scour try`, the development loop.** One page, fetched once,
 cached, and re-run against the cache from then on.
@@ -286,7 +297,7 @@ has numbers to compare against the ones on `main`.
 | Job document: parse, validate, chains, DAG, diff | Done |
 | 1. The chain | Not started |
 | 2. Downloader and the four middleware | Not started |
-| 3. Frontier and scheduler | Not started. Store decided |
+| 3. Frontier and scheduler | Contract, policies and benchmarks built. Durable store not started |
 | 3.5. `scour try`, the development loop | Not started |
 | 4. Spider | Not started |
 | 4.5. `scour train`, locators into the document | Not started |
