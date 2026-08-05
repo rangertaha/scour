@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The cache is the corpus · scour</title>
+<meta name="description" content="Bodies are kept because understanding a page is cheap and fetching it is not.">
+<link rel="stylesheet" href="book.css">
+</head>
+<body>
+<div class="shell">
+  <nav class="nav">
+    <p class="brand"><a href="index.html">scour</a></p>
+    <p class="brand-sub">a focused crawler</p>
+    <ol>
+      <li><a href="index.html">The shape</a></li>
+      <li><a href="job.html">The job</a></li>
+      <li><a href="chains.html">Chains</a></li>
+      <li><a href="downloader.html">Fetching</a></li>
+      <li><a href="cache.html" aria-current="page">The corpus</a></li>
+      <li><a href="frontier.html">The frontier</a></li>
+      <li><a href="items.html">Items</a></li>
+      <li><a href="pipeline.html">The pipeline</a></li>
+      <li><a href="storage.html">Storage</a></li>
+    </ol>
+    <p class="nav-foot">Source and working notes:
+    <a href="https://github.com/rangertaha/scour">github.com/rangertaha/scour</a></p>
+  </nav>
+
+  <main>
+    <section class="page">
+      <p class="eyebrow">Chapter five</p>
+      <h1>The cache is the corpus</h1>
+      <p class="lede">Fetching is the expensive, rate-limited, impolite part of
+      crawling. Understanding a page is neither. Keeping the bodies is what lets
+      extraction be re-run, and re-run again after a change to how it works,
+      without asking a site for the same page twice.</p>
+
+      <figure>
+        <div class="well">
+          <svg viewBox="0 0 900 320" role="img" aria-label="A URL is hashed to a key. The key holds the body exactly as the server sent it, and the same key with a dot-meta suffix holds the status, final URL, headers and fetch time. Reading back requires both; decoding uses the headers from the sidecar.">
+            <defs>
+              <marker id="k1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+              </marker>
+              <marker id="k1k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="var(--blueprint)"/>
+              </marker>
+            </defs>
+
+            <text class="dl" x="24" y="52">https://example.com/price</text>
+            <line class="ln" x1="24" y1="64" x2="240" y2="64"/>
+            <text class="dl-sm" x="24" y="84">sha-256, because a URL is not a filename</text>
+
+            <line class="ln" x1="260" y1="60" x2="316" y2="60" marker-end="url(#k1)"/>
+
+            <rect class="box-key" x="330" y="34" width="300" height="46"/>
+            <text class="dl-key" x="346" y="63">4b1667...cc28b3cb05df</text>
+
+            <path class="ln-key" d="M420 80 L420 116" marker-end="url(#k1k)"/>
+            <path class="ln-key" d="M560 80 L560 116" marker-end="url(#k1k)"/>
+
+            <rect class="box" x="300" y="120" width="200" height="112"/>
+            <text class="dl" x="316" y="144">&lt;key&gt;</text>
+            <text class="dl-sm" x="316" y="168">f6 e5 ed e0</text>
+            <text class="dl-sm" x="316" y="190">the bytes the server sent,</text>
+            <text class="dl-sm" x="316" y="206">in the encoding it sent them</text>
+
+            <rect class="box" x="520" y="120" width="240" height="112"/>
+            <text class="dl" x="536" y="144">&lt;key&gt;.meta</text>
+            <text class="dl-sm" x="536" y="168">status · final url</text>
+            <text class="dl-sm" x="536" y="186">headers · fetched at</text>
+            <text class="dl-sm" x="536" y="212">content-type: charset=windows-1251</text>
+
+            <path class="ln-key" d="M760 176 L806 176 L806 262 L500 262" marker-end="url(#k1k)"/>
+            <text class="dl-key" x="512" y="266">decodes to</text>
+
+            <rect class="box" x="300" y="244" width="180" height="36"/>
+            <text class="dl" x="390" y="268" text-anchor="middle">цена</text>
+
+            <text class="dl-sm" x="24" y="300">without the sidecar the same bytes decode to mojibake, and nothing about the resulting text says it went wrong</text>
+          </svg>
+        </div>
+        <figcaption>One page, two keys. The body is kept exactly as it arrived;
+        everything needed to read it back correctly is kept beside it.</figcaption>
+      </figure>
+
+      <h2>What is stored, and why in two keys</h2>
+
+      <p>The cache itself is deliberately dumb: a key maps to bytes, and nothing
+      else. That is what lets the same interface be a directory on a laptop and
+      a bucket shared by a fleet, with the local filesystem, S3 and Google Cloud
+      Storage behind one contract that all three are held to by the same test
+      suite.</p>
+
+      <p>Using two of those keys per page is the middleware's business and none
+      of the store's. The sidecar exists because a body on its own is not
+      re-readable. A page in windows-1251 that declared its encoding in the
+      <code>Content-Type</code> header and nowhere else decodes correctly on the
+      way in and into mojibake on the way back out.</p>
+
+      <p>This could have lived in the records database instead. It lives in the
+      cache because a corpus that cannot be read without a second database that
+      happens to still exist is not a corpus.</p>
+
+      <p>The body is written first. A hit needs both and reads the sidecar to
+      decide, so an interrupted write leaves an entry that is a clean miss,
+      never a sidecar promising a body that is not there.</p>
+
+      <h2>What the cache holds is what the server sent</h2>
+
+      <p>Not decoded output. That is the more useful archive: detection
+      improves, and original bytes can be decoded again to get a better answer,
+      while a corpus decoded on the way in has its mistakes baked in until
+      somebody re-crawls. It is smaller, too, and faithful enough to
+      revalidate.</p>
+
+      <p>The cost is that every read decodes. For a corpus re-analysed a few
+      hundred pages at a time that is nothing, and it buys the ability to be
+      wrong about an encoding and fix it later.</p>
+
+      <div class="note">
+        <span class="tag">A decision that was reversed</span>
+        <p>Decoding was briefly a middleware, sitting at 600 so that what landed
+        in the cache was already UTF-8. That was wrong twice over: it baked
+        today's detection into the archive, and it only applied to bodies read
+        through the downloader's chain, while the spider reads the cache
+        directly by key and never passes through it. It is now a function both
+        callers use, and the cache holds what arrived.</p>
+      </div>
+
+      <h2>A cache that fails does not fail the crawl</h2>
+
+      <p>A read that errors is a miss. A write that errors is logged and
+      dropped. Losing a page that was successfully fetched because the disk that
+      was only ever an optimisation filled up is a bad trade, and the fetch has
+      already been paid for by then.</p>
+
+      <h2>What a job can say about it</h2>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>Setting</th><th>Default</th><th>What it decides</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>backend</code></td><td><code>local</code></td><td>A directory, an S3 bucket or a GCS bucket</td></tr>
+            <tr><td><code>bucket</code>, <code>prefix</code></td><td>none</td><td>Where in it, so one bucket can hold several corpora</td></tr>
+            <tr><td><code>ttl</code></td><td>never</td><td>How old a hit may be. The difference between an archive and a monitor</td></tr>
+            <tr><td><code>statuses</code></td><td><code>[200]</code></td><td>What is worth keeping. A 404 says a URL is dead today, and caching it would keep saying so after the page came back</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre><code>downloader {
+  plugin "cache" {
+    backend = "s3"
+    bucket  = "pages"
+    prefix  = "news/"
+    ttl     = "24h"
+  }
+}</code></pre>
+
+      <p>None of the credentials appear here. A cloud backend that needs one
+      reaches for <code>secret("name")</code>, which is resolved on the node
+      building the plugin and nowhere the job was written down.</p>
+    </section>
+
+  <nav class="pager">
+    <a class="prev" href="downloader.html"><span class="dir">Back</span>Fetching, politely</a>
+    <a class="next" href="frontier.html"><span class="dir">Next</span>What to fetch next</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>
