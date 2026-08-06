@@ -11,6 +11,7 @@ package memory
 
 import (
 	"context"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -97,6 +98,7 @@ func (f *Frontier) Lease(_ context.Context, job string, now time.Time, hold time
 	}
 
 	var best *entry
+	seen := 0
 	for _, hash := range q.order {
 		e := q.byID[hash]
 		switch {
@@ -108,6 +110,19 @@ func (f *Frontier) Lease(_ context.Context, job string, now time.Time, hold time
 		// Politeness first, and it is not negotiable by the policy: a policy
 		// that could override it could hammer one server by choosing badly.
 		if next, seen := f.hosts[e.req.Host]; seen && next.After(now) {
+			continue
+		}
+		// A policy with no ordering wants one of the candidates rather than the
+		// best of them, and reservoir sampling is what makes that uniform:
+		// taking each with probability one over the number seen so far leaves
+		// every candidate equally likely. Using Less as a coin flip instead
+		// made `random` overwhelmingly pick the most recently added, which is
+		// insertion order wearing a disguise.
+		seen++
+		if _, unordered := f.policy.(frontier.Unordered); unordered {
+			if rand.IntN(seen) == 0 {
+				best = e
+			}
 			continue
 		}
 		if best == nil || f.policy.Less(e.req, best.req) {

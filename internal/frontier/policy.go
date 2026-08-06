@@ -87,7 +87,20 @@ func (depth) Less(a, b Request) bool {
 	if a.Depth != b.Depth {
 		return a.Depth > b.Depth
 	}
-	return a.Discovered.After(b.Discovered)
+	if !a.Discovered.Equal(b.Discovered) {
+		return a.Discovered.After(b.Discovered)
+	}
+	// A full tie is the ordinary case, not the rare one: every link found on
+	// one page is stamped with that page's depth and one discovery time, so a
+	// page's whole link set ties on both columns. With nothing after them the
+	// two implementations disagreed — SQLite's rowid tie-break handed out the
+	// last link on the page and the memory frontier's scan kept the first,
+	// which for a depth-first policy is the opposite of what it means.
+	//
+	// The hash orders them the same way everywhere, and reversed to match
+	// SQLite's DESC, so a crawl drains in one order whichever frontier it is
+	// using. Arbitrary, but arbitrary and agreed beats arbitrary and split.
+	return a.Hash > b.Hash
 }
 
 // random draws without regard to score or age.
@@ -97,5 +110,28 @@ func (depth) Less(a, b Request) bool {
 // the scorer has already had an opinion about.
 type random struct{}
 
-func (random) Name() string               { return "random" }
+func (random) Name() string { return "random" }
+
+// Less is never consulted, because a coin flip is not an ordering: used as one
+// in a scan it replaces the best with probability one half at every candidate,
+// so the last thing added wins half the time and the k-th from the end wins one
+// time in 2^k. A frontier with ten thousand waiting URLs drew from the last
+// fifteen. It is here because [Policy] requires it.
 func (random) Less(Request, Request) bool { return rand.IntN(2) == 0 }
+
+// Unordered says this policy picks one candidate rather than the best.
+//
+// Declared as a method rather than checked by name, so a second unordered
+// policy gets the right treatment by saying so rather than by somebody
+// remembering to add it to a switch.
+func (random) Unordered() {}
+
+// Unordered is a policy with no ordering at all: it wants one of the
+// candidates, uniformly, rather than the smallest under Less.
+//
+// A frontier scanning candidates asks for this and uses reservoir sampling when
+// it gets it. Without it, `random` was shaped by insertion order — the one
+// thing it exists not to be shaped by.
+type Unordered interface {
+	Unordered()
+}

@@ -16,6 +16,7 @@ package frontiertest
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +66,8 @@ func Run(t *testing.T, open Open) {
 	t.Run("Breadth", func(t *testing.T) { testBreadth(t, open) })
 	t.Run("Depth", func(t *testing.T) { testDepth(t, open) })
 	t.Run("PolicyIsCheckedWhenBuilt", func(t *testing.T) { testBadPolicy(t, open) })
+	t.Run("AFullTieIsBrokenTheSameWay", func(t *testing.T) { testAFullTieIsBrokenTheSameWay(t, open) })
+	t.Run("AnUnorderedPolicyIsNotShapedByInsertion", func(t *testing.T) { testAnUnorderedPolicyIsNotShapedByInsertion(t, open) })
 }
 
 func lease(t testing.TB, f frontier.Frontier, at time.Duration) *frontier.Request {
@@ -546,5 +549,109 @@ func benchHosts(b *testing.B, open Open) {
 			b.Fatalf("lease: %v", err)
 		}
 		_ = f.Done(ctx, job, req.Hash, req.Attempt)
+	}
+}
+
+// testAFullTieIsBrokenTheSameWay: every implementation drains a page's links in
+// one order.
+//
+// A full tie is the ordinary case rather than the rare one: every link found on
+// one page carries that page's depth and one discovery time, so a page's whole
+// link set ties on both ordering columns. With nothing after them the two
+// frontiers disagreed — SQLite's rowid tie-break handed out the last link on
+// the page and the memory frontier's scan kept the first, which for a
+// depth-first policy is the opposite of what it means. The suite could not see
+// it, because its own fixture gives every request a distinct time.
+func testAFullTieIsBrokenTheSameWay(t *testing.T, open Open) {
+	ctx := context.Background()
+	f := open(t, frontier.Config{Policy: "depth"})
+
+	// One page's links: one depth, one instant, different hashes.
+	at := time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)
+	var reqs []frontier.Request
+	for _, name := range []string{"a", "b", "c", "d"} {
+		reqs = append(reqs, frontier.Request{
+			Hash:       "hash-" + name,
+			URL:        "https://example.com/" + name,
+			Host:       "example.com",
+			Depth:      2,
+			Discovered: at,
+		})
+	}
+	if _, err := f.Add(ctx, "news", reqs...); err != nil {
+		t.Fatal(err)
+	}
+
+	// The order is whatever it is, but it has to be the same everywhere, so it
+	// is pinned rather than merely observed.
+	var got []string
+	for range reqs {
+		req, err := f.Lease(ctx, "news", at, time.Minute)
+		if err != nil {
+			t.Fatalf("lease: %v", err)
+		}
+		got = append(got, req.Hash)
+		if err := f.Done(ctx, "news", req.Hash, req.Attempt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	want := []string{"hash-d", "hash-c", "hash-b", "hash-a"}
+	if !slices.Equal(got, want) {
+		t.Errorf("a page's tied links drained %v, want %v: two frontiers must agree", got, want)
+	}
+}
+
+// testAnUnorderedPolicyIsNotShapedByInsertion.
+//
+// `random` exists to sample a site without the sample being shaped by the
+// scorer. Used as a comparator in a scan it replaced the best with probability
+// one half at every candidate, so the last thing added won half the time and
+// the k-th from the end one time in 2^k: ten thousand waiting URLs drew from
+// the last fifteen. Insertion order wearing a disguise.
+func testAnUnorderedPolicyIsNotShapedByInsertion(t *testing.T, open Open) {
+	ctx := context.Background()
+	at := time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)
+
+	const urls = 32
+	const draws = 200
+
+	// How often the first half of what was added comes out first. Uniform
+	// sampling puts it near half; a scan biased to the end puts it near zero.
+	early := 0
+	for draw := range draws {
+		f := open(t, frontier.Config{Policy: "random"})
+
+		var reqs []frontier.Request
+		for i := range urls {
+			reqs = append(reqs, frontier.Request{
+				Hash:       fmt.Sprintf("hash-%02d", i),
+				URL:        fmt.Sprintf("https://example.com/%d", i),
+				Host:       fmt.Sprintf("host-%d.example", i),
+				Discovered: at,
+			})
+		}
+		if _, err := f.Add(ctx, fmt.Sprintf("news-%d", draw), reqs...); err != nil {
+			t.Fatal(err)
+		}
+
+		req, err := f.Lease(ctx, fmt.Sprintf("news-%d", draw), at, time.Minute)
+		if err != nil {
+			t.Fatalf("lease: %v", err)
+		}
+		var n int
+		if _, err := fmt.Sscanf(req.Hash, "hash-%d", &n); err != nil {
+			t.Fatal(err)
+		}
+		if n < urls/2 {
+			early++
+		}
+	}
+
+	// Generous bounds: this is a fairness check, not a statistics exam. A
+	// scan biased toward the end scores essentially zero.
+	if early < draws/5 {
+		t.Errorf("the first half of what was added was drawn %d times in %d: the sample is shaped by insertion order",
+			early, draws)
 	}
 }
