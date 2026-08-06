@@ -4,6 +4,7 @@ package main
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -41,24 +42,44 @@ func TestEveryCommandIsDocumented(t *testing.T) {
 	}
 }
 
-func TestEveryDocumentedCommandExists(t *testing.T) {
-	src := doc(t)
+// builtRow matches a row of the "What exists today" table: | `scour run` | ... |
+var builtRow = regexp.MustCompile("(?m)^\\|\\s*`scour ([a-z]+)`\\s*\\|")
+
+// TestWhatExistsTodayIsWhatExists holds that table to the binary, in both
+// directions.
+//
+// The direction that matters is the second. A command built and left out of the
+// table reads as a command that does not exist, and this file spent a while
+// saying five things were built when there were twelve: everything a person
+// could actually run, from `scour run` to `scour service`, was described here
+// as waiting on the stages.
+func TestWhatExistsTodayIsWhatExists(t *testing.T) {
 	a := &cli.App{Out: os.Stdout, Err: os.Stderr}
 
 	have := map[string]bool{}
 	for _, cmd := range root(a).Commands {
-		have[cmd.Name] = true
+		if !cmd.Hidden {
+			have[cmd.Name] = true
+		}
 	}
 
-	// Only the commands claimed to exist today. The ones under "Running" are
-	// deliberately written before they are built.
-	section := between(t, src, "## What exists today", "")
-	for _, name := range []string{"init", "validate", "show", "spec", "defaults"} {
-		if !strings.Contains(section, "`"+name+"`") {
-			continue
-		}
+	section := between(t, doc(t), "## What exists today", true)
+	claimed := map[string]bool{}
+	for _, row := range builtRow.FindAllStringSubmatch(section, -1) {
+		claimed[row[1]] = true
+	}
+	if len(claimed) == 0 {
+		t.Fatal("CLI.md has no table of what exists, so this check is not checking anything")
+	}
+
+	for name := range claimed {
 		if !have[name] {
-			t.Errorf("CLI.md says `%s` exists, and it does not", name)
+			t.Errorf("CLI.md says `scour %s` is built, and the binary has no such command", name)
+		}
+	}
+	for name := range have {
+		if !claimed[name] {
+			t.Errorf("`scour %s` is built, and CLI.md's table of what exists leaves it out", name)
 		}
 	}
 }
@@ -70,18 +91,71 @@ func TestEveryFlagIsDocumented(t *testing.T) {
 	a := &cli.App{Out: os.Stdout, Err: os.Stderr}
 
 	for _, cmd := range root(a).Commands {
-		section := between(t, src, "#### `scour "+cmd.Name, "####")
+		section := between(t, src, "#### `scour "+cmd.Name, false)
 		if section == "" {
 			if len(flagNames(cmd)) > 0 {
 				t.Errorf("`scour %s` has flags and no section in CLI.md", cmd.Name)
 			}
 			continue
 		}
+		// A command's subcommands are documented in its own section, as one
+		// table: `--corpus` belongs to `topic propose` and `topic train`, and
+		// splitting the table three ways would say less.
 		for _, name := range flagNames(cmd) {
 			if !strings.Contains(section, "--"+name) {
 				t.Errorf("`scour %s --%s` is not documented", cmd.Name, name)
 			}
 		}
+	}
+}
+
+// flagRow matches a documented flag: | `--pages <n>` | How many ... |
+var flagRow = regexp.MustCompile("(?m)^\\|\\s*`(--[a-z-]+)")
+
+// TestEveryDocumentedFlagExists is the other direction, and it is the one that
+// wastes somebody's afternoon.
+//
+// A flag written down and never built is not a gap, it is an instruction that
+// fails. `scour train` was documented here with `--url`, `-i` and `--replace`,
+// which sound like exactly what somebody teaching it an answer would reach for,
+// and the binary has never had any of them.
+//
+// Only the flag tables, not the prose: a section explaining why `--write` is
+// needed is not a claim that this command takes it.
+func TestEveryDocumentedFlagExists(t *testing.T) {
+	src := doc(t)
+	a := &cli.App{Out: os.Stdout, Err: os.Stderr}
+
+	checked := 0
+	for _, cmd := range root(a).Commands {
+		section := between(t, src, "#### `scour "+cmd.Name, false)
+		if section == "" {
+			continue
+		}
+
+		have := map[string]bool{}
+		for _, name := range flagNames(cmd) {
+			have[name] = true
+		}
+		// A subcommand's flags are documented in the parent's table, so they
+		// are what the parent's table is allowed to name.
+		for _, sub := range cmd.Commands {
+			for _, name := range flagNames(sub) {
+				have[name] = true
+			}
+		}
+
+		for _, row := range flagRow.FindAllStringSubmatch(section, -1) {
+			checked++
+			name := strings.TrimPrefix(row[1], "--")
+			if !have[name] {
+				t.Errorf("CLI.md documents `scour %s --%s`, and nothing takes it", cmd.Name, name)
+			}
+		}
+	}
+
+	if checked == 0 {
+		t.Fatal("no documented flags were found, so this check is not checking anything")
 	}
 }
 
@@ -111,9 +185,15 @@ func TestExitCodesAreDocumented(t *testing.T) {
 	}
 }
 
-// between returns the text from the first heading to the next one starting
-// with stop, or to the end when stop is empty.
-func between(t *testing.T, src, start, stop string) string {
+// between returns the text under a heading, up to the next heading of any
+// level, or to the end of the file when toEnd is set.
+//
+// Any level, and that matters. It used to stop at the next "####", so the
+// `scour service` section ran on through `### Secrets` and claimed its flag
+// table: the reverse flag check then reported that `scour service` documents a
+// `--key-file` it does not take, which was the check being wrong rather than
+// the document.
+func between(t *testing.T, src, start string, toEnd bool) string {
 	t.Helper()
 
 	i := strings.Index(src, start)
@@ -121,10 +201,10 @@ func between(t *testing.T, src, start, stop string) string {
 		return ""
 	}
 	rest := src[i+len(start):]
-	if stop == "" {
+	if toEnd {
 		return rest
 	}
-	if j := strings.Index(rest, stop); j >= 0 {
+	if j := strings.Index(rest, "\n#"); j >= 0 {
 		return rest[:j]
 	}
 	return rest

@@ -3,8 +3,11 @@
 Build order for the rewrite. [NOTES.md](NOTES.md) is the design and argues why;
 this is what gets built, in what order, and what proves each piece works.
 
-Two things are built: the page cache with its backends, and the job document
-with everything that reads it. Nothing crawls yet.
+Every phase in it is built. `scour run` crawls a job end to end in one process,
+`scour serve` puts the stages on a bus, and `scour service` runs the stores a
+cluster shares. What is left is written at the bottom, and it is smaller than
+what is here: nothing drives a crawl over the bus, nothing applies a change to a
+job that is already running, and recognition and linking has not been started.
 
 ## The order, and why it is this order
 
@@ -75,9 +78,12 @@ indexes:
     UPDATE urls SET leased_until = ?, attempts = attempts + 1 WHERE id = ?
     COMMIT
 
-`FOR UPDATE` is a no-op on SQLite, which serialises writers anyway, and is what
-Postgres needs the day sharding is not enough. Writing it in from the start
-makes that a dialect change rather than a rewrite.
+**That sketch was wrong in one line, and building it is what said so.** SQLite
+does not ignore `FOR UPDATE`, it refuses the syntax. What it has instead is
+`BEGIN IMMEDIATE`, which takes the write lock when the transaction opens rather
+than when it first writes, and that is what the implementation uses. Postgres
+gets `FOR UPDATE SKIP LOCKED` at the same point the day sharding is not enough.
+Still a dialect change rather than a rewrite, and worth knowing which line.
 
 *Proved by:* `internal/frontier/frontiertest`, which every implementation runs.
 The order each policy claims; a lease that expires and is handed out again; a
@@ -90,10 +96,17 @@ implementations are compared on identical workloads rather than on whatever
 each author found convenient.
 
 The in-memory reference is deliberately naive: it scans, so a lease is O(n) and
-costs 45µs over a thousand URLs and 4.3ms over a hundred thousand. That is the
-bar rather than the target. A durable frontier ordering by an index should be
-roughly flat across both, and if it is not, the index is wrong — which is a
-thing to find out in a benchmark rather than at two hundred thousand pages.
+costs microseconds over a thousand URLs and milliseconds over a hundred
+thousand. That is the bar rather than the target. A durable frontier ordering by
+an index should be roughly flat across both, and if it is not, the index is
+wrong, which is a thing to find out in a benchmark rather than at two hundred
+thousand pages.
+
+*Where it is:* built, tested and measured, and it came out flat: 357µs at a
+thousand URLs and 369µs at a hundred thousand, against the memory floor of 43µs
+and 4.7ms. The table and what had to change to get there are in NOTES.md. The
+query plan is asserted in a test rather than left to a benchmark somebody
+remembers to read.
 
 **Phase 3.5. `scour try`, the development loop.** One page, fetched once,
 cached, and re-run against the cache from then on.
@@ -133,7 +146,7 @@ train` stated as a measurement rather than as a preference.
 
 **Phase 4.5. `scour train`, locators written back into the document.**
 Induction over the cached pages, proposing an xpath or a css selector per
-property, edited into the job with `hclwrite` so comments survive.
+property, edited into the job as text so comments survive.
 
 This is where the old implementation's induction returns, in a form that can be
 argued with: a locator in the document is something a person reads, corrects and
@@ -201,10 +214,18 @@ the menu. Optional throughout, so a node running no topiced jobs loads nothing.
 over the same budget, measured rather than asserted; and a job with no topic
 plugin never opening the classifier at all.
 
-*Where it is:* the spider's half is built and tested, with classifiers shared,
-versioned and stored one file per training. The scheduler's half, scoring a URL
-before it is fetched, is the other question and is not built, so the
-measurement that this phase turns on cannot be made yet.
+*Where it is:* built and tested, both halves. The spider's scores a page and can
+drop what is off the subject; the scheduler's scores a URL from its text and the
+page it was found on, before anything is fetched, and feeds the ordering policy.
+Classifiers are shared, versioned and stored one file per training, and
+`internal/classify/source` is what lets a node take one from a directory or from
+the cluster without either middleware knowing which it got. `scour topic`
+proposes labels over the corpus, trains from a labels document, and never
+overwrites a correction.
+
+What is still owed is the measurement this phase turns on: a focused crawl
+reaching on-topic pages sooner than an unfocused one over the same budget. The
+parts are there and the number has not been taken.
 
 **Phase 5. Pipelines and exporters.** The DAG runner over `Waves()`, and the
 formats.
@@ -259,8 +280,14 @@ produced, and the step returns them untouched, which is what makes the byline
 claim testable rather than aspirational. Identity resolution is built as
 recorded merges: an alias row pointing at a canonical id, one automatic rule
 (an initial and a surname against exactly one full name), and nothing fuzzy.
-Recognition and linking is not built, and the store is still opened directly
-rather than behind a service.
+Entities and relations both carry properties, declared in the document and
+extracted from the page.
+
+The service is built too, and so is the event log beside it: `scour service`
+reads a document of its own and serves `scour.entity.*`, `scour.event.*` and
+`scour.topic.*` from one process. Both stores are an interface with a registry
+and a conformance suite every registered backend runs, so a second backend is a
+registration rather than a rewrite. Recognition and linking is not built.
 
 **Phase 6. The bus.** Stages talking over NATS instead of calling each other,
 in one process against an embedded server.
@@ -284,25 +311,29 @@ Jobs and nodes are in KV and watched. A spider in another language is possible
 by construction, since the wire format is JSON and the spec renders to HCL, and
 nobody has written one.
 
-## What blocks Phase 3
+## What blocked Phase 3, and how it was answered
 
-**The frontier needs a store, and the store has not been chosen.**
+**The frontier needed a store, and the store had not been chosen.**
 
 The workload is a priority queue with dedup and leases: pop-highest-score,
-upsert-by-hash, lease with a timeout, survive restart. Nothing else in scour
-needs a database. Bodies are in the cache, models will be files, config is the
-job document, and records are in a database of their own per job.
+upsert-by-hash, lease with a timeout, survive restart. What was already ruled
+out was NATS alone: JetStream is a work queue and work queues are FIFO, so it
+cannot rank, and a focused crawl is ranking.
 
-What is already ruled out: NATS alone. JetStream is a work queue and work queues
-are FIFO, so it cannot rank, and a focused crawl is ranking.
-
-The real question is whether more than one process writes one frontier.
-Politeness argues no: two schedulers handing out the same host cannot honour a
-crawl delay between them without a distributed lock, so the frontier wants to be
+The real question was whether more than one process writes one frontier.
+Politeness said no: two schedulers handing out the same host cannot honour a
+crawl delay between them without a distributed lock, so the frontier is
 single-writer per host, and the scaling story is to shard by host rather than to
-share a writer. If that holds, SQLite is correct and stays correct.
+share a writer.
 
-This needs an answer before Phase 3 and not before Phase 2.
+**The answer is SQLite, and it has been reconsidered and kept.** It was weighed
+against Postgres, an embedded key-value store, Redis, DuckDB and Parquet, and
+the frontier is not close: politeness already forces one writer per host, the
+lease is a transaction with an ordering in it rather than a row fetched by id,
+and answering "why was that URL never fetched" with a SELECT is worth more
+during development than anything the alternatives offer. Three other stores
+have since landed on it for their own reasons, and `internal/storage` is the
+dialect seam that says how far away Postgres is.
 
 ## How it is written
 
@@ -316,26 +347,38 @@ other Go project can read this one.
   returning its own `*cli.Command`. The tree is built in `cmd/scour`; no command
   reaches into another.
 - **Every extension point is the same registry**: a name, a factory, and a
-  config. `internal/cache` already is one, and the stages, middleware, pipeline
-  kinds and exporters each get theirs. One shape to learn, and a generic
-  registry rather than six copies of the same forty lines.
+  config. One per stage's middleware, and one each for cache backends, pipeline
+  step kinds, exporters, classifier kinds, entity backends and event backends.
+  One shape to learn, and a generic registry rather than a copy of the same
+  forty lines per extension point. `internal/plugins` is the one import list
+  that fills them, with a test that walks the repository and fails when a
+  registering package is not on it.
 - **Interfaces are declared by the consumer**, not the implementation, and kept
   narrow enough to be satisfied by a test double without a mocking library.
 - **`context.Context` first, errors wrapped with `%w`,** `errors.Is` and
   `errors.As` at the boundaries, `log/slog` for logging, no global state, no
   `init()` beyond registration.
 - **Tests are table-driven and behavioural.** A contract that several
-  implementations satisfy gets one suite they all run, as
-  `internal/cache/cachetest` already does. That is what makes a backend
-  swappable in fact rather than in principle.
-- `make all`: format, vet, lint, test, build. Nothing merges that does not pass
-  it.
+  implementations satisfy gets one suite they all run: `cachetest`,
+  `frontiertest`, `exportertest`, `entitytest` and `eventtest`. That is what
+  makes a backend swappable in fact rather than in principle, and every one of
+  them found a real defect the first time an implementation was pointed at it.
+  A method on the interface and not in the suite is where the next drift will
+  be, so it belongs in the suite.
+- **The gate before a commit** is `gofmt -l .` empty, `go vet ./...`,
+  `CGO_ENABLED=0 go build ./...`, `go test ./... -count=2 -shuffle=on` and the
+  documentation checks. Repeatedly and shuffled, because a package that cannot
+  be run twice in a process is a package whose flakiness nobody will ever see:
+  three were in that state and it was found by trying to shuffle the suite.
 
 ## Risks
 
 **Extraction quality is a number, and the number is on another branch.** Phase 4
 is not done when it runs, it is done when it matches what the old implementation
 measured. Anything less is a rewrite that lost something and did not notice.
+Still owed: what is measured so far is 54.7% over fifteen hand-written pages,
+held to a floor by a test, and the comparison against `main` over a real crawl
+has not been made.
 
 **The chain contract is a one-way door.** Short-circuit and drop have to be in
 it from Phase 1.
@@ -367,15 +410,26 @@ has numbers to compare against the ones on `main`.
 | --- | --- |
 | Page cache, three backends, one contract suite | Done |
 | Job document: parse, validate, chains, DAG, diff | Done |
-| 1. The chain | Not started |
-| 2. Downloader and the four middleware | Not started |
-| 3. Frontier and scheduler | Contract, policies and benchmarks built. Durable store not started |
-| 3.5. `scour try`, the development loop | Not started |
-| 4. Spider | Not started |
-| 4.5. `scour train`, locators into the document | Not started |
-| 4.75. Topic classification, optional | Designed, not started |
-| 5. Pipelines and exporters | Not started |
-| 5.5. Secrets | Designed, not started |
-| 5.75. Entity store, assertions with provenance | Built, tested. No service yet |
-| 6. The bus | Not started |
-| 7. The cluster | Not started |
+| 1. The chain | Done |
+| 2. Downloader, robots, redirects, the cache middleware | Done |
+| 3. Frontier and scheduler | Done. SQLite, benchmarked, query plan asserted |
+| 3.5. `scour try`, the development loop | Done |
+| 4. Spider | Done, and measured at 54.7% over the corpus |
+| 4.5. `scour train`, locators into the document | Done |
+| 4.75. Topic classification, optional | Done, both placements. The focused-crawl measurement is not taken |
+| 5. Pipelines and exporters | Done. json, jsonlines, csv, parquet, nats, sqlite |
+| 5.5. Secrets | Done |
+| 5.75. Entity store, assertions with provenance | Done, with the event log and both services |
+| 6. The bus | Done. Equivalence held to a test |
+| 7. The cluster | Two nodes on one job, done. A crawl driven over the bus, not built |
+
+**What is left**, which is the useful half of a status table:
+
+| Piece | Why it is not done |
+| --- | --- |
+| A crawl driven over the bus | The seam exists (`run.Options.Fetch` and `Read`) and only the bus's own tests use it. `external = true` is refused rather than run locally |
+| Applying a change to a running job | `engine.Diff` and every `Effect` are built and tested and have no caller, so the whole `mutation` block is accepted, validated and never consulted |
+| `scour plan`, `apply`, `ls`, `status`, `rm` | All of them need a server that owns running state, and run state in KV is decided and not started |
+| Entity recognition and linking | Designed, not started. The largest remaining piece |
+| Parquet as the measurement archive | The exporter writes records. A call to `Measure` and a different layout |
+| The comparison against `main` | The one thing that can say whether this rewrite lost something |

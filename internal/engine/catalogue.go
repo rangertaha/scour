@@ -108,6 +108,7 @@ var PipelineKinds = []Placement{
 	{"validate", 0, "Enforces required and types"},
 	{"dedupe", 0, "Drops items already seen"},
 	{"rank", 0, "Scores and orders"},
+	{"entities", 0, "Asserts what the records refer to, into the entity store"},
 	{"python", 0, "Runs a Python script, inline or from a file"},
 	{"rhai", 0, "Runs a Rhai script, inline or from a file"},
 	{"nodejs", 0, "Runs a Node script, inline or from a file"},

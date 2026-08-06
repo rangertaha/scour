@@ -153,7 +153,7 @@ it up and a job resubmitted next month does what it did today.
 job "news" {
   domains  = ["example.com"]
   start    = ["https://example.com/topic"]
-  included = ["*.example.com"]
+  included = ["*/topic/*", "https://example.com/topic"]
   excluded = []
 
   # What to extract.
@@ -287,10 +287,10 @@ job "news" {
   }
 
   # Exporters are per item. The second label says which.
-  exporter "json"   "article" { dir    = "./out" }
-  exporter "csv"    "article" { dir    = "./out" }
-  exporter "nats"   "article" { stream = "ITEMS" }
-  exporter "sqlite" "article" { file   = "./items.db" }
+  exporter "json"   "article" { dir     = "./out" }
+  exporter "csv"    "article" { dir     = "./out" }
+  exporter "nats"   "article" { subject = "items.article" }
+  exporter "sqlite" "article" { file    = "./items.db" }
 }
 ```
 
@@ -520,7 +520,7 @@ job "markets" {
   }
 
   exporter "nats" "price" {
-    stream = "MARKETS"
+    subject = "events.markets.price"
   }
 }
 ```
@@ -544,8 +544,8 @@ property become the same kind of scan over the same files.
 need nothing new, and where an export lands is a config line. That part is the
 design and not yet the code: the exporter as built writes to a `dir` and a
 `file` like the other file formats, which is why the block above says `dir`. It
-also takes records rather than measurements, so the two-interface split below is
-still a design and the second interface has one implementation waiting for it.
+also writes records rather than measurements, which the section below has the
+rest of.
 
 **And nothing has to be running.** DuckDB reads Parquet where it lies, so
 analytics is pointing something at files rather than importing into a database
@@ -556,37 +556,39 @@ that then has to be kept in step.
 They do differ, and in the shape they consume rather than where they put it.
 
 A record is a document: properties, some of them nested, as somebody asked for
-them. A measurement is flat: a name, tags, fields and a time. `json` and
-`sqlite` want the first. `parquet`, `nats` and `influx` want the second.
+them. A measurement is flat: a name, tags, fields and a time. `json`, `csv` and
+`sqlite` want the first. `nats` wants the second, and `parquet` would suit it.
 
-So there are two interfaces, and an exporter says which it is by implementing
-one:
+**One interface, and the conversion is a method on the record.** The design here
+used to be two interfaces, `Exporter` and an `EventExporter` an implementation
+opted into, with the pipeline converting once and handing each exporter the
+shape it asked for. What was built is simpler and it is worth recording why.
 
-```go
-// Exporter writes records.
-type Exporter interface {
-	Write(ctx context.Context, rec *Record) error
-}
+[record.Record.Measure] takes the item's declaration and returns the
+measurement. The split it applies is the one the item already declares, in
+[engine.Item.Tags] and [engine.Item.Fields], so an exporter never decides that
+`of` is a tag or that `time` names the timestamp and two of them cannot disagree
+about it. The `nats` exporter calls it and publishes the result; the file
+formats do not call it and write the record.
 
-// EventExporter writes measurements. An exporter implementing this is handed
-// the event form instead, converted once by the pipeline rather than by each
-// exporter working it out again.
-type EventExporter interface {
-	WriteEvent(ctx context.Context, ev *Event) error
-}
-```
+That is the whole of what the second interface would have bought, without a
+second interface: a type assertion at the seam would have made the pipeline
+carry two shapes and every exporter's contract test carry two paths, for one
+line an exporter can call itself. The rule that matters, that the conversion is
+written once, is kept by there being one `Measure` and no other way to reach a
+measurement.
 
-The conversion happens once per item, in the pipeline, using the split the item
-already declares. An exporter never has to know that `of` is a tag or that
-`time` names the timestamp, and two exporters cannot disagree about it.
-
-It is the same shape as [http.Flusher]: one interface for the common case, a
-second that an implementation opts into, and a type assertion where they meet.
+**Parquet still writes records.** It goes through [exporter.Layout], the same
+column derivation the CSV and SQLite exporters use, so an archive of
+measurements is not what is on disk today. It is the one format where the change
+would pay, since tags are low cardinality by construction, and it is a call to
+`Measure` and a different layout rather than a redesign.
 
 The other difference is batching. A streaming exporter sends as it goes; a file
 exporter cannot write a Parquet file per row, so rolling by time or by size is
 its own business, in its own block, like everything else a plugin decides for
-itself.
+itself. Nothing rolls yet: `json`, `jsonlines`, `csv` and `parquet` each write
+one file, named for the item unless the block says otherwise.
 
 ## Entities
 
@@ -756,6 +758,15 @@ Which is what makes relations carrying properties matter. The topic on
 articles underneath it. A relation therefore has an identity of its own and can
 be the subject of assertions, the same as an entity.
 
+That part is built. A `relation` block takes `property` blocks like an item
+does, `Relate` returns the edge's id so `Describe` can hang a value on it, and
+the extraction plan reaches inside the relation so the value comes off the page
+rather than out of a map somebody filled in. It was the second half that was
+missing for a while: the store took relation properties and no valid document
+could express one, which is the shape of unreachable feature this repository
+keeps rediscovering. A feature needs a test that starts where a person starts,
+at the document.
+
 ### Explicit tables, not triples
 
 Everything here could be one table of subject-predicate-object with provenance
@@ -821,15 +832,15 @@ job "climate" {
 
   scheduler {
     plugin "topic" {
-      use        = "climate@7"
-      drop_below = 0.05        # not worth following
+      subject = "climate@7"
+      least   = 0.05         # not worth following
     }
   }
 
   spider {
     plugin "topic" {
-      use       = "climate@7"
-      min_score = 0.4          # not worth extracting
+      subject = "climate@7"
+      least   = 0.4          # not worth extracting
     }
   }
 }
@@ -857,6 +868,13 @@ genuinely right.
 That is also why there are two thresholds and not one. "Not an article about
 this" and "not worth traversing" are far apart, and one number for both is the
 mistake.
+
+Both are spelled `least`, because the block a plugin is written in is what says
+which question it is answering, and a job that wants only ranking leaves it out:
+zero drops nothing. The scheduler's copy also takes a `weight`, which is how a
+subject is blended against whatever else scored the same request, and both take
+either a `dir` of trained classifiers or the `url` of a cluster to fetch one
+from.
 
 ### A classifier is shared, and jobs reference it
 
@@ -1039,14 +1057,23 @@ a job may want to bring its own.
 Not a plugin stage. A step is a node in a graph, written as `step <kind> <name>`
 and ordered by `requires` rather than by a number.
 
-| Kind | What it does |
-| --- | --- |
-| `clean` | Rule-driven tidying |
-| `validate` | Enforces `required` and types |
-| `dedupe` | Drops items already seen |
-| `rank` | Scores and orders |
-| `entities` | Asserts what the records refer to, into the entity store |
-| `python`, `rhai`, `nodejs`, `bash` | Runs a script, inline or from a file |
+| Kind | What it does | State |
+| --- | --- | --- |
+| `clean` | Rule-driven tidying | Built |
+| `validate` | Enforces `required` and types | Built |
+| `dedupe` | Drops items already seen | Built |
+| `rank` | Scores and orders | Built |
+| `entities` | Asserts what the records refer to, into the entity store | Built |
+| `python` | Runs a Python script, inline or from a file | Catalogued |
+| `rhai` | Runs a Rhai script, inline or from a file | Catalogued |
+| `nodejs` | Runs a Node script, inline or from a file | Catalogued |
+| `bash` | Runs a shell script, inline or from a file | Catalogued |
+
+**Catalogued means a position, not a part**, the same as the plugin tables
+above: the name is what a step of that kind would be called, and a job naming
+one is refused when the pipeline is built rather than when the document is
+validated. The state column is compared with the registry by a test, so a kind
+that gets built and is still written down as catalogued fails.
 
 ### Exporters
 
@@ -1122,9 +1149,23 @@ job "news" {
 }
 ```
 
+**What is built, and what is not.** `internal/node` joins a cluster, watches the
+jobs and serves the stages it offers, and `internal/bus` carries a request to
+one and an answer back. Both are tested, and the equivalence test holds one job
+to the same records through either wiring.
+
+What has no caller is the other end. `run.Options` has a `Fetch` and a `Read`,
+which is the whole of what running over a bus changes, and only the bus's own
+tests supply them. So a document saying `external = true` is refused by name
+rather than crawled locally: the setting is reported back by `scour show` as
+"yes, waiting 5m0s", and a run that quietly ignored it would leave somebody
+believing their pages were being fetched on a machine they were not. That also
+leaves `external_timeout` a setting nothing reads yet, which is recorded where
+the check for those lives rather than left to be rediscovered.
+
 ## Storage
 
-Five kinds of thing get kept, and they want different stores. Gathered here
+Several kinds of thing get kept, and they want different stores. Gathered here
 because the decisions were argued out one at a time and the map is the thing
 worth being able to read at once.
 
@@ -1137,8 +1178,21 @@ worth being able to read at once.
 | Nodes | NATS KV, `SCOUR_NODES`, with a TTL | Not durable state. A row outliving its process is a lie |
 | Frontier and hosts | SQLite, one shared database | Politeness is shared, so this cannot be partitioned |
 | Records and marks | SQLite, one database per job | Unbounded, unshared, and deleted by unlinking |
+| The entity graph | SQLite, behind a service | Shared between jobs, and two stages touch it |
+| The event log | SQLite, behind a service | The same, and the one most likely to want another backend |
+| Trained classifiers | Files, one per version, `.scour/topics` | A few hundred kilobytes of counts that never change once written |
 | Learned locators | The job document itself, marked | A guess should be readable and correctable |
 | Exports | Whatever the exporters write | Copies. Not the record of truth |
+
+The two behind a service are the ones that broke the ownership rule, and the
+service is what restores it: one process owns the file, everything else asks.
+Both are an interface with a registry, `internal/entity` and `internal/event`,
+so a backend that is not SQLite is a registration rather than a rewrite, and
+`entitytest` and `eventtest` are what make two of them interchangeable in fact
+rather than in principle. The SQLite implementations are in those packages
+rather than in a subpackage each, because the driver is in every build already;
+anything bringing a driver of its own belongs beside them the way the cloud
+caches do.
 
 ### What that buys
 
@@ -1153,7 +1207,24 @@ and the spec comes from KV like everything else. That is the property the whole
 split exists to protect, and it survives this map.
 
 **A laptop needs nothing installed.** An embedded broker, a directory of bodies,
-and two SQLite files.
+and a SQLite file per store that a crawl actually asks for. A job with no
+entities and no events opens neither.
+
+**The SQL is written once per question, not once per dialect.**
+`internal/storage` is the seam the entity graph and the event log are written
+against: `Greatest`, `Least`, `MergeJSON` and `Rebind`, which is the whole of
+what differs between SQLite and Postgres in the queries here. It was measured
+rather than assumed, and the answer was eight scalar `MAX`/`MIN` calls, one JSON
+merge, the DSN and the placeholders. That is small enough that no ORM earns its
+place, and the queries stay the design.
+
+**SQLite is the decision, and the Postgres dialect is a measurement of the
+distance rather than a backend.** Nothing constructs it: it exists so that the
+size of the port is a fact in the repository instead of an estimate in
+somebody's head, and it is held to that by `internal/storage`'s own tests. A
+second backend gets built when there is a workload that needs one, and the
+event log is where that will come from first, because events are the one thing
+here that is not bounded.
 
 ### Where the frontier lives
 
@@ -1487,8 +1558,15 @@ separable and fingerprinted, so either works. Pushing it with every response
 wastes bandwidth; pulling it needs a request-reply the stage has to implement.
 
 **How does a run know it is finished?** An empty frontier is not enough: work
-may be leased, a response in flight, and an item mid-graph. Quiescence across
-four stages is the genuinely new distributed-systems problem here.
+may be leased, a response in flight, and an item mid-graph. In one process
+`internal/run` answers it with a stall bound: nothing making progress for longer
+than `run.StallFor`, which is a constant longer than a lease plus the job's
+politeness rate plus its fetch timeout, and the run ends as `Stalled` rather
+than hanging. Both of the last two terms are there because a crawl legitimately
+waits for each, and each was missing once. That bound is arithmetic over
+settings this one process can see. Quiescence across four stages on four
+machines is the genuinely new distributed-systems problem here, and it is still
+open.
 
 ## Status
 
@@ -1535,18 +1613,49 @@ four stages is the genuinely new distributed-systems problem here.
 | S3 and GCS taking an explicit credential from one | Built, tested |
 | Entity store: typed entities, relations, assertions with provenance | Built, tested |
 | Entity identity resolution: aliases, one conservative rule | Built, tested |
+| Entity and relation properties, declared and extracted | Built, tested |
+| `internal/entity`, `internal/event`: an interface, a registry, a backend | Built, one contract suite each, every registered backend run through it |
+| `internal/storage`: the SQL dialect seam | Built, tested. Only SQLite is constructed |
+| Events as items: tags, fields, time, and the nats exporter publishing them | Built, tested |
+| Parquet as the measurement archive | Designed. The exporter writes records |
 | Entity recognition and linking | Designed, not started |
-| Events as items: tags, fields, time. Parquet archive | Designed. Schema built |
-| Plugin implementations, all of them | Not started |
+| `internal/bus`: the entity, event and topic services on one connection | Built, tested |
+| `engine.ParseService`: a service document, separate from a job | Built, tested |
+| `scour service`: all three stores from one file | Built, tested |
+| `internal/classify/source`: a topic from a directory or from the cluster | Built, tested |
+| `scour topic ls / show / rm / propose / train`, from a labels document | Built, tested |
+| The `topic` middleware, in the spider and in the scheduler | Built, tested |
+| Plugin implementations: `cache`, `dupefilter`, `httperror`, `topic` twice | Built, tested. The rest of the catalogue is positions, not parts |
 | Jobs and nodes in NATS KV, watched | Built, tested |
-| `internal/node`: join, watch, serve. Two nodes, one job, work on both | Built, tested |
+| `internal/node`: join, watch, serve, drain and stop. Two nodes, one job, work on both | Built, tested |
+| A crawl driven over the bus | Not built. `run.Options.Fetch` and `Read` have no caller but the bus's tests |
 | `internal/train`: locators induced from the corpus, written back | Built, tested |
 | `scour serve`, `scour secret`, `scour train` | Built, tested |
 | Frontier in SQLite, one shared database | Built, tested, benchmarked |
-| Records in SQLite, one database per job | Decided. The piece most likely to move |
+| Records in SQLite, one database per job | The sqlite exporter writes one. Marks, `stale_records` and re-extraction not built |
 | Run state in a KV bucket of its own | Decided, not started |
+| Applying a change to a running job | `engine.Diff` and every `Effect` are built and tested, and nothing calls them |
 
-`internal/engine/notes_test.go` reads this file. It parses and validates the job
-documents in it, and compares every number in the catalogue tables with the
-catalogue the code uses. If the notes and the code disagree, the tests fail,
-which is the only way a document like this stays true.
+`internal/engine/notes_test.go` and `internal/engine/bodies_test.go` read this
+file, and between them they are why it can be trusted:
+
+- **The job documents in it are parsed and validated**, so an example that has
+  drifted from the schema is a failing build rather than something somebody
+  discovers by typing it.
+- **The service and labels documents are parsed too**, by their own parsers,
+  which decode strictly.
+- **Every plugin and exporter block is decoded** against the schema the
+  implementation itself uses. Those bodies are opaque to the engine by design,
+  which made them the one part of an example nothing had ever checked, and two
+  wrong field names had been sitting here for a while when the check was added.
+- **Every number in the catalogue tables** is compared with the catalogue the
+  code uses, and the pipeline kinds with the kinds it ships.
+- **Every bare word in an example** is checked against the vocabulary the parser
+  resolves against.
+- **The prose about what may be replaced and what may be extended** is held to
+  what the stages actually allow.
+
+If the notes and the code disagree, the tests fail, which is the only way a
+document like this stays true. It is not a guarantee that everything here is
+right: a claim nothing covers can still be wrong, and the way to add one is to
+add the check with it.

@@ -365,14 +365,21 @@ nothing written. Pass --write to edit news.hcl
 property's `examples` are values it is known to have taken, and given the answer
 induction can look for the node that produces it and generalise across the
 corpus. Written down, an example survives; typed into a shell, it is gone when
-the terminal is.
-| `--replace` | Also replace locators that are already there |
+the terminal is. This is built: `train.Learn` looks for each example on the page
+before it falls back to what extraction already finds.
+
+There is no `--replace`. What may be overwritten is decided by the document
+rather than by a flag, and the rule below is the whole of it.
 
 ##### Teaching it an answer
 
+**Designed, not built.** The `examples` in the document are what training reads
+today. What follows is the command-line shortcut for putting one there, and
+nothing implements it yet: `scour train` takes no `--url` and no `-i`.
+
 Induction over a corpus can find what is *consistent*. It cannot know which
 consistent thing you wanted, and on a page with three plausible headings it will
-pick one and be confidently wrong. So you can hand it the answer:
+pick one and be confidently wrong. So you would hand it the answer:
 
 ```console
 $ scour train news.hcl --url https://example.com/story/1     -i 'article.title.text="Hello World"'     -i 'article.published.attr=datetime'
@@ -406,7 +413,7 @@ Three outcomes are worth naming because they are all useful:
 
 ##### Where an example lives
 
-`-i` is a shortcut for something the document keeps:
+In the document, which is what `-i` would be a shortcut for:
 
 ```hcl
 property "title" {
@@ -430,14 +437,21 @@ matching is a signal that the site changed, not a setting that has gone stale.
 
 Two rules about writing, and they are the ones worth arguing with:
 
-**A locator a person wrote is never replaced.** Training fills in what is empty
-and leaves alone what is not, unless `--replace` says otherwise. The document is
-the source of truth and a human's correction outranks a fresh guess, or the loop
-becomes: correct it, retrain, lose the correction, correct it again.
+**A locator a person wrote is never replaced.** Not by a flag: what training
+wrote is marked, with `# induced by scour train; delete this comment to keep
+your own`, and only what is marked is ever overwritten. Deleting the comment is
+how a person says this one is theirs now, so the state lives in the document and
+nowhere else. The alternative, a `--replace` somebody remembers to leave off,
+loses a correction the first time they forget. The loop has to converge instead
+of going in circles: correct it, retrain, lose the correction, correct it again.
 
 **Comments and formatting survive.** The document is edited rather than
 regenerated, so the notes somebody left themselves are still there afterwards.
-This is why it is written with `hclwrite` and not with a template.
+That is why `internal/train/write.go` edits the lines a locator belongs on
+rather than reprinting the file from its parse tree: a round trip through a
+parser and a printer returns something equivalent and unrecognisable, and a diff
+nobody can read is a diff nobody reviews. Reviewing what induction proposed is
+the entire point, so the less clever approach is the right one.
 
 The match count is written beside each locator as a comment, because a locator
 that worked on 97 of 312 pages and one that worked on 311 deserve different
@@ -711,10 +725,15 @@ scour secret ls             The names that have been set
 scour secret rm <name>
 ```
 
+#### `scour secret`
+
 | Flag | Effect |
 | --- | --- |
 | `--join <url>` | The cluster, as `nats://host:port` |
 | `--key-file <path>` | The sealing key, if it is not in `SCOUR_SECRET_KEY` |
+
+On the subcommands rather than on `secret` itself, which takes none: every one
+of them talks to the cluster, and `key` is the exception that needs neither.
 
 A job holds a reference, never a value: `access_key = secret("acme-s3-key")`.
 The document stays safe to commit, diff and paste into an issue, and the value
@@ -815,17 +834,44 @@ where that becomes an error.
 
 ## What exists today
 
-`init`, `validate`, `show`, `spec` and `defaults` are built and tested. They
-are all local, which is why they work with nothing else built: they need only
-the engine package. The `--server` and `--timeout` flags arrive with the first
-command that has something to ask. Everything under Running, Output and The install
-waits on the stages.
+Built and tested. This is the whole of what the binary has:
+
+| Command | Needs |
+| --- | --- |
+| `scour init` | Nothing |
+| `scour validate` | Nothing |
+| `scour show` | Nothing |
+| `scour spec` | Nothing |
+| `scour defaults` | Nothing |
+| `scour try` | The cache on disk |
+| `scour run` | Nothing. A frontier and a cache under `--dir` |
+| `scour train` | The cache on disk |
+| `scour topic` | A directory of trained topics, or a cluster |
+| `scour serve` | Nothing, or `--join` to a cluster |
+| `scour service` | A directory per store, and a cluster to answer on |
+| `scour secret` | A cluster, and a sealing key |
+
+The first five need only the engine package, which is why they work offline, in
+CI and on a plane. `run` is the whole crawl in one process: the same four stages
+the cluster wires over the bus, wired directly, and held to producing the same
+records either way.
+
+**What is written above and not built:** `plan`, `apply`, `ls`, `status`,
+`logs`, `pause`, `resume`, `stop`, `rm`, `records`, `nodes` and `version`. They
+all need a server that holds running state, and the `--server` and `--timeout`
+flags arrive with them. `serve`, `service` and `secret` take `--join` instead,
+because they are the cluster rather than a client of it.
 
 `cmd/scour/main_test.go` drives the whole command line, arguments and all,
 through `cli.Run`, and reads what it printed. That is why `App` carries its
 streams rather than reaching for the process's: a command that wrote to
 `os.Stdout` directly could only be tested by starting a process.
 
-`cmd/scour/cli_doc_test.go` reads this file and checks that the commands and
-flags documented above are the ones the binary has. If they disagree, the tests
-fail, which is the only way a document like this stays true.
+`cmd/scour/cli_doc_test.go` reads this file. It checks the table above against
+the commands the binary has, in both directions, and every flag against the
+command it is written under, also in both directions: a flag that exists and is
+undocumented fails, and so does a flag documented here that nothing takes. The
+second direction was added after this file spent a while promising `scour train
+--url`, `-i` and `--replace`, none of which were ever built. A command surface
+that has drifted from its documentation is worse than an undocumented one:
+somebody reads it, types what it says, and is told there is no such flag.

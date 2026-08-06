@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rangertaha/scour/internal/engine"
+	"github.com/rangertaha/scour/internal/pipeline"
 )
 
 // NOTES.md is checked against the code rather than trusted.
@@ -153,13 +154,85 @@ func TestNotesCatalogueMatchesTheCode(t *testing.T) {
 	}
 }
 
+// TestNotesPipelineKindsMatchTheCode checks the notes against both lists that
+// could disagree with them.
+//
+// The catalogue is what a document may name, in principle. The registry is what
+// this build can actually run, and they are not the same list: `entities` was
+// registered, documented and reachable while the catalogue had never heard of
+// it, so a check that read only the catalogue could not have noticed either
+// list going stale.
 func TestNotesPipelineKindsMatchTheCode(t *testing.T) {
 	documented := sectionOf(t, notes(t), "### Pipeline")
 	text := strings.Join(documented, "\n")
 
+	catalogued := map[string]bool{}
 	for _, kind := range engine.PipelineKindNames() {
+		catalogued[kind] = true
 		if !strings.Contains(text, "`"+kind+"`") {
-			t.Errorf("the code ships pipeline kind %q, which NOTES.md does not document", kind)
+			t.Errorf("the code catalogues pipeline kind %q, which NOTES.md does not document", kind)
+		}
+	}
+
+	for _, kind := range pipeline.Registered() {
+		if !catalogued[kind] {
+			t.Errorf("this build runs pipeline kind %q, which engine.PipelineKinds does not list", kind)
+		}
+		if !strings.Contains(text, "`"+kind+"`") {
+			t.Errorf("this build runs pipeline kind %q, which NOTES.md does not document", kind)
+		}
+	}
+}
+
+// | `clean` | Rule-driven tidying | Built |
+//
+// One expression for both documents, because the book is Markdown too now and
+// its kinds table is the same table.
+var kindRow = regexp.MustCompile("(?m)^\\|\\s*`([a-z]+)`\\s*\\|[^|]*\\|\\s*(Built|Catalogued)\\s*\\|")
+
+// TestNotesAndBookSayWhichKindsAreBuilt.
+//
+// A kinds table with no state column reads as a list of working parts, and four
+// of the nine are not: `python`, `rhai`, `nodejs` and `bash` are catalogued
+// positions, and a job naming one is refused when the pipeline is built. The
+// plugin tables have always said so in prose. This says it per row, and holds
+// the rows to the registry, in both documents at once.
+func TestNotesAndBookSayWhichKindsAreBuilt(t *testing.T) {
+	built := map[string]bool{}
+	for _, kind := range pipeline.Registered() {
+		built[kind] = true
+	}
+	if len(built) == 0 {
+		t.Fatal("no pipeline kinds are registered, so this check is not checking anything")
+	}
+
+	for _, tc := range []struct {
+		what string
+		src  string
+		row  *regexp.Regexp
+	}{
+		{"NOTES.md", strings.Join(sectionOf(t, notes(t), "### Pipeline"), "\n"), kindRow},
+		{"pipeline.md", bookPages(t)["pipeline.md"], kindRow},
+	} {
+		said := map[string]bool{}
+		for _, row := range tc.row.FindAllStringSubmatch(tc.src, -1) {
+			kind, state := row[1], row[2]
+			said[kind] = true
+
+			switch {
+			case state == "Built" && !built[kind]:
+				t.Errorf("%s says the %q step is built, and nothing registers one", tc.what, kind)
+			case state == "Catalogued" && built[kind]:
+				t.Errorf("%s calls the %q step catalogued, and this build runs it", tc.what, kind)
+			}
+		}
+		if len(said) == 0 {
+			t.Errorf("%s has no kinds table with a state column, so this check is not checking it", tc.what)
+		}
+		for kind := range built {
+			if !said[kind] {
+				t.Errorf("%s leaves the %q step out of its kinds table", tc.what, kind)
+			}
 		}
 	}
 }

@@ -36,12 +36,18 @@ func Service(a *App) *ucli.Command {
 
 	return &ucli.Command{
 		Name:      "service",
-		Usage:     "Run the entity and event stores this cluster shares",
+		Usage:     "Run the entity, event and topic stores this cluster shares",
 		ArgsUsage: "<service.hcl>",
 		Description: "Reads a service document and answers for the stores it names, on the\n" +
 			"bus, until interrupted.\n\n" +
 			"A service document is not a job document: it says where a store lives,\n" +
-			"and a job never does. See `scour service --help` for the blocks.",
+			"and a job never does. It holds an `entity`, an `event` or a `topic`\n" +
+			"block, and whichever are present are served. Each takes a `dir`, which\n" +
+			"is required; a `url` to answer on, which starts a broker here when it\n" +
+			"is left out; and a `timeout` bounding one request.\n\n" +
+			"  entity {\n" +
+			"    dir = \"./graph\"\n" +
+			"  }",
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "join", Usage: "a node to join, as nats://host:port", Destination: &join},
 		},
