@@ -88,6 +88,23 @@ func Hold(fetch time.Duration) time.Duration {
 // ctrl-c was meant to avoid.
 const Shutdown = 30 * time.Second
 
+// StallFor is how long a run waits with nothing progressing before it gives up,
+// given the two things that legitimately make it wait.
+//
+// A host cooling, and one fetch taking as long as the job allows it to.
+// Progress is only recorded after a fetch returns, so both have to be in the
+// bound: the rate term was added and the fetch term was not, and a job with
+// `timeout = "10m"` and one slow page had a worker declare the crawl stalled
+// six minutes in while another was still fetching perfectly happily. The run
+// then reported Stalled and blamed the store for zero refused writes.
+//
+// A function rather than an expression at the one call site, so a test can
+// assert the bound this computes rather than recomputing it and agreeing with
+// itself.
+func StallFor(rate, fetch time.Duration) time.Duration {
+	return Stall + rate + fetch
+}
+
 // Idle is how long the loop waits when the frontier has nothing due but is not
 // empty, which is what politeness looks like from here.
 const Idle = 50 * time.Millisecond
@@ -409,7 +426,7 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 
 	stall := r.opts.Stall
 	if stall <= 0 {
-		stall = Stall + rate
+		stall = StallFor(rate, fetch)
 	}
 
 	for range workers {
@@ -510,12 +527,16 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 	shutdown, done := context.WithTimeout(context.WithoutCancel(ctx), Shutdown)
 	defer done()
 
-	if err := r.flush(shutdown); err != nil {
-		return ending.Load().(Ending), err
-	}
-
+	// The workers' problems are collected before anything can return, because
+	// a flush failure used to return first and take them with it: an exporter
+	// running out of disk hid the frontier failure that had stopped the crawl
+	// early, which is the more diagnostic of the two and the reason there was
+	// nothing left to export.
 	var failures []error
 	for err := range problems {
+		failures = append(failures, err)
+	}
+	if err := r.flush(shutdown); err != nil {
 		failures = append(failures, err)
 	}
 	if err := errors.Join(failures...); err != nil {
@@ -561,6 +582,15 @@ func (r *Run) one(ctx context.Context, req *scheduler.Request) {
 		r.log.DebugContext(ctx, "dropped", "url", req.URL, "why", err)
 		r.done(ctx, req)
 		return
+	case err != nil && ctx.Err() != nil:
+		// The crawl was interrupted while this page was in flight. That is not
+		// the page failing, and reporting it as one spends a frontier attempt
+		// on it: three interruptions while the same slow URL was being fetched
+		// abandoned it altogether, so the resume that interruption exists to
+		// preserve quietly lost a URL. The lease expires on its own and the
+		// next run takes it.
+		r.log.DebugContext(ctx, "interrupted mid-fetch", "url", req.URL)
+		return
 	case err != nil:
 		r.stats.Failed.Add(1)
 		r.log.WarnContext(ctx, "fetch failed", "url", req.URL, "error", err)
@@ -588,15 +618,28 @@ func (r *Run) one(ctx context.Context, req *scheduler.Request) {
 		return
 	}
 
-	if added, err := r.sched.Submit(ctx, out.Links...); err != nil {
+	added, err := r.sched.Submit(ctx, out.Links...)
+
+	// What did land is counted whatever else happened, and only what did not
+	// is counted lost.
+	//
+	// Submit returns both, because a partial failure is the ordinary one: most
+	// of a page's links are usually dropped as out of scope, which is not a
+	// failure at all. Counting the whole page as lost on any error meant a page
+	// with a hundred links, ninety-nine of them off-site and one write that
+	// failed, reported a hundred urls thrown away and failed the run, while the
+	// summary said nothing had been queued from a page that queued one.
+	r.stats.Queued.Add(int64(added))
+
+	if err != nil {
 		// Counted, not merely logged. A store that has stopped accepting work
 		// is not a quiet crawl: every link found from here on is thrown away,
 		// the frontier drains, and the run reports that it finished the site.
 		// The count is what [Run.Do] turns into a failure at the end.
-		r.stats.Lost.Add(int64(len(out.Links)))
+		if lost := len(out.Links) - added; lost > 0 {
+			r.stats.Lost.Add(int64(lost))
+		}
 		r.log.WarnContext(ctx, "could not queue what a page found", "url", req.URL, "error", err)
-	} else {
-		r.stats.Queued.Add(int64(added))
 	}
 
 	if len(out.Items) > 0 {

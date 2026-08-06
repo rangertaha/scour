@@ -741,3 +741,129 @@ func TestTheHoldOutlastsOneFetch(t *testing.T) {
 		t.Errorf("Hold = %s for a ten minute fetch", got)
 	}
 }
+
+// TestASlowFetchIsNotAStall.
+//
+// Hold lets one fetch outlast the lease, and the stall bound was not updated to
+// match: `timeout = "10m"` and one slow page had a worker declare the crawl
+// stalled six minutes in while another was still fetching happily. The run then
+// reported Stalled and blamed the store for zero refused writes.
+//
+// Asserted on the arithmetic, because observing it through a crawl would mean
+// waiting a fetch timeout out.
+func TestASlowFetchIsNotAStall(t *testing.T) {
+	server, _ := site(t)
+
+	j := document(t, server, `
+  downloader {
+    timeout = "10m"
+  }
+
+  scheduler {
+    rate = "1s"
+  }
+`)
+
+	fetch, err := j.Downloader.RequestTimeout()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rate, err := j.Scheduler.RateDuration()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stall := run.StallFor(rate, fetch)
+	hold := run.Hold(fetch)
+
+	if stall <= hold {
+		t.Errorf("stall %s does not outlast a hold of %s, so a worker waiting on one fetch declares a stall",
+			stall, hold)
+	}
+	if stall <= fetch {
+		t.Errorf("stall %s does not outlast a fetch of %s", stall, fetch)
+	}
+}
+
+// TestAPartialFailureLosesOnlyWhatWasLost.
+//
+// Most of a page's links are usually dropped as out of scope, which is not a
+// failure at all, so counting the whole page as lost on any error reported a
+// hundred urls thrown away when one write had failed — and discarded the count
+// of what had landed, so the summary said nothing was queued from a page that
+// had queued the rest.
+//
+// The frontier here takes some and then refuses, which is the shape a real
+// partial failure has and the shape no other test produced.
+func TestAPartialFailureLosesOnlyWhatWasLost(t *testing.T) {
+	server, _ := site(t)
+
+	partial := &partialFrontier{Frontier: mustOpen(t), accept: 2}
+	r, err := run.New(context.Background(), document(t, server, ""), run.Options{
+		Dir:   t.TempDir(),
+		Open:  func(cfg frontier.Config) (frontier.Frontier, error) { return partial, nil },
+		Stall: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	if _, err := r.Seed(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	partial.on.Store(true)
+
+	// The run fails, because links really were thrown away.
+	if _, err := r.Do(context.Background()); err == nil {
+		t.Fatal("a run that lost links reported success")
+	}
+
+	stats := r.Stats()
+	lost, queued := stats.Lost.Load(), stats.Queued.Load()
+
+	if lost == 0 {
+		t.Fatal("nothing was counted lost by a frontier that refused writes")
+	}
+	// The page that failed had more links than the two the frontier took, and
+	// what it took is not lost.
+	if queued == 0 {
+		t.Error("the urls the frontier did take were not counted queued")
+	}
+	if int(lost) >= len(indexLinks)+int(queued) {
+		t.Errorf("lost %d of a page whose links the frontier partly took (queued %d)", lost, queued)
+	}
+}
+
+// indexLinks is what the test site's index page offers, which is what a partial
+// failure is measured against.
+var indexLinks = []string{"/story/1", "/story/2", "/story/3", "/story/1?utm_source=nav"}
+
+// partialFrontier takes a few requests and then refuses, which is what a store
+// under pressure does and what no other double here produced.
+type partialFrontier struct {
+	frontier.Frontier
+	on     atomic.Bool
+	accept int
+	taken  atomic.Int64
+}
+
+func (f *partialFrontier) Add(ctx context.Context, job string, reqs ...frontier.Request) (int, error) {
+	if !f.on.Load() {
+		return f.Frontier.Add(ctx, job, reqs...)
+	}
+
+	var added int
+	for _, req := range reqs {
+		if int(f.taken.Load()) >= f.accept {
+			return added, errors.New("database is locked")
+		}
+		n, err := f.Frontier.Add(ctx, job, req)
+		if err != nil {
+			return added, err
+		}
+		f.taken.Add(1)
+		added += n
+	}
+	return added, nil
+}
