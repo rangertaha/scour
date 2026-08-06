@@ -120,7 +120,7 @@ func TestTheSameEventsComeBackEitherWay(t *testing.T) {
 	}
 	defer remote.Close()
 
-	service, err := conn.ServeEvents(remote)
+	service, err := conn.ServeEvents(remote, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestAnEventTheStoreRefusesIsAnAnswer(t *testing.T) {
 	}
 	defer store.Close()
 
-	service, err := conn.ServeEvents(store)
+	service, err := conn.ServeEvents(store, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestTheClientKeepsTheEventContract(t *testing.T) {
 		}
 		t.Cleanup(func() { store.Close() })
 
-		service, err := conn.ServeEvents(store)
+		service, err := conn.ServeEvents(store, 0)
 		if err != nil {
 			t.Fatalf("serve: %v", err)
 		}

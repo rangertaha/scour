@@ -126,7 +126,7 @@ func TestTheSameTopicsComeBackEitherWay(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	service, err := conn.ServeTopics(remote)
+	service, err := conn.ServeTopics(remote, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestAClientScoresWithTheModelItFetched(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	service, err := conn.ServeTopics(remote)
+	service, err := conn.ServeTopics(remote, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestATopicNobodyTrainedIsRefusedByName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := conn.ServeTopics(remote)
+	service, err := conn.ServeTopics(remote, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

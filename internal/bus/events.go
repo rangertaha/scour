@@ -49,8 +49,10 @@ type (
 // ServeEvents answers for an event store until the returned service is closed.
 //
 // The store is not closed with it, for the reason [Conn.ServeEntities] gives.
-func (c *Conn) ServeEvents(store Log) (*Service, error) {
-	s := &Service{}
+// The wait bounds one request, and comes from the service document's
+// `timeout`. Zero means [Timeout].
+func (c *Conn) ServeEvents(store Log, wait time.Duration) (*Service, error) {
+	s := &Service{wait: wait}
 
 	serving(c, s, EventSubject("put"), EventQueue,
 		func(ctx context.Context, a putAsk) (string, error) {

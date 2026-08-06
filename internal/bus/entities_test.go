@@ -4,6 +4,7 @@ package bus_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -170,7 +171,7 @@ func TestTheSameOperationsProduceTheSameGraphEitherWay(t *testing.T) {
 	}
 	defer remote.Close()
 
-	service, err := conn.ServeEntities(remote)
+	service, err := conn.ServeEntities(remote, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +207,7 @@ func TestTheStoreSaysNoRatherThanNothingAnswering(t *testing.T) {
 	}
 	defer store.Close()
 
-	service, err := conn.ServeEntities(store)
+	service, err := conn.ServeEntities(store, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +257,7 @@ func TestTheClientKeepsTheGraphContract(t *testing.T) {
 		}
 		t.Cleanup(func() { store.Close() })
 
-		service, err := conn.ServeEntities(store)
+		service, err := conn.ServeEntities(store, 0)
 		if err != nil {
 			t.Fatalf("serve: %v", err)
 		}
@@ -264,4 +265,58 @@ func TestTheClientKeepsTheGraphContract(t *testing.T) {
 
 		return conn.NewEntities(wait)
 	})
+}
+
+// slowGraph is a graph whose Assert never returns until its context ends, so a
+// test can see what deadline the service gave it.
+//
+// The embedded interface is nil: every other method panics if called, which is
+// what this test wants. It asks for one operation, and a graph that quietly
+// answered a second would hide a change in what the service calls.
+type slowGraph struct {
+	bus.Graph
+	saw chan error
+}
+
+func (g *slowGraph) Assert(ctx context.Context, kind, name string, said entity.Provenance) (string, error) {
+	<-ctx.Done()
+	g.saw <- ctx.Err()
+	return "", ctx.Err()
+}
+
+// TestAServiceBoundsARequestByTheTimeItWasGiven.
+//
+// `timeout` in a service block was parsed, validated, documented as "how long
+// one request may take", and read by nothing: every handler ran on the
+// package's own constant instead. A service document asking for a two-second
+// bound got the default, so an operator who had shortened it to keep a busy
+// store responsive was watching requests they thought were bounded hold a
+// connection for the full default.
+//
+// The handler's context is the observable part, so that is what is asserted:
+// what the service promises is not that a slow store is fast, but that it is
+// let go of when the time the document named has passed.
+func TestAServiceBoundsARequestByTheTimeItWasGiven(t *testing.T) {
+	conn := connect(t)
+
+	graph := &slowGraph{saw: make(chan error, 1)}
+	service, err := conn.ServeEntities(graph, 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+
+	// The caller waits far longer than the service was given, so what ends the
+	// handler is the service's own deadline and not this one.
+	go conn.NewEntities(10*time.Second).Assert(
+		context.Background(), "company", "acme", entity.Provenance{Job: "j", URL: "u"})
+
+	select {
+	case err := <-graph.saw:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("the handler ended with %v, want the deadline the document asked for", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Error("the handler was never let go: the service used its own timeout, not the document's")
+	}
 }

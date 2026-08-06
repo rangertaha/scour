@@ -124,8 +124,10 @@ type (
 // The store is not closed with it: whoever opened it owns it, and a service
 // that closed somebody else's store on shutdown would take the graph away from
 // everything else in the process still using it.
-func (c *Conn) ServeEntities(store Graph) (*Service, error) {
-	s := &Service{}
+// The wait bounds one request, and comes from the service document's
+// `timeout`. Zero means [Timeout].
+func (c *Conn) ServeEntities(store Graph, wait time.Duration) (*Service, error) {
+	s := &Service{wait: wait}
 
 	serving(c, s, EntitySubject("assert"), EntityQueue,
 		func(ctx context.Context, a assertAsk) (string, error) {

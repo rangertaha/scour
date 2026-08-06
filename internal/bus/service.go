@@ -121,7 +121,7 @@ func remoteError(msg, sentinel string) error {
 
 // serve subscribes one operation, in a queue group so that starting a second
 // service does not double every write.
-func serve[Req, Res any](c *Conn, subject, queue string, handle func(context.Context, Req) (Res, error)) (*nats.Subscription, error) {
+func serve[Req, Res any](c *Conn, subject, queue string, wait time.Duration, handle func(context.Context, Req) (Res, error)) (*nats.Subscription, error) {
 	sub, err := c.QueueSubscribe(subject, queue, func(msg *nats.Msg) {
 		var req Req
 		var reply struct {
@@ -136,7 +136,12 @@ func serve[Req, Res any](c *Conn, subject, queue string, handle func(context.Con
 			// A context of the handler's own. The request that arrived carries
 			// no deadline, and a store call with none is one that can hold a
 			// connection open for as long as the store is unwell.
-			ctx, cancel := context.WithTimeout(context.Background(), Timeout)
+			//
+			// How long is the service document's to say, which is why it
+			// arrives here rather than being read from the package constant:
+			// `timeout` was documented as how long one request may take and
+			// then never reached the request. Zero still means [Timeout].
+			ctx, cancel := withTimeout(context.Background(), wait)
 			result, err := handle(ctx, req)
 			cancel()
 
@@ -174,6 +179,14 @@ type none struct{}
 type Service struct {
 	subs []*nats.Subscription
 	err  error
+
+	// wait bounds one request, for every operation this service registers.
+	//
+	// Held here rather than passed to each serving call because a service
+	// whose operations disagreed about how long they may take is a service
+	// nobody can reason about, and because it is one place for the next
+	// ServeX to find. Zero means [Timeout].
+	wait time.Duration
 }
 
 // serving registers one operation, remembering the first failure rather than
@@ -187,7 +200,7 @@ func serving[Req, Res any](c *Conn, s *Service, subject, queue string, handle fu
 	if s.err != nil {
 		return
 	}
-	sub, err := serve(c, subject, queue, handle)
+	sub, err := serve(c, subject, queue, s.wait, handle)
 	if err != nil {
 		s.err = err
 		return

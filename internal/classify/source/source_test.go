@@ -103,7 +103,7 @@ func TestAClassifierIsTheSameWhereverItCameFrom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := conn.ServeTopics(topics)
+	service, err := conn.ServeTopics(topics, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestATopicNobodyTrainedIsRefusedWhenTheChainIsBuilt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := conn.ServeTopics(topics)
+	service, err := conn.ServeTopics(topics, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

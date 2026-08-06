@@ -81,8 +81,10 @@ type (
 )
 
 // ServeTopics answers for a topic store until the returned service is closed.
-func (c *Conn) ServeTopics(topics Topics) (*Service, error) {
-	s := &Service{}
+// The wait bounds one request, and comes from the service document's
+// `timeout`. Zero means [Timeout].
+func (c *Conn) ServeTopics(topics Topics, wait time.Duration) (*Service, error) {
+	s := &Service{wait: wait}
 
 	serving(c, s, TopicSubject("names"), TopicQueue,
 		func(_ context.Context, _ nothingAsk) ([]string, error) {

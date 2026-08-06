@@ -126,13 +126,18 @@ func runService(ctx context.Context, a *App, path, join string) error {
 	}()
 
 	if c := doc.Entity; c != nil {
+		// The document's own timeout, not the bus package's default. Validate
+		// has already refused a length of time that is not one, so the error
+		// here cannot happen and the wait is used as it is.
+		wait, _ := c.Wait()
+
 		store, err := entity.New(ctx, entity.Config{Dir: c.Dir})
 		if err != nil {
 			return Failedf("%v", err)
 		}
 		stop = append(stop, store.Close)
 
-		service, err := conn.ServeEntities(store)
+		service, err := conn.ServeEntities(store, wait)
 		if err != nil {
 			return Failedf("%v", err)
 		}
@@ -142,13 +147,15 @@ func runService(ctx context.Context, a *App, path, join string) error {
 	}
 
 	if c := doc.Event; c != nil {
+		wait, _ := c.Wait()
+
 		store, err := event.New(ctx, event.Config{Dir: c.Dir})
 		if err != nil {
 			return Failedf("%v", err)
 		}
 		stop = append(stop, store.Close)
 
-		service, err := conn.ServeEvents(store)
+		service, err := conn.ServeEvents(store, wait)
 		if err != nil {
 			return Failedf("%v", err)
 		}
@@ -158,12 +165,14 @@ func runService(ctx context.Context, a *App, path, join string) error {
 	}
 
 	if c := doc.Topic; c != nil {
+		wait, _ := c.Wait()
+
 		topics, err := store.Open(c.Dir)
 		if err != nil {
 			return Failedf("%v", err)
 		}
 
-		service, err := conn.ServeTopics(topics)
+		service, err := conn.ServeTopics(topics, wait)
 		if err != nil {
 			return Failedf("%v", err)
 		}
