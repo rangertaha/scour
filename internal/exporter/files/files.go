@@ -74,6 +74,9 @@ func open(cfg exporter.Config, extension string) (io.WriteCloser, string, error)
 		name = cfg.Item + "." + extension
 	}
 	path := filepath.Join(c.Dir, name)
+	if err := cfg.Claim(path, cfg.Format+"."+cfg.Item); err != nil {
+		return nil, "", err
+	}
 
 	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0o750); err != nil {

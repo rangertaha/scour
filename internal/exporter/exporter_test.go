@@ -375,3 +375,68 @@ func TestAnEmptyCSVStillHasItsHeader(t *testing.T) {
 		t.Errorf("header = %q", got)
 	}
 }
+
+// TestTwoExportersMayNotWriteOneFile.
+//
+// The engine refuses a duplicate format.item and nothing else, and the path
+// lives inside each format's own block, which the engine deliberately does not
+// decode. So two exporters pointed at one file validated cleanly, both called
+// os.Create on it, the second truncated the first's header, and the two handles
+// wrote from independent offsets: a file that is neither export, with both
+// Close calls reporting success.
+func TestTwoExportersMayNotWriteOneFile(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := exporter.New(context.Background(), job(t, `
+  item "price" {
+    property "value" {
+      type = str
+    }
+  }
+
+  exporter "csv" "article" {
+    dir  = "`+dir+`"
+    file = "out.csv"
+  }
+
+  exporter "csv" "price" {
+    dir  = "`+dir+`"
+    file = "out.csv"
+  }
+`), nil)
+	if err == nil {
+		t.Fatal("two exporters were given one file")
+	}
+	if !strings.Contains(err.Error(), "out.csv") {
+		t.Errorf("the refusal does not name the file: %v", err)
+	}
+	if !strings.Contains(err.Error(), "different files") {
+		t.Errorf("the refusal does not say what to do: %v", err)
+	}
+}
+
+// TestOneFilePerExporterIsStillFine, so the check refuses a collision rather
+// than refusing two exporters.
+func TestOneFilePerExporterIsStillFine(t *testing.T) {
+	dir := t.TempDir()
+
+	set, err := exporter.New(context.Background(), job(t, `
+  item "price" {
+    property "value" {
+      type = str
+    }
+  }
+
+  exporter "csv" "article" {
+    dir = "`+dir+`"
+  }
+
+  exporter "csv" "price" {
+    dir = "`+dir+`"
+  }
+`), nil)
+	if err != nil {
+		t.Fatalf("two exporters with their own default files were refused: %v", err)
+	}
+	set.Close()
+}

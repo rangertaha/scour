@@ -226,6 +226,9 @@ func destination(cfg exporter.Config, c Config) (io.WriteCloser, string, error) 
 		name = cfg.Item + ".parquet"
 	}
 	path := filepath.Join(c.Dir, name)
+	if err := cfg.Claim(path, cfg.Format+"."+cfg.Item); err != nil {
+		return nil, "", err
+	}
 
 	// The directory is made first, so a missing parent reads as a missing
 	// parent rather than as a file that could not be created.

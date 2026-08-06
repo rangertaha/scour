@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/hashicorp/hcl/v2/gohcl"
@@ -72,6 +73,36 @@ type Config struct {
 	// Out overrides the file, so a test or a `--stdout` run can read what was
 	// written without going near a disk.
 	Out io.WriteCloser
+
+	// claim is how a file-backed exporter says which path it owns. Unexported:
+	// a format calls [Config.Claim] and nothing else needs to see the list.
+	claim func(path, address string) error
+}
+
+// Claim reserves a path for this exporter, and refuses one another exporter in
+// the same job already owns.
+//
+// # Why this exists
+//
+// Because two exporters could be pointed at one file and neither would notice.
+// `exporter "csv" "article" { file = "out.csv" }` and the same for "price"
+// validate cleanly — the engine only refuses a duplicate format.item, and the
+// path lives inside each format's own block, which the engine deliberately does
+// not decode. Both then called os.Create on it: the second truncated the
+// first's header, the two handles wrote from independent offsets, and the
+// result was a file that is neither export. Both Close calls reported success.
+//
+// A format that writes to a path calls this before creating anything, so the
+// job is refused rather than half-written. A format that shares a file on
+// purpose does not: the SQLite exporter puts one table per item in one
+// database, and its handle is reference counted for exactly that reason.
+func (c Config) Claim(path, address string) error {
+	if c.claim == nil {
+		// Built without a set, which is what a test that constructs a Config
+		// by hand does. Nothing to collide with.
+		return nil
+	}
+	return c.claim(path, address)
 }
 
 // Body is an exporter's own configuration, decoded by the exporter.
@@ -98,6 +129,29 @@ type Set struct {
 	job     string
 	writers []named
 	closed  bool
+
+	// paths is what each file-backed exporter owns, so two cannot own one. See
+	// [Config.Claim].
+	paths map[string]string
+}
+
+// claimPath records which exporter owns a path, refusing a second.
+func (s *Set) claimPath(path, address string) error {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		// Not resolvable, so compare what was given. Two exporters naming one
+		// file two ways is a stretch; two naming it identically is not.
+		absolute = path
+	}
+
+	if s.paths == nil {
+		s.paths = map[string]string{}
+	}
+	if owner, taken := s.paths[absolute]; taken {
+		return fmt.Errorf("writes to %s, which %s already writes. Give them different files", path, owner)
+	}
+	s.paths[absolute] = address
+	return nil
 }
 
 type named struct {
@@ -132,6 +186,7 @@ func New(ctx context.Context, job *engine.Job, out map[string]io.WriteCloser) (*
 			Shape:  itemNamed(job, declared.Item),
 			Body:   body{declared},
 			Out:    out[address],
+			claim:  set.claimPath,
 		})
 		if err != nil {
 			failed = append(failed, fmt.Sprintf("%s (%v)", address, err))
