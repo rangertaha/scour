@@ -237,7 +237,7 @@ func TestANodeThatStoppedStopsBeingListed(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	if err := nodes.Announce(ctx, "worker-one", []byte(`{"stages":["download"]}`)); err != nil {
+	if _, err := nodes.Announce(ctx, "worker-one", []byte(`{"stages":["download"]}`)); err != nil {
 		t.Fatalf("announce: %v", err)
 	}
 

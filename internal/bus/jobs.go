@@ -251,14 +251,26 @@ func (c *Conn) OpenNodes(ctx context.Context) (*Nodes, error) {
 	return &Nodes{kv: kv}, nil
 }
 
-// Announce says this node is here, and keeps saying it until the context ends.
-func (n *Nodes) Announce(ctx context.Context, name string, what []byte) error {
+// Announce says this node is here, and keeps saying it until the returned stop
+// is called or the context ends.
+func (n *Nodes) Announce(ctx context.Context, name string, what []byte) (stop func(), err error) {
 	if err := checkName(name); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := n.kv.Put(ctx, name, what); err != nil {
-		return fmt.Errorf("bus: announce %q: %w", name, err)
+		return nil, fmt.Errorf("bus: announce %q: %w", name, err)
 	}
+
+	// Its own cancellation, so a caller that stops serving can stop saying it
+	// is here.
+	//
+	// The renewal used to end only with the context the caller happened to pass
+	// in, which for a node is the one its whole run uses: a node that had been
+	// closed, with its stages torn down and answering nothing, went on
+	// rewriting its row every ten seconds for as long as that context lived, so
+	// the registry listed a node with its stages that nobody could get an
+	// answer from.
+	ctx, leave := context.WithCancel(ctx)
 
 	go func() {
 		ticker := time.NewTicker(NodeTTL / 3)
@@ -281,7 +293,7 @@ func (n *Nodes) Announce(ctx context.Context, name string, what []byte) error {
 			}
 		}
 	}()
-	return nil
+	return leave, nil
 }
 
 // Here lists the nodes that have announced themselves recently.

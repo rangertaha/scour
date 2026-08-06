@@ -396,3 +396,101 @@ func waitFor(t *testing.T, done func() bool) {
 	}
 	t.Fatal("timed out waiting")
 }
+
+// TestAClosedNodeStopsSayingItIsHere.
+//
+// The presence renewal ended only with the context the caller happened to pass
+// in, which for a node is the one its whole run uses. A node that had been
+// closed, with its stages torn down and answering nothing, went on rewriting
+// its row every ten seconds for as long as that context lived — so the registry
+// listed a node with its stages that nobody could get an answer from.
+func TestAClosedNodeStopsSayingItIsHere(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	conn, err := bus.Connect(bus.Options{Name: "one", StoreDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	joined, err := node.Join(ctx, conn, node.Options{Name: "worker", Bodies: bodies(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nodes, err := conn.OpenNodes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	here, err := nodes.Here(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, listed := here["worker"]; !listed {
+		t.Fatal("a node that joined is not listed")
+	}
+
+	if err := joined.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Gone at once rather than left to expire, which is what the announcement
+	// already promised for a cancelled context and did not do for Close.
+	here, err = nodes.Here(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, listed := here["worker"]; listed {
+		t.Error("a closed node is still listed as here, with stages it no longer serves")
+	}
+}
+
+// TestAClosedNodeTakesOnNothingFurther.
+//
+// serve releases the lock to build its stages and subscribe, which takes as
+// long as opening a cache and a database. A Close in that window swapped in an
+// empty map and returned having stopped nothing for the job, and serve then put
+// its subscriptions into the fresh map where nothing would ever close them: the
+// node answered for a job after Close returned, and a second Close could not
+// help, having no handle on them.
+func TestAClosedNodeTakesOnNothingFurther(t *testing.T) {
+	server, _ := site(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	conn, err := bus.Connect(bus.Options{Name: "one", StoreDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	joined, err := node.Join(ctx, conn, node.Options{Name: "worker", Bodies: bodies(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go joined.Watch(ctx)
+
+	if err := joined.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A job arriving after Close is not taken on, however the watch happens to
+	// be scheduled.
+	store, err := conn.OpenJobs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Put(ctx, "news", []byte(document(server))); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if serving := joined.Serving(); len(serving) != 0 {
+			t.Fatalf("a closed node took on %v", serving)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

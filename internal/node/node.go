@@ -79,6 +79,17 @@ type Node struct {
 
 	mu      sync.Mutex
 	serving map[string]*served
+
+	// closed is set by Close, so a serve that was building when it ran does not
+	// put its subscriptions into the map afterwards. Without it the node kept
+	// answering for a job after Close had returned, with nothing holding a
+	// handle on the subscriptions.
+	closed bool
+
+	// leave stops the presence renewal. Held so Close can end it: a closed node
+	// that kept renewing was listed in the registry with its stages while
+	// answering nothing.
+	leave func()
 }
 
 // served is what one node is running for one job.
@@ -191,9 +202,11 @@ func Join(ctx context.Context, conn *bus.Conn, opts Options) (*Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("node: %w", err)
 	}
-	if err := nodes.Announce(ctx, opts.Name, announcement); err != nil {
+	leave, err := nodes.Announce(ctx, opts.Name, announcement)
+	if err != nil {
 		return nil, err
 	}
+	n.leave = leave
 	return n, nil
 }
 
@@ -322,7 +335,19 @@ func (n *Node) serve(ctx context.Context, change bus.Change) error {
 		}
 	}
 
+	// Checked again under the lock, because serve releases it to build the
+	// stages and subscribe, which takes as long as opening a cache and a
+	// database. A Close in that window swapped in an empty map and returned,
+	// having stopped nothing for this job, and then this line put the new
+	// subscriptions into the fresh map where nothing would ever close them: the
+	// node went on answering for a job after Close had returned, and a second
+	// Close could not help because it had no handle on them.
 	n.mu.Lock()
+	if n.closed {
+		n.mu.Unlock()
+		running.close()
+		return nil
+	}
 	n.serving[job.Name] = running
 	n.mu.Unlock()
 
@@ -378,12 +403,50 @@ func (n *Node) stopAll() {
 
 // Close stops everything this node was serving.
 func (n *Node) Close() error {
+	n.mu.Lock()
+	n.closed = true
+	leave := n.leave
+	n.mu.Unlock()
+
+	// Stop saying this node is here before tearing down what it was here for,
+	// so the registry never lists a node that has stopped answering.
+	if leave != nil {
+		leave()
+	}
+
 	n.stopAll()
 	return nil
 }
 
 // Drain is how long a node waits for the requests it had already taken.
 const Drain = 30 * time.Second
+
+// settled is how often the subscriptions are asked whether they have handed
+// everything over. Short, because this is the gap between a message arriving
+// and a handler starting, which is microseconds when nothing is wrong.
+const settled = 5 * time.Millisecond
+
+// settle waits until nothing is buffered in the subscriptions.
+//
+// Bounded by [Drain] like everything else here: a subscription that never
+// empties must not hold a shutdown open, and past the bound the in-flight wait
+// is still there to catch what did start.
+func (s *served) settle() {
+	deadline := time.Now().Add(Drain)
+
+	for time.Now().Before(deadline) {
+		pending := 0
+		for _, sub := range s.subs {
+			if n, _, err := sub.Pending(); err == nil {
+				pending += n
+			}
+		}
+		if pending == 0 {
+			return
+		}
+		time.Sleep(settled)
+	}
+}
 
 // close stops taking work, waits for what is in flight, and only then releases
 // what the stages hold.
@@ -395,9 +458,24 @@ const Drain = 30 * time.Second
 // own context is cancelled last, so a request that was in flight is answered
 // rather than aborted with "context canceled".
 func (s *served) close() {
+	// Drained, not unsubscribed: unsubscribing discards the requests NATS has
+	// already handed this member, and core NATS does not redeliver them, so
+	// whoever asked would wait out its timeout for an answer nobody was ever
+	// going to give.
 	for _, sub := range s.subs {
 		_ = sub.Drain()
 	}
+
+	// Then wait for the delivered-but-not-yet-started messages to reach the
+	// handler, because the in-flight counter cannot see them.
+	//
+	// Drain is asynchronous. A request already buffered in the subscription has
+	// not entered the counter, so the wait below returned at once, the context
+	// was cancelled and the chain closed under a callback that was about to
+	// run. That is the use-after-close this function's own comment claims to
+	// have fixed; it did not cover the window before a message reaches the
+	// handler.
+	s.settle()
 	if s.work != nil {
 		s.work.wait(Drain)
 	}
