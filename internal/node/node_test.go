@@ -169,7 +169,7 @@ func TestTwoNodesOneJobWorkOnBoth(t *testing.T) {
 		}
 		defer fetcher.Close()
 
-		if _, err := each.conn.ServeDownloader(ctx, "news", counting{fetcher, each.count}, shared); err != nil {
+		if _, err := each.conn.ServeDownloader(ctx, "news", counting{fetcher, each.count}, shared, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

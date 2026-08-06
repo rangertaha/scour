@@ -40,14 +40,29 @@ import (
 // mentions the field is called elsewhere. Reading it here does not count, and
 // nor does validating it — validation is what all three instances had.
 //
+// # What it does NOT catch, which is most of it
+//
+// The match is on the selector's bare name, with no type behind it, so any
+// identifier of the same name anywhere in the tree vouches for a field. That is
+// not a small gap: of the 94 tagged fields, 77 pass on the bare name alone, and
+// the passes are often nonsense. `Monitoring.Level` is vouched for by
+// parquet-go's `.Level(0, 0, i)`; every service block's `Dir` by
+// `filepath.Dir`. Two of the three instances this was written for would have
+// slipped through — `monitoring.level` demonstrably does.
+//
+// So it catches a new field with a distinctive name and nothing else, which is
+// worth having and is not the guarantee the name suggests. Making it hold needs
+// the selector resolved to its type, which needs go/types and
+// golang.org/x/tools/go/packages. That is recorded rather than done, and this
+// comment is here so nobody reads a pass as proof.
+//
 // # Why an allowlist rather than a cleverer check
 //
-// Because the honest alternatives are worse. Following a field through
-// engine-internal machinery to whatever it eventually affects is dataflow
-// analysis, and a check nobody can predict the output of is a check people
-// disable. Four fields are genuinely reachable in a way this cannot see, they
-// are listed below with the reason, and anything new has to be argued for in
-// the same place. That is the point: the exemption is visible.
+// Following a field through engine-internal machinery to whatever it eventually
+// affects is dataflow analysis, and a check nobody can predict the output of is
+// a check people disable. Four fields are genuinely reachable in a way this
+// cannot see, they are listed below with the reason, and anything new has to be
+// argued for in the same place. That is the point: the exemption is visible.
 func TestNoSettingIsAcceptedAndIgnored(t *testing.T) {
 	const dir = "."
 

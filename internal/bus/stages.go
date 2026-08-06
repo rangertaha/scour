@@ -85,6 +85,32 @@ type readReply struct {
 	Error   string `json:"error,omitempty"`
 }
 
+// Working is told when a request starts and finishes being handled.
+//
+// It exists because "in flight" has to mean the whole request and not just the
+// stage's part of it. A node that counted only the handler released its guard
+// while the callback was still storing the fetched body, and then cancelled the
+// context that store was using: a page fetched perfectly well came back as
+// "could not store the body: context canceled", the body was thrown away, and
+// the driving node recorded a failure for it. The callback is the unit of work,
+// so the callback is what gets counted.
+//
+// Nil means nobody is waiting, which is what a caller with nothing to drain
+// passes.
+type Working interface {
+	Enter()
+	Leave()
+}
+
+// entered marks the start of a request and returns how to mark its end.
+func entered(work Working) func() {
+	if work == nil {
+		return func() {}
+	}
+	work.Enter()
+	return work.Leave
+}
+
 // ServeDownloader answers fetch requests for one job.
 //
 // The subscription is a queue group, so two nodes serving one job's downloader
@@ -93,9 +119,11 @@ type readReply struct {
 // It takes a handler rather than the stage, because what is behind it is not
 // this package's business: a downloader, one wrapped in something that counts,
 // or a stand-in are all the same thing from here.
-func (c *Conn) ServeDownloader(ctx context.Context, job string, stage downloader.Handler, bodies cache.Store) (*nats.Subscription, error) {
+func (c *Conn) ServeDownloader(ctx context.Context, job string, stage downloader.Handler, bodies cache.Store, work Working) (*nats.Subscription, error) {
 	return c.QueueSubscribe(Subject(job, DownloadSubject), Queue(job, DownloadSubject),
 		func(msg *nats.Msg) {
+			defer entered(work)()
+
 			var req fetchRequest
 			if err := json.Unmarshal(msg.Data, &req); err != nil {
 				reply(msg, fetchReply{Error: "bus: unreadable request: " + err.Error()})
@@ -219,9 +247,11 @@ func (d *Downloader) Handle(ctx context.Context, req *downloader.Request) (*down
 }
 
 // ServeSpider answers read requests for one job.
-func (c *Conn) ServeSpider(ctx context.Context, job string, stage spider.Handler, bodies cache.Store) (*nats.Subscription, error) {
+func (c *Conn) ServeSpider(ctx context.Context, job string, stage spider.Handler, bodies cache.Store, work Working) (*nats.Subscription, error) {
 	return c.QueueSubscribe(Subject(job, ReadSubject), Queue(job, ReadSubject),
 		func(msg *nats.Msg) {
+			defer entered(work)()
+
 			var req readRequest
 			if err := json.Unmarshal(msg.Data, &req); err != nil {
 				reply(msg, readReply{Error: "bus: unreadable request: " + err.Error()})

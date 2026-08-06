@@ -30,6 +30,20 @@ func (plan *itemPlan) extract(p *page) *Item {
 			}
 			continue
 		}
+		// A relation's pseudo-property contributes its fields and never the
+		// name itself.
+		//
+		// A relation may share a name with a property on purpose: the schema
+		// says a relation with no `property` is asserted from an extracted
+		// property of the same name, and the entities step reads exactly that.
+		// So the two are one name by design, and letting the pseudo-property
+		// win overwrote the real value with an empty one — the record's column
+		// went blank, and the entities step then skipped the entity, every edge
+		// to it and everything the page said about it, silently.
+		if prop.relation {
+			merge(item, prop.prop.Name, value)
+			continue
+		}
 		item.Values[prop.prop.Name] = value
 	}
 
@@ -37,6 +51,33 @@ func (plan *itemPlan) extract(p *page) *Item {
 		return nil
 	}
 	return item
+}
+
+// merge adds a relation's fields to whatever is already under its name,
+// keeping the value that was extracted for the name itself.
+func merge(item *Item, name string, from *Value) {
+	if len(from.Nested) == 0 {
+		return
+	}
+
+	into, ok := item.Values[name]
+	if !ok {
+		// Nothing was extracted under the name, so the fields stand alone: the
+		// relation's far end comes from `self` in that case, and the step
+		// resolves it without needing a value here.
+		item.Values[name] = from
+		return
+	}
+	if into.Nested == nil {
+		into.Nested = map[string]*Value{}
+	}
+	for field, value := range from.Nested {
+		// What the item declared wins, because a property is a claim about the
+		// page and a relation's field is a claim about the edge.
+		if _, taken := into.Nested[field]; !taken {
+			into.Nested[field] = value
+		}
+	}
 }
 
 // find looks for one property's value, taught locators first.
@@ -71,20 +112,33 @@ func (p *propPlan) find(page *page, within *html.Node) *Value {
 		return found
 	}
 
-	// A property that found nothing itself may still have fields that find
-	// something, and the fields are the point of it.
+	// A property declared purely to group fields may still have fields that
+	// find something, and the fields are the point of it.
 	//
-	// [propPlan.value] was already written for this: it refuses an empty value
-	// only when there is nothing nested. It was never reached, because finding
-	// nothing here returned before it. So an object property declared purely to
-	// group fields yielded nothing at all unless the group itself happened to
-	// match something, and a relation's properties — which have no parent value
-	// by construction, since the far end comes from `self` — could never be
-	// extracted at all.
-	if len(p.nested) > 0 {
+	// Only when it declares no locators of its own. A property that said where
+	// to look and did not find it there has not been found, whatever its
+	// children matched: allowing the children to stand in for it made
+	// `required` unenforceable on any property with nested fields, because the
+	// parent was never recorded as missing, and a site that changed its markup
+	// read as a healthy crawl while a child matched something unrelated
+	// elsewhere on the page. It also let a group with nothing in it overwrite a
+	// real value of the same name.
+	//
+	// A relation's pseudo-property has no locators by construction, since its
+	// far end comes from `self`, so this is the case it needs and the case that
+	// is safe.
+	if len(p.nested) > 0 && !p.located() {
 		return p.value(page, "", "", BySemantics, nil)
 	}
 	return nil
+}
+
+// located reports whether this property says where to look.
+//
+// A property with a locator is a claim about the page; one without is a name
+// and a shape. The difference decides whether its fields may stand in for it.
+func (p *propPlan) located() bool {
+	return len(p.css) > 0 || len(p.xpath) > 0 || len(p.regex) > 0
 }
 
 // semantic looks for what a page says about itself, under any of the names

@@ -179,10 +179,10 @@ func TestTheSameJobProducesTheSameRecordsEitherWay(t *testing.T) {
 	}
 	defer reader.Close()
 
-	if _, err := conn.ServeDownloader(ctx, j.Name, fetcher, store); err != nil {
+	if _, err := conn.ServeDownloader(ctx, j.Name, fetcher, store, nil); err != nil {
 		t.Fatalf("serve downloader: %v", err)
 	}
-	if _, err := conn.ServeSpider(ctx, j.Name, reader, store); err != nil {
+	if _, err := conn.ServeSpider(ctx, j.Name, reader, store, nil); err != nil {
 		t.Fatalf("serve spider: %v", err)
 	}
 
@@ -235,7 +235,7 @@ func TestABodyNeverCrossesTheBus(t *testing.T) {
 	}
 	defer fetcher.Close()
 
-	if _, err := conn.ServeDownloader(ctx, j.Name, fetcher, store); err != nil {
+	if _, err := conn.ServeDownloader(ctx, j.Name, fetcher, store, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -283,7 +283,7 @@ func TestADropTravelsAsADrop(t *testing.T) {
 	}
 	defer fetcher.Close()
 
-	if _, err := conn.ServeDownloader(ctx, j.Name, fetcher, store); err != nil {
+	if _, err := conn.ServeDownloader(ctx, j.Name, fetcher, store, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -332,7 +332,7 @@ func TestTwoWorkersShareTheWork(t *testing.T) {
 		}
 		defer fetcher.Close()
 
-		if _, err := conn.ServeDownloader(ctx, j.Name, countingStage{fetcher, counter}, store); err != nil {
+		if _, err := conn.ServeDownloader(ctx, j.Name, countingStage{fetcher, counter}, store, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

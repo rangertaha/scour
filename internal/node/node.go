@@ -114,7 +114,7 @@ func newInFlight() *inFlight {
 	return f
 }
 
-func (f *inFlight) enter() {
+func (f *inFlight) Enter() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -124,7 +124,7 @@ func (f *inFlight) enter() {
 	f.count++
 }
 
-func (f *inFlight) leave() {
+func (f *inFlight) Leave() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -218,6 +218,18 @@ func (n *Node) Watch(ctx context.Context) error {
 		case change, open := <-changes:
 			if !open {
 				n.stopAll()
+
+				// The channel closing while the context is still live is not
+				// this node being asked to leave: jetstream closes it when the
+				// connection drops or the consumer fails, so the node has
+				// stopped noticing jobs and nothing said so. Returning nil made
+				// `scour serve` print "has left" and exit zero, so a supervisor
+				// set to restart on failure never restarted it and the machine
+				// sat there serving whatever it happened to have.
+				if err := ctx.Err(); err == nil {
+					n.log.ErrorContext(ctx, "the job watch ended, so this node has stopped noticing jobs")
+					return errors.New("node: the job watch ended, so this node has stopped noticing jobs")
+				}
 				return nil
 			}
 			if change.Replayed {
@@ -280,7 +292,7 @@ func (n *Node) serve(ctx context.Context, change bus.Change) error {
 				running.close()
 				return err
 			}
-			sub, err := n.conn.ServeDownloader(work, job.Name, counted{built, running.work}, n.opts.Bodies)
+			sub, err := n.conn.ServeDownloader(work, job.Name, built, n.opts.Bodies, running.work)
 			if err != nil {
 				built.Close()
 				running.close()
@@ -295,7 +307,7 @@ func (n *Node) serve(ctx context.Context, change bus.Change) error {
 				running.close()
 				return err
 			}
-			sub, err := n.conn.ServeSpider(work, job.Name, read{built, running.work}, n.opts.Bodies)
+			sub, err := n.conn.ServeSpider(work, job.Name, built, n.opts.Bodies, running.work)
 			if err != nil {
 				built.Close()
 				running.close()
@@ -396,29 +408,4 @@ func (s *served) close() {
 		_ = closer()
 	}
 	s.subs, s.closers = nil, nil
-}
-
-// counted and read wrap a stage so the node knows when a handler is running.
-// Two types rather than one because the two stages carry different things, and
-// a generic wrapper would need a type parameter for no benefit.
-type counted struct {
-	inner downloader.Handler
-	work  *inFlight
-}
-
-func (c counted) Handle(ctx context.Context, req *downloader.Request) (*downloader.Response, error) {
-	c.work.enter()
-	defer c.work.leave()
-	return c.inner.Handle(ctx, req)
-}
-
-type read struct {
-	inner spider.Handler
-	work  *inFlight
-}
-
-func (r read) Handle(ctx context.Context, resp *downloader.Response) (*spider.Output, error) {
-	r.work.enter()
-	defer r.work.leave()
-	return r.inner.Handle(ctx, resp)
 }

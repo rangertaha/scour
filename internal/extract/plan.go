@@ -29,6 +29,11 @@ type propPlan struct {
 	regex  []*regexp.Regexp
 	names  []string // the property's name and its aliases, lowercased
 	nested []*propPlan
+
+	// relation marks a plan synthesised from a relation block rather than
+	// declared as a property. It contributes its fields and never the name
+	// itself, because a relation may share a name with a property on purpose.
+	relation bool
 }
 
 func planItem(item *engine.Item) (*itemPlan, error) {
@@ -66,6 +71,7 @@ func planItem(item *engine.Item) (*itemPlan, error) {
 		if err != nil {
 			return nil, err
 		}
+		compiled.relation = true
 		plan.props = append(plan.props, compiled)
 	}
 

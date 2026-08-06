@@ -3,6 +3,7 @@
 package extract_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -746,5 +747,98 @@ func TestJSONLDPrefersTheOutermostNameAndPicksItTheSameWayEveryTime(t *testing.T
 		if got != "The Article Itself" {
 			t.Fatalf("attempt %d: name = %q, want the outermost one and the same one every time", attempt, got)
 		}
+	}
+}
+
+// TestARelationDoesNotStealAPropertysName.
+//
+// A relation may share a name with a property on purpose: the schema says a
+// relation with no `property` is asserted from an extracted property of the
+// same name, and the entities step reads exactly that. So the two are one name
+// by design.
+//
+// Planning the relation as a pseudo-property made it overwrite the real one
+// with an empty value: the record's column went blank, and the entities step
+// then skipped the entity, every edge to it and everything the page said about
+// it, without a word.
+func TestARelationDoesNotStealAPropertysName(t *testing.T) {
+	result := run(t, `
+  item "article" {
+    property "author" {
+      type   = entity
+      entity = "person"
+      css    = [".byline"]
+    }
+
+    relation "author" {
+      entity = "person"
+
+      property "role" {
+        type = str
+        css  = [".role"]
+      }
+    }
+  }
+`, `<!doctype html><html><body>
+  <div class="byline">Alex Doe</div>
+  <div class="role">Correspondent</div>
+</body></html>`)
+
+	item, ok := result.Item("article")
+	if !ok {
+		t.Fatal("nothing extracted")
+	}
+
+	author := item.Values["author"]
+	if author == nil {
+		t.Fatal("the property was lost entirely")
+	}
+	if author.Text != "Alex Doe" {
+		t.Errorf("author = %q, want the property's own value", author.Text)
+	}
+	if role := author.Nested["role"]; role == nil || role.Text != "Correspondent" {
+		t.Errorf("the relation's field did not survive: %+v", author.Nested)
+	}
+}
+
+// TestARequiredPropertyIsMissingWhenItsOwnLocatorFails.
+//
+// Letting a property's fields stand in for it made `required` unenforceable on
+// anything with nested fields: a site that changed its markup produced an item
+// that reported itself complete, because a child had matched something
+// unrelated elsewhere on the page. A property that said where to look and did
+// not find it there has not been found, whatever its children matched.
+func TestARequiredPropertyIsMissingWhenItsOwnLocatorFails(t *testing.T) {
+	result := run(t, `
+  item "article" {
+    property "title" {
+      type = str
+      css  = ["h1"]
+    }
+
+    property "author" {
+      type     = object
+      required = true
+      css      = [".byline"]
+
+      property "name" {
+        type = str
+      }
+    }
+  }
+`, `<!doctype html><html><body>
+  <h1>A story</h1>
+  <div class="name">Somebody In A Sidebar</div>
+</body></html>`)
+
+	item, ok := result.Item("article")
+	if !ok {
+		t.Fatal("nothing extracted")
+	}
+	if !slices.Contains(item.Missing, "author") {
+		t.Errorf("Missing = %v, want the required property whose locator failed", item.Missing)
+	}
+	if item.Complete() {
+		t.Error("the item reports itself complete with a required property unfound")
 	}
 }
