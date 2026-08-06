@@ -693,6 +693,40 @@ func TestAJobWhoseStageIsElsewhereIsRefusedRatherThanRunLocally(t *testing.T) {
 	r.Close()
 }
 
+// TestAnExternalPipelineIsRefusedBecauseNothingServesOne.
+//
+// The same class as the test above, and the case it missed. `external = true`
+// in a `pipeline` block was accepted, validated and reported, and then the
+// items were written here: no node serves a pipeline stage, [Options] has no
+// seam to reach one, and the run said nothing. An operator who moved the
+// pipeline elsewhere got their records written on this machine instead, which
+// is where they were trying not to put them.
+//
+// So this one is refused whatever the caller supplied, unlike the downloader
+// and the spider, and the message says why rather than suggesting a node that
+// does not exist.
+func TestAnExternalPipelineIsRefusedBecauseNothingServesOne(t *testing.T) {
+	server, hits := site(t)
+
+	_, err := run.New(context.Background(), document(t, server, `
+  pipeline {
+    external = true
+  }
+`), run.Options{
+		Dir:  t.TempDir(),
+		Open: func(cfg frontier.Config) (frontier.Frontier, error) { return sqlite.Open(cfg) },
+	})
+	if err == nil {
+		t.Fatal("a job whose pipeline is elsewhere was accepted, and its items would be written here")
+	}
+	if !strings.Contains(err.Error(), "pipeline") || !strings.Contains(err.Error(), "external") {
+		t.Errorf("the error does not say what is wrong: %v", err)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("it fetched %d pages locally before refusing", hits.Load())
+	}
+}
+
 // TestTheHoldOutlastsOneFetch.
 //
 // The hold was the constant run.Lease, and a job may set a request timeout

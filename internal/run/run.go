@@ -176,6 +176,17 @@ type Options struct {
 // with no way to reach the stage the job named. Checked here rather than in
 // each command, so a new caller cannot forget.
 func external(job *engine.Job) error {
+	// A pipeline is refused outright, because there is no seam to supply and
+	// no node that serves one: [Options] has a Fetch and a Read and nothing
+	// for a pipeline, and [node.Options.Serve] answers "nothing here serves a
+	// pipeline stage". Saying so is the whole fix. Running it here silently
+	// wrote the operator's records on the machine they were moving them off.
+	if job.Pipeline != nil && job.Pipeline.IsExternal() {
+		return fmt.Errorf(
+			"run: job %q: its pipeline is external, and nothing serves an external pipeline. "+
+				"Take `external = true` out of the pipeline block", job.Name)
+	}
+
 	var stages []string
 	if job.Downloader != nil && job.Downloader.IsExternal() {
 		stages = append(stages, "downloader")
