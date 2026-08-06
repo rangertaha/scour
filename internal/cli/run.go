@@ -11,6 +11,7 @@ import (
 
 	ucli "github.com/urfave/cli/v3"
 
+	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/frontier"
 	"github.com/rangertaha/scour/internal/frontier/sqlite"
 	"github.com/rangertaha/scour/internal/run"
@@ -60,6 +61,32 @@ func Crawl(a *App) *ucli.Command {
 	}
 }
 
+// logLevel is how loudly a run reports itself.
+//
+// Off is a level rather than a separate path: `logging = false` means the crawl
+// says nothing while it runs, and the summary at the end is printed rather than
+// logged, so turning logging off never takes the result with it.
+func logLevel(m *engine.Monitoring, verbose bool) slog.Level {
+	if verbose {
+		return slog.LevelDebug
+	}
+	if !m.LoggingOn() {
+		// Above every level slog defines, so nothing is emitted.
+		return slog.Level(64)
+	}
+
+	switch m.LogLevel() {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
 func runCrawl(ctx context.Context, a *App, path, jobName, dir string, verbose, fresh bool) error {
 	doc, err := Accept(path)
 	if err != nil {
@@ -75,11 +102,18 @@ func runCrawl(ctx context.Context, a *App, path, jobName, dir string, verbose, f
 	}
 	job = withCache(job, filepath.Dir(path))
 
-	level := slog.LevelWarn
-	if verbose {
-		level = slog.LevelDebug
-	}
-	log := slog.New(slog.NewTextHandler(a.Err, &slog.HandlerOptions{Level: level}))
+	// The job's own monitoring block, with --verbose overriding it, because a
+	// flag is what somebody types for one run and a document is what they mean
+	// every run.
+	//
+	// Read at all because it was not: `monitoring { logging { level = "debug" } }`
+	// was parsed, defaulted, validated and reported by `scour show`, and the
+	// run logged at warn regardless. A setting the document accepts and nothing
+	// acts on is worse than one that does not exist, because the operator has
+	// been told otherwise.
+	log := slog.New(slog.NewTextHandler(a.Err, &slog.HandlerOptions{
+		Level: logLevel(job.Monitoring, verbose),
+	}))
 
 	// A local crawl reaches the cluster's secret store if there is one and
 	// this machine has the key. Without either, a job asking for a secret is
