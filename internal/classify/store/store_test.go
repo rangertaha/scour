@@ -5,8 +5,10 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/rangertaha/scour/internal/classify"
@@ -147,5 +149,99 @@ func TestWhatIsNotAClassifier(t *testing.T) {
 
 	if _, err := store.Open(""); err == nil {
 		t.Error("opened a store with no directory")
+	}
+}
+
+// TestOnlyOneConcurrentPutOfAVersionWins.
+//
+// Put used to Stat and then write, which is a race with a name: two
+// `scour topic train` runs starting together both read the same Latest, both
+// computed the same next version, both saw no file, and both wrote it. The
+// second won silently, and a job that had already pinned that version scored
+// pages with a model nobody chose — which is what versions exist to prevent and
+// what this package's documentation promises cannot happen.
+//
+// Both runs exiting zero is the part that made it invisible: each printed
+// "trained, use it with climate@2" and one of them was lying.
+func TestOnlyOneConcurrentPutOfAVersionWins(t *testing.T) {
+	topics, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const writers = 8
+
+	var start sync.WaitGroup
+	var done sync.WaitGroup
+	start.Add(1)
+
+	results := make([]error, writers)
+	for i := range writers {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			start.Wait()
+			results[i] = topics.Put("terms", classify.Config{
+				Name:    "climate",
+				Version: 2,
+				// Distinguishable, so the winner is identifiable.
+				Terms: []string{fmt.Sprintf("writer-%d", i)},
+			})
+		}()
+	}
+
+	start.Done()
+	done.Wait()
+
+	var won int
+	for i, err := range results {
+		if err == nil {
+			won++
+			continue
+		}
+		if !strings.Contains(err.Error(), "already exists") {
+			t.Errorf("writer %d failed for the wrong reason: %v", i, err)
+		}
+	}
+	if won != 1 {
+		t.Fatalf("%d writers of one version succeeded, want exactly one", won)
+	}
+
+	// And what is on disk is one of them, whole: a torn write would be a file
+	// that no longer decodes.
+	one, err := topics.Load(classify.Ref{Name: "climate", Version: 2})
+	if err != nil {
+		t.Fatalf("the version that was written cannot be read back: %v", err)
+	}
+	if len(one.Terms) != 1 || !strings.HasPrefix(one.Terms[0], "writer-") {
+		t.Errorf("the stored topic is not one writer's: %+v", one.Terms)
+	}
+}
+
+// TestReplaceStillOverwrites, because the exclusive create must not have taken
+// the update of CRUD with it.
+func TestReplaceStillOverwrites(t *testing.T) {
+	topics, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := topics.Put("terms", classify.Config{
+		Name: "climate", Version: 1, Terms: []string{"first"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := topics.Replace("terms", classify.Config{
+		Name: "climate", Version: 1, Terms: []string{"corrected"},
+	}); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+
+	one, err := topics.Load(classify.Ref{Name: "climate", Version: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(one.Terms) != 1 || one.Terms[0] != "corrected" {
+		t.Errorf("terms = %v, want the correction", one.Terms)
 	}
 }

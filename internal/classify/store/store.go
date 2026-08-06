@@ -96,10 +96,7 @@ func (s *Store) Put(kind string, cfg classify.Config) error {
 		return err
 	}
 
-	if _, err := os.Stat(s.path(ref)); err == nil {
-		return fmt.Errorf("classify: %s already exists. Train a new version rather than replacing one", ref)
-	}
-	return s.write(kind, cfg)
+	return s.write(kind, cfg, os.O_CREATE|os.O_EXCL|os.O_WRONLY)
 }
 
 // write puts a topic on disk, whether or not one was there.
@@ -107,7 +104,18 @@ func (s *Store) Put(kind string, cfg classify.Config) error {
 // Shared by [Store.Put] and [Store.Replace] so the two cannot drift into
 // writing different files: the difference between them is the check above and
 // nothing else.
-func (s *Store) write(kind string, cfg classify.Config) error {
+// write puts a topic on disk under the given open flags.
+//
+// The flags are what tells [Store.Put] from [Store.Replace], and they are flags
+// rather than a check because a check is a race. Put used to Stat and then
+// write: two `scour topic train` runs starting together both read the same
+// Latest, both computed the same next version, both saw no file and both wrote
+// it. The second won, silently, and a job that had already pinned that version
+// scored pages with a model nobody chose — which is precisely what versions
+// exist to prevent, and what this package's own documentation promises cannot
+// happen. O_EXCL makes the check and the write one operation the filesystem
+// performs, so the loser is told rather than ignored.
+func (s *Store) write(kind string, cfg classify.Config, flags int) error {
 	body, err := json.MarshalIndent(Topic{
 		Kind:    kind,
 		Name:    cfg.Name,
@@ -121,7 +129,20 @@ func (s *Store) write(kind string, cfg classify.Config) error {
 	}
 
 	ref := classify.Ref{Name: cfg.Name, Version: cfg.Version}
-	if err := os.WriteFile(s.path(ref), body, 0o640); err != nil {
+
+	file, err := os.OpenFile(s.path(ref), flags, 0o640)
+	switch {
+	case os.IsExist(err):
+		return fmt.Errorf("classify: %s already exists. Train a new version rather than replacing one", ref)
+	case err != nil:
+		return fmt.Errorf("classify: %w", err)
+	}
+
+	if _, err := file.Write(body); err != nil {
+		file.Close()
+		return fmt.Errorf("classify: %w", err)
+	}
+	if err := file.Close(); err != nil {
 		return fmt.Errorf("classify: %w", err)
 	}
 	return nil
@@ -222,7 +243,7 @@ func (s *Store) Replace(kind string, cfg classify.Config) error {
 	delete(s.loaded, ref.String())
 	s.mu.Unlock()
 
-	return s.write(kind, cfg)
+	return s.write(kind, cfg, os.O_CREATE|os.O_TRUNC|os.O_WRONLY)
 }
 
 // Delete removes one trained version.
