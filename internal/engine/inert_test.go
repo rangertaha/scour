@@ -4,15 +4,28 @@ package engine_test
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"os"
+	"go/types"
 	"path/filepath"
-	"regexp"
-	"slices"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
+
+	"golang.org/x/tools/go/packages"
+)
+
+const (
+	// engineImport is the package under examination.
+	engineImport = "github.com/rangertaha/scour/internal/engine"
+
+	// reportPath prints a job's settings back to whoever wrote them, so it
+	// reads nearly all of them and cannot vouch for any. See reachedFromOutside.
+	reportPath = "internal/cli/show.go"
+
+	// checkPrefix names the validators, which read a setting to decide whether
+	// it is allowed and then do nothing with it. See reachedFromOutside.
+	checkPrefix = "validate"
 )
 
 // A setting the document accepts that nothing acts on.
@@ -33,28 +46,39 @@ import (
 // one that does not exist, because the operator has been told otherwise and
 // will debug the thing it claims to control.
 //
+// Two more turned up the moment this test was made to hold, which is the
+// argument for having made it hold: `external = true` in a `pipeline` block,
+// which ran the pipeline here in silence, and `timeout` in every service block,
+// which every handler ignored in favour of the bus package's own constant.
+//
 // # What it checks
 //
-// Every `hcl:"..."` field in this package has to be reachable from outside it:
-// either the field itself is read elsewhere, or a method of the same type that
-// mentions the field is called elsewhere. Reading it here does not count, and
-// nor does validating it — validation is what all three instances had.
+// Every `hcl:"..."` field in this package has to be read by something outside
+// it. Not read directly, necessarily: the module is type-checked, every use of
+// an engine identifier is resolved to the object it names, and reachability is
+// followed from the outside in. A field read by a method of the engine's own
+// counts exactly when something outside can reach that method, however many
+// hops away it is. Reading it in this package and going no further does not
+// count, and nor does validating it: validation is what all three instances
+// had.
 //
-// # What it does NOT catch, which is most of it
+// A write does not count either. `p.Field = v` and `Pipeline{Field: v}` set
+// something nothing goes on to look at, which is the shape of the class.
 //
-// The match is on the selector's bare name, with no type behind it, so any
-// identifier of the same name anywhere in the tree vouches for a field. That is
-// not a small gap: of the 94 tagged fields, 77 pass on the bare name alone, and
-// the passes are often nonsense. `Monitoring.Level` is vouched for by
-// parquet-go's `.Level(0, 0, i)`; every service block's `Dir` by
-// `filepath.Dir`. Two of the three instances this was written for would have
-// slipped through — `monitoring.level` demonstrably does.
+// # Why this is type-checked rather than grepped
 //
-// So it catches a new field with a distinctive name and nothing else, which is
-// worth having and is not the guarantee the name suggests. Making it hold needs
-// the selector resolved to its type, which needs go/types and
-// golang.org/x/tools/go/packages. That is recorded rather than done, and this
-// comment is here so nobody reads a pass as proof.
+// It matched bare selector names once, and that did not hold: any identifier of
+// the same name anywhere in the tree vouched for a field. 77 of the 94 tagged
+// fields passed on that alone, and the passes were nonsense —
+// `Monitoring.Level` was vouched for by parquet-go's `.Level(0, 0, i)`, and
+// every service block's `Dir` by `filepath.Dir`. Two of the three instances
+// this was written for would have slipped through, and `monitoring.level`
+// demonstrably did: reverting its wiring left the test passing.
+//
+// Type-checking the module costs a few seconds, which is why this is the
+// slowest test in the package. A check that passes when the thing it checks for
+// is present is not a check, so the seconds are the price of the test meaning
+// anything.
 //
 // # Why an allowlist rather than a cleverer check
 //
@@ -64,8 +88,6 @@ import (
 // cannot see, they are listed below with the reason, and anything new has to be
 // argued for in the same place. That is the point: the exemption is visible.
 func TestNoSettingIsAcceptedAndIgnored(t *testing.T) {
-	const dir = "."
-
 	// exempt is what this check cannot see, and why. Adding to it is a claim
 	// somebody can check.
 	exempt := map[string]string{
@@ -87,30 +109,49 @@ func TestNoSettingIsAcceptedAndIgnored(t *testing.T) {
 		// not built, and the honest options are to build it or to delete the
 		// field. Recorded rather than hidden.
 		"Monitoring.Metrics": "no metrics are published yet: tracked, not resolved",
+
+		// The next eight are one cause, not eight, and the same kind of
+		// deliberate record as the line above.
+		//
+		// Nothing outside a test drives a crawl over the bus:
+		// bus.Conn.NewDownloader and bus.Conn.NewSpider have no caller but
+		// internal/bus's own tests, and both are always passed a zero wait. So
+		// the length of time a document says an external stage may take is
+		// never the length of time anything waits. That is the oldest instance
+		// of this class and the one the test was written for, which is worth
+		// saying plainly: it was retired, and it came back, because the fix
+		// wired the value into `scour show` rather than into a crawl.
+		//
+		// `external` itself does act, so it is not on this list: a run that
+		// cannot reach the stage refuses rather than crawling locally.
+		"Downloader.ExternalTimeout": "no command runs a crawl over the bus yet: tracked, not resolved",
+		"Spider.ExternalTimeout":     "no command runs a crawl over the bus yet: tracked, not resolved",
+		"Pipeline.ExternalTimeout":   "an external pipeline is refused outright: tracked, not resolved",
+
+		// Applying a change to a running job is unwired the same way. Diff and
+		// the Effect it reports have no caller but this package's own tests, so
+		// the policy for what to do about a change that is not free is never
+		// consulted. Five fields, one cause.
+		"Job.Mutation":           "nothing applies a change to a running job yet: tracked, not resolved",
+		"Mutation.Costly":        "nothing applies a change to a running job yet: tracked, not resolved",
+		"Mutation.OutOfScope":    "nothing applies a change to a running job yet: tracked, not resolved",
+		"Mutation.StaleRecords":  "nothing applies a change to a running job yet: tracked, not resolved",
+		"Mutation.OrphanedCache": "nothing applies a change to a running job yet: tracked, not resolved",
 	}
 
-	fields, methods := declarations(t, dir)
-	used := selectorsOutside(t, dir)
+	loaded := load(t)
+	reached := reachedFromOutside(t, loaded)
 
 	var inert []string
-	for key, field := range fields {
-		if slices.Contains(used, field.name) {
+	for field, tag := range taggedFields(t, loaded) {
+		if reached[field] {
 			continue
 		}
-		reachable := false
-		for _, m := range methods {
-			if m.owner == field.owner && m.mentions[field.name] && slices.Contains(used, m.name) {
-				reachable = true
-				break
-			}
-		}
-		if reachable {
-			continue
-		}
+		key := owner(field) + "." + field.Name()
 		if _, ok := exempt[key]; ok {
 			continue
 		}
-		inert = append(inert, key+" (hcl "+field.hcl+")")
+		inert = append(inert, key+" (hcl "+tag+")")
 	}
 	sort.Strings(inert)
 
@@ -126,142 +167,200 @@ it to the exempt list above with a reason somebody can check.`,
 	}
 }
 
-type decl struct {
-	owner, name, hcl string
-	mentions         map[string]bool
-}
-
-var (
-	typeLine  = regexp.MustCompile(`^type (\w+) struct`)
-	fieldLine = regexp.MustCompile("^\\s*(\\w+)\\s+[\\w\\[\\]\\*\\.]+\\s+`hcl:\"([^\",]+)")
-)
-
-// declarations are the hcl-tagged fields and the methods that mention them.
-func declarations(t *testing.T, dir string) (map[string]decl, []decl) {
+// load type-checks the whole module, without its tests: a field only a test
+// reads is a field nothing acts on.
+func load(t *testing.T) []*packages.Package {
 	t.Helper()
 
-	fields := map[string]decl{}
-	var methods []decl
-
-	for _, path := range goFiles(t, dir, false) {
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		owner := ""
-		for _, line := range strings.Split(string(body), "\n") {
-			if m := typeLine.FindStringSubmatch(line); m != nil {
-				owner = m[1]
-				continue
-			}
-			if m := fieldLine.FindStringSubmatch(line); m != nil && owner != "" {
-				fields[owner+"."+m[1]] = decl{owner: owner, name: m[1], hcl: m[2]}
-			}
-		}
-
-		parsed, err := parser.ParseFile(token.NewFileSet(), path, body, 0)
-		if err != nil {
-			t.Fatalf("%s: %v", path, err)
-		}
-		for _, d := range parsed.Decls {
-			fn, ok := d.(*ast.FuncDecl)
-			if !ok || fn.Recv == nil || len(fn.Recv.List) == 0 || fn.Body == nil {
-				continue
-			}
-			methods = append(methods, decl{
-				owner:    receiverType(fn),
-				name:     fn.Name.Name,
-				mentions: selectorsIn(fn.Body),
-			})
+	loaded, err := packages.Load(&packages.Config{
+		Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes |
+			packages.NeedTypesInfo | packages.NeedDeps | packages.NeedImports,
+		Tests: false,
+	}, engineImport+"/...", "github.com/rangertaha/scour/...")
+	if err != nil {
+		t.Fatalf("loading the module: %v", err)
+	}
+	for _, pkg := range loaded {
+		if len(pkg.Errors) > 0 {
+			t.Fatalf("%s: %v", pkg.PkgPath, pkg.Errors[0])
 		}
 	}
-	return fields, methods
-}
-
-func receiverType(fn *ast.FuncDecl) string {
-	switch t := fn.Recv.List[0].Type.(type) {
-	case *ast.StarExpr:
-		if named, ok := t.X.(*ast.Ident); ok {
-			return named.Name
-		}
-	case *ast.Ident:
-		return t.Name
+	if len(loaded) < 2 {
+		t.Fatalf("loaded %d packages, so this test asserts nothing", len(loaded))
 	}
-	return ""
+	return loaded
 }
 
-// selectorsIn is every `x.Name` a function body mentions.
-func selectorsIn(body *ast.BlockStmt) map[string]bool {
-	out := map[string]bool{}
-	ast.Inspect(body, func(n ast.Node) bool {
-		if sel, ok := n.(*ast.SelectorExpr); ok {
-			out[sel.Sel.Name] = true
+// taggedFields is every hcl-tagged field the engine declares, and its tag name.
+func taggedFields(t *testing.T, loaded []*packages.Package) map[*types.Var]string {
+	t.Helper()
+
+	out := map[*types.Var]string{}
+	for _, pkg := range loaded {
+		if pkg.PkgPath != engineImport {
+			continue
+		}
+		scope := pkg.Types.Scope()
+		for _, name := range scope.Names() {
+			declared, ok := scope.Lookup(name).(*types.TypeName)
+			if !ok {
+				continue
+			}
+			structure, ok := declared.Type().Underlying().(*types.Struct)
+			if !ok {
+				continue
+			}
+			for i := range structure.NumFields() {
+				tag, ok := reflect.StructTag(structure.Tag(i)).Lookup("hcl")
+				if !ok {
+					continue
+				}
+				out[structure.Field(i)] = strings.Split(tag, ",")[0]
+			}
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("no hcl-tagged fields were found, so this test asserts nothing")
+	}
+	return out
+}
+
+// owner is the type a field belongs to, for the report.
+func owner(field *types.Var) string {
+	for _, pkg := range []*types.Scope{field.Pkg().Scope()} {
+		for _, name := range pkg.Names() {
+			declared, ok := pkg.Lookup(name).(*types.TypeName)
+			if !ok {
+				continue
+			}
+			structure, ok := declared.Type().Underlying().(*types.Struct)
+			if !ok {
+				continue
+			}
+			for i := range structure.NumFields() {
+				if structure.Field(i) == field {
+					return name
+				}
+			}
+		}
+	}
+	return "?"
+}
+
+// reachedFromOutside is every engine object something outside the engine can
+// get to.
+//
+// Uses outside the engine are the roots. Inside it, each function is a node and
+// the engine objects its body reads are its edges, so a field read by a method
+// counts once anything outside can reach that method, at any depth. Uses at
+// package level are roots too, because initialisation always runs.
+//
+// With two exclusions, and they are what make this test work at all. Both are
+// paths that read a setting without acting on it, and every instance of the
+// class so far had both:
+//
+//   - `scour show` prints the document back, so it reads nearly every setting,
+//     and through Job.Resolved it reaches nearly every one it does not read
+//     directly. All three instances were reported correctly by `scour show`
+//     and acted on by nothing, which is what made them so hard to see.
+//   - The validators check a value is allowed and then drop it. `external`,
+//     `url` and `level` were all validated, and a job that failed validation
+//     was refused for the right reason while a job that passed it was run as
+//     though the setting were not there.
+//
+// A setting whose only readers are the thing that describes settings and the
+// thing that checks them has not been wired up.
+func reachedFromOutside(t *testing.T, loaded []*packages.Package) map[types.Object]bool {
+	t.Helper()
+
+	edges := map[types.Object][]types.Object{}
+	var roots []types.Object
+
+	for _, pkg := range loaded {
+		inside := pkg.PkgPath == engineImport
+		for _, file := range pkg.Syntax {
+			if strings.HasSuffix(filepath.ToSlash(pkg.Fset.Position(file.Pos()).Filename), reportPath) {
+				continue
+			}
+			if !inside {
+				roots = append(roots, engineReads(pkg.TypesInfo, file)...)
+				continue
+			}
+			for _, decl := range file.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Body == nil {
+					roots = append(roots, engineReads(pkg.TypesInfo, decl)...)
+					continue
+				}
+				if strings.HasPrefix(strings.ToLower(fn.Name.Name), checkPrefix) {
+					continue
+				}
+				if defined := pkg.TypesInfo.Defs[fn.Name]; defined != nil {
+					edges[defined] = append(edges[defined], engineReads(pkg.TypesInfo, fn.Body)...)
+				}
+			}
+		}
+	}
+
+	reached := map[types.Object]bool{}
+	for len(roots) > 0 {
+		next := roots[len(roots)-1]
+		roots = roots[:len(roots)-1]
+		if reached[next] {
+			continue
+		}
+		reached[next] = true
+		roots = append(roots, edges[next]...)
+	}
+	return reached
+}
+
+// engineReads is every engine object a piece of syntax reads.
+//
+// Assignment targets and composite-literal keys are not reads: setting a field
+// nothing goes on to look at is the class this test is for, so counting the
+// write would let the class vouch for itself.
+func engineReads(info *types.Info, node ast.Node) []types.Object {
+	written := map[*ast.Ident]bool{}
+	mark := func(target ast.Expr) {
+		switch target := target.(type) {
+		case *ast.SelectorExpr:
+			written[target.Sel] = true
+		case *ast.Ident:
+			written[target] = true
+		}
+	}
+	ast.Inspect(node, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			// Only a plain assignment. `x.N += 1` reads before it writes.
+			if n.Tok == token.ASSIGN || n.Tok == token.DEFINE {
+				for _, target := range n.Lhs {
+					mark(target)
+				}
+			}
+		case *ast.CompositeLit:
+			for _, element := range n.Elts {
+				if pair, ok := element.(*ast.KeyValueExpr); ok {
+					mark(pair.Key)
+				}
+			}
 		}
 		return true
 	})
-	return out
-}
 
-// selectorsOutside is every `x.Name` mentioned outside this package, in
-// production code. Tests do not count: a field only a test reads is a field
-// nothing acts on.
-func selectorsOutside(t *testing.T, dir string) []string {
-	t.Helper()
-
-	root, err := filepath.Abs(filepath.Join(dir, "..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	seen := map[string]bool{}
-	for _, where := range []string{"internal", "cmd"} {
-		for _, path := range goFiles(t, filepath.Join(root, where), true) {
-			if strings.Contains(path, filepath.Join("internal", "engine")) {
-				continue
-			}
-			parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-			if err != nil {
-				t.Fatalf("%s: %v", path, err)
-			}
-			ast.Inspect(parsed, func(n ast.Node) bool {
-				if sel, ok := n.(*ast.SelectorExpr); ok {
-					seen[sel.Sel.Name] = true
-				}
-				return true
-			})
+	var out []types.Object
+	ast.Inspect(node, func(n ast.Node) bool {
+		name, ok := n.(*ast.Ident)
+		if !ok || written[name] {
+			return true
 		}
-	}
-
-	out := make([]string, 0, len(seen))
-	for name := range seen {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func goFiles(t *testing.T, dir string, recurse bool) []string {
-	t.Helper()
-
-	var out []string
-	walk := func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
+		used := info.Uses[name]
+		if used == nil || used.Pkg() == nil || used.Pkg().Path() != engineImport {
+			return true
 		}
-		if entry.IsDir() {
-			if !recurse && path != dir {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
-			out = append(out, path)
-		}
-		return nil
-	}
-	if err := filepath.WalkDir(dir, walk); err != nil {
-		t.Fatal(err)
-	}
+		out = append(out, used)
+		return true
+	})
 	return out
 }
