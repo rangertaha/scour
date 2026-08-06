@@ -42,8 +42,10 @@ func (plan *itemPlan) extract(p *page) *Item {
 		// to it and everything the page said about it, silently.
 		if prop.relation {
 			merge(item, prop.prop.Name, value)
+			item.Missing = append(item.Missing, value.Missing...)
 			continue
 		}
+		item.Missing = append(item.Missing, value.Missing...)
 		item.Values[prop.prop.Name] = value
 	}
 
@@ -148,32 +150,66 @@ func (p *propPlan) located() bool {
 // publisher telling machines what the page is; microdata is the same; an
 // element carrying the name as a class is a guess about somebody's stylesheet.
 func (p *propPlan) semantic(page *page, within *html.Node) *Value {
+	// Inside a parent, what the parent contains wins over what the page says
+	// about itself.
+	//
+	// These two were tried last, after the page-global metadata maps, so a
+	// nested field escaped its parent whenever the page happened to name the
+	// same thing: an article whose JSON-LD carried publisher.name returned "The
+	// Chronicle" for `author.name` while "Alex Doe" sat inside the matched
+	// byline, and it was not even marked as having come from outside, because
+	// that marking is gated on the parent having had no node. The guarantee
+	// this function's own callers state is that a field is looked for inside
+	// its parent; it now is.
+	scoped := within != nil && within != page.root
+	if scoped {
+		if node := p.byWellKnownElement(within); node != nil {
+			return p.value(page, nodeValue(node), describe(node), BySemantics, node)
+		}
+		if node := p.byClassOrID(within); node != nil {
+			return p.value(page, nodeValue(node), describe(node), BySemantics, node)
+		}
+	}
+
 	// Sorted, because these are maps and a page that says the same thing under
 	// two names would otherwise be read differently between runs: the value
 	// could change, and the provenance certainly did. Two runs over one corpus
 	// producing different records is the property every other part of this
 	// crawler is careful to keep.
-	for _, name := range sorted(page.meta) {
-		if p.answersTo(name) {
-			return p.value(page, page.meta[name], "<meta "+name+">", BySemantics, nil)
-		}
-	}
-	for _, name := range sorted(page.linked) {
-		if p.answersTo(name) {
-			return p.value(page, page.linked[name], "json-ld "+name, BySemantics, nil)
-		}
-	}
-	for _, name := range sorted(page.micro) {
-		if p.answersTo(name) {
-			return p.value(page, page.micro[name], "<itemprop "+name+">", BySemantics, nil)
+	// The page's own metadata. Inside a parent this is a statement about the
+	// page rather than about the parent, so it is marked, and the caller says
+	// so in the provenance.
+	for _, one := range []struct {
+		from map[string]string
+		how  string
+	}{
+		{page.meta, "<meta "},
+		{page.linked, "json-ld "},
+		{page.micro, "<itemprop "},
+	} {
+		for _, name := range sorted(one.from) {
+			if !p.answersTo(name) {
+				continue
+			}
+			where := one.how + name
+			if one.how != "json-ld " {
+				where += ">"
+			}
+			found := p.value(page, one.from[name], where, BySemantics, nil)
+			if found != nil {
+				found.outside = scoped
+			}
+			return found
 		}
 	}
 
-	if node := p.byWellKnownElement(within); node != nil {
-		return p.value(page, nodeValue(node), describe(node), BySemantics, node)
-	}
-	if node := p.byClassOrID(within); node != nil {
-		return p.value(page, nodeValue(node), describe(node), BySemantics, node)
+	if !scoped {
+		if node := p.byWellKnownElement(within); node != nil {
+			return p.value(page, nodeValue(node), describe(node), BySemantics, node)
+		}
+		if node := p.byClassOrID(within); node != nil {
+			return p.value(page, nodeValue(node), describe(node), BySemantics, node)
+		}
 	}
 	return nil
 }
@@ -320,13 +356,27 @@ func (p *propPlan) value(page *page, raw, from, how string, node *html.Node) *Va
 		for _, nested := range p.nested {
 			inner := nested.find(page, within)
 			if inner == nil {
+				// A required field that was not found is reported the way a
+				// required property is, under its dotted name. Only the top
+				// level was collected, so an item with a missing required
+				// field said it was complete while the fill-rate report,
+				// counting the same pages, said the field was missing on all
+				// of them.
+				if nested.prop.Required {
+					v.Missing = append(v.Missing, p.prop.Name+"."+nested.prop.Name)
+				}
 				continue
 			}
-			if how != "" {
+			if how != "" || inner.outside {
 				// Found outside the parent, so it is a guess about the page
-				// rather than a reading of the parent, whatever found it.
-				inner.How = how
+				// rather than a reading of the parent, whatever found it. The
+				// second case is a field the parent DID have a node for, whose
+				// value still came from the page's own metadata: that was
+				// unmarked, so a caller could not tell it apart from a reading
+				// of the parent.
+				inner.How = BySemantics
 				inner.From = inner.From + " (outside " + p.prop.Name + ")"
+				inner.outside = false
 			}
 			v.Nested[nested.prop.Name] = inner
 		}

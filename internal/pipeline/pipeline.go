@@ -148,6 +148,19 @@ func New(ctx context.Context, job *engine.Job) (*Pipeline, error) {
 		}
 	}
 
+	// A pipeline that will not be returned still has to give back what its
+	// built steps opened.
+	//
+	// The loop keeps going after the first failure, so several steps can be
+	// built before a later one is refused, and the caller gets nil and no
+	// handle: `run.New` then calls close with a nil graph and Pipeline.Close
+	// never runs. The entities step opens SQLite, so a job with an entities
+	// step and a later step that fails validation held a database handle and
+	// its write-ahead files for the life of the process — which is the file
+	// lock a second run cannot take, named in Close's own documentation.
+	if len(missing) > 0 || len(failed) > 0 {
+		p.Close()
+	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("job %q: no pipeline step of kind %s. This build has %s",
 			job.Name, quoted(missing), strings.Join(Registered(), ", "))

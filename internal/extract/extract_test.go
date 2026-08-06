@@ -842,3 +842,117 @@ func TestARequiredPropertyIsMissingWhenItsOwnLocatorFails(t *testing.T) {
 		t.Error("the item reports itself complete with a required property unfound")
 	}
 }
+
+// TestANestedFieldIsLookedForInsideItsParentFirst.
+//
+// The page's own metadata was consulted before the two lookups that respect the
+// parent node, so a field escaped its parent whenever the page named the same
+// thing: an article whose JSON-LD carries publisher.name returned "The
+// Chronicle" for author.name while "Alex Doe" sat inside the matched byline.
+// Worse, it was not marked as coming from outside, because that marking is
+// gated on the parent having had no node at all, so nothing downstream could
+// tell a reading of the parent from a guess about the page.
+func TestANestedFieldIsLookedForInsideItsParentFirst(t *testing.T) {
+	result := run(t, `
+  item "article" {
+    property "author" {
+      type = object
+      css  = [".byline"]
+
+      property "name" {
+        type = str
+      }
+    }
+  }
+`, `<!doctype html><html><head>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"NewsArticle",
+ "publisher":{"@type":"Organization","name":"The Chronicle"}}
+</script>
+</head><body>
+  <div class="byline"><span class="name">Alex Doe</span></div>
+</body></html>`)
+
+	item, ok := result.Item("article")
+	if !ok {
+		t.Fatal("nothing extracted")
+	}
+	author := item.Values["author"]
+	if author == nil {
+		t.Fatal("the parent was not found")
+	}
+
+	name := author.Nested["name"]
+	if name == nil {
+		t.Fatal("the nested field was not found")
+	}
+	if name.Text != "Alex Doe" {
+		t.Errorf("author.name = %q, want what is inside the byline", name.Text)
+	}
+}
+
+// TestAFieldFoundOutsideItsParentSaysSo, so the weaker inference is legible
+// rather than indistinguishable from a reading of the parent.
+func TestAFieldFoundOutsideItsParentSaysSo(t *testing.T) {
+	result := run(t, `
+  item "article" {
+    property "author" {
+      type = object
+      css  = [".byline"]
+
+      property "name" {
+        type = str
+      }
+    }
+  }
+`, `<!doctype html><html><head>
+<meta name="name" content="From The Page">
+</head><body>
+  <div class="byline">Alex Doe</div>
+</body></html>`)
+
+	item, _ := result.Item("article")
+	name := item.Values["author"].Nested["name"]
+	if name == nil {
+		t.Fatal("the nested field was not found at all")
+	}
+	if !strings.Contains(name.From, "outside author") {
+		t.Errorf("From = %q, want it marked as coming from outside the parent", name.From)
+	}
+}
+
+// TestARequiredNestedFieldIsReportedMissing.
+//
+// Only top-level properties were collected into Missing, so an item with a
+// missing required field reported itself complete while the fill-rate report,
+// counting the same pages, said that field was missing on all of them. The same
+// report said both things.
+func TestARequiredNestedFieldIsReportedMissing(t *testing.T) {
+	result := run(t, `
+  item "article" {
+    property "author" {
+      type = object
+      css  = [".byline"]
+
+      property "profile" {
+        type     = url
+        required = true
+        css      = ["a.profile"]
+      }
+    }
+  }
+`, `<!doctype html><html><body>
+  <div class="byline">Alex Doe</div>
+</body></html>`)
+
+	item, ok := result.Item("article")
+	if !ok {
+		t.Fatal("nothing extracted")
+	}
+	if !slices.Contains(item.Missing, "author.profile") {
+		t.Errorf("Missing = %v, want the required field that was not found", item.Missing)
+	}
+	if item.Complete() {
+		t.Error("the item reports itself complete with a required field missing")
+	}
+}

@@ -814,3 +814,54 @@ func register(t *testing.T, kind string, f func(context.Context, pipeline.Config
 // TestMain fails the package if a test left a name in the global table. See
 // [registrytest].
 func TestMain(m *testing.M) { registrytest.Main(m, pipeline.Registered) }
+
+// closingStep records that it was closed, which is the only way to see from
+// outside whether a built step gave back what it opened.
+type closingStep struct {
+	pipeline.Step
+	closed *atomic.Bool
+}
+
+func (c closingStep) Close() error {
+	c.closed.Store(true)
+	return nil
+}
+
+// TestABuiltStepIsClosedWhenALaterOneIsRefused.
+//
+// New keeps building after the first failure and then returns nil, so the caller
+// gets no handle and Pipeline.Close never runs. The entities step opens SQLite,
+// so a job with one of those and a later step that fails validation held a
+// database handle and its write-ahead files for the life of the process — the
+// file lock a second run cannot take, which Close's own documentation names as
+// the reason it exists.
+//
+// Asserted on Close being called rather than on a symptom downstream: SQLite in
+// WAL mode lets a second handle open and write the same file, so a leaked
+// handle is invisible from there.
+func TestABuiltStepIsClosedWhenALaterOneIsRefused(t *testing.T) {
+	var closed atomic.Bool
+
+	register(t, "test-holds-something", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+		return closingStep{
+			Step:   pipeline.Func(func(_ context.Context, r []*record.Record) ([]*record.Record, error) { return r, nil }),
+			closed: &closed,
+		}, nil
+	})
+	register(t, "test-refuses", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+		return nil, errors.New("this step cannot be built")
+	})
+
+	_, err := pipeline.New(context.Background(), job(t, `
+  pipeline {
+    step "test-holds-something" "article" {}
+    step "test-refuses" "article" {}
+  }
+`))
+	if err == nil {
+		t.Fatal("a pipeline with a step that cannot be built was returned")
+	}
+	if !closed.Load() {
+		t.Error("the step that was built kept whatever it opened, and nothing can close it now")
+	}
+}

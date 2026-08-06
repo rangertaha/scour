@@ -88,6 +88,16 @@ type Value struct {
 	// they wrote from a guess that happened to work.
 	How string
 
+	// Missing names the required fields of this value that were not found,
+	// dotted. Collected by the item, so a required field is reported the way a
+	// required property is.
+	Missing []string
+
+	// outside marks a nested value that came from the page's own metadata
+	// rather than from inside its parent, so the parent can say so in the
+	// provenance. Cleared once it has.
+	outside bool
+
 	// Nested holds the fields of an object property.
 	Nested map[string]*Value
 }
