@@ -79,3 +79,32 @@ func TestANodeServesOnlyTheStagesItWasTold(t *testing.T) {
 		t.Errorf("the node did not leave cleanly:\n%s", said)
 	}
 }
+
+// TestANodeRefusesAStageNobodyServes.
+//
+// A typo is the likeliest thing to be wrong with --stages, and it was the thing
+// least likely to be reported: the value was never validated anywhere, so the
+// node connected, announced the misspelled stage into the registry, printed
+// that it was serving, and then answered nothing for the rest of its life while
+// logging one warning per job. `scour nodes` said the capacity was there.
+//
+// Worse with a mixed list. The correctly spelled stage was built and subscribed
+// first, and the unknown one then tore it down again, so a node asked for
+// "read,downlaod" served neither.
+func TestANodeRefusesAStageNobodyServes(t *testing.T) {
+	for _, stages := range []string{"downlaod", "read,downlaod"} {
+		got := scour(t, t.TempDir(), "serve", "--stages", stages)
+		if got.code == 0 {
+			t.Errorf("--stages %q was accepted:\n%s%s", stages, got.stdout, got.stderr)
+			continue
+		}
+
+		said := got.stdout + got.stderr
+		if !strings.Contains(said, "downlaod") {
+			t.Errorf("--stages %q: the failure does not name the stage that is wrong:\n%s", stages, said)
+		}
+		if !strings.Contains(said, "download") || !strings.Contains(said, "read") {
+			t.Errorf("--stages %q: the failure does not say what the stages are:\n%s", stages, said)
+		}
+	}
+}

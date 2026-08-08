@@ -177,6 +177,21 @@ func Join(ctx context.Context, conn *bus.Conn, opts Options) (*Node, error) {
 		opts.Serve = []string{StageDownload, StageRead}
 	}
 
+	// A stage nobody serves is refused here, before the node announces itself.
+	//
+	// It was checked once per job instead, deep inside serve, which meant
+	// `scour serve --stages downlaod` connected, announced ["downlaod"] into
+	// the registry, printed that it was serving, and then answered nothing for
+	// the rest of its life while logging one warning per job. The registry said
+	// the capacity was there. A typo is the likeliest thing to be wrong with
+	// this flag, and it was the thing least likely to be reported.
+	for _, stage := range opts.Serve {
+		if stage != StageDownload && stage != StageRead {
+			return nil, fmt.Errorf("node: nothing serves a %q stage; the stages are %q and %q",
+				stage, StageDownload, StageRead)
+		}
+	}
+
 	jobs, err := conn.OpenJobs(ctx)
 	if err != nil {
 		return nil, err
@@ -284,11 +299,6 @@ func (n *Node) serve(ctx context.Context, change bus.Change) error {
 		return fmt.Errorf("node: %q holds no job of that name", change.Name)
 	}
 
-	// A job that changed is torn down and built again, rather than patched.
-	// The stages are built from the document, and half of a stage built from
-	// one revision and half from another is a thing nobody can debug.
-	n.stop(change.Name)
-
 	// The handlers run on a context of this job's own, not on the one that
 	// says when to stop serving. Sharing them meant a SIGTERM aborted the
 	// fetch a handler was in the middle of and it answered "context
@@ -297,6 +307,22 @@ func (n *Node) serve(ctx context.Context, change bus.Change) error {
 	work, stop := context.WithCancel(context.WithoutCancel(ctx))
 	running := &served{revision: change.Revision, stop: stop, work: newInFlight()}
 
+	// Built first, and subscribed only once all of it built.
+	//
+	// A job that changed is torn down and built again rather than patched,
+	// because half of a stage from one revision and half from another is a
+	// thing nobody can debug. That is right about subscribing and was wrong
+	// about building: this used to stop the old revision before it knew
+	// whether the new one would build at all.
+	//
+	// A resubmission that parses and validates can still fail here, on this
+	// node specifically: a plugin this build does not have, or a `secret()`
+	// this node has no key to resolve. When it did, the working stages were
+	// already gone. The node served nothing for that job from then on, logged
+	// one warning, and went on advertising both stages in the registry, so
+	// `scour nodes` showed capacity that answered nothing and the driving
+	// node's requests timed out.
+	var subscribe []func() (*nats.Subscription, error)
 	for _, stage := range n.opts.Serve {
 		switch stage {
 		case StageDownload:
@@ -305,14 +331,10 @@ func (n *Node) serve(ctx context.Context, change bus.Change) error {
 				running.close()
 				return err
 			}
-			sub, err := n.conn.ServeDownloader(work, job.Name, built, n.opts.Bodies, running.work)
-			if err != nil {
-				built.Close()
-				running.close()
-				return err
-			}
-			running.subs = append(running.subs, sub)
 			running.closers = append(running.closers, built.Close)
+			subscribe = append(subscribe, func() (*nats.Subscription, error) {
+				return n.conn.ServeDownloader(work, job.Name, built, n.opts.Bodies, running.work)
+			})
 
 		case StageRead:
 			built, err := spider.New(ctx, job, spider.Options{Eval: n.opts.Eval})
@@ -320,19 +342,31 @@ func (n *Node) serve(ctx context.Context, change bus.Change) error {
 				running.close()
 				return err
 			}
-			sub, err := n.conn.ServeSpider(work, job.Name, built, n.opts.Bodies, running.work)
-			if err != nil {
-				built.Close()
-				running.close()
-				return err
-			}
-			running.subs = append(running.subs, sub)
 			running.closers = append(running.closers, built.Close)
+			subscribe = append(subscribe, func() (*nats.Subscription, error) {
+				return n.conn.ServeSpider(work, job.Name, built, n.opts.Bodies, running.work)
+			})
 
 		default:
+			// Unreachable: [Join] refuses an unknown stage before a node ever
+			// starts. Kept because "nothing serves that" is still the truth if
+			// a later caller finds a way past it, and because the alternative
+			// is a silent no-op.
 			running.close()
 			return fmt.Errorf("node: nothing here serves a %q stage", stage)
 		}
+	}
+
+	// Everything built. Now the old revision goes, and the new one takes over.
+	n.stop(change.Name)
+
+	for _, join := range subscribe {
+		sub, err := join()
+		if err != nil {
+			running.close()
+			return err
+		}
+		running.subs = append(running.subs, sub)
 	}
 
 	// Checked again under the lock, because serve releases it to build the

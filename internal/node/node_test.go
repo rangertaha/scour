@@ -518,3 +518,82 @@ func TestAClosedNodeTakesOnNothingFurther(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// TestAResubmissionThisNodeCannotBuildLeavesItServingWhatItHad.
+//
+// A job that changed is torn down and built again rather than patched, because
+// half of a stage from one revision and half from another is undebuggable. That
+// is right about subscribing and was wrong about building: the old revision was
+// stopped before anything knew whether the new one would build at all.
+//
+// A document can parse and validate and still fail on THIS node: a plugin this
+// build does not have, or a `secret()` this node has no key to resolve. When it
+// did, the working stages were already gone. The node served nothing for that
+// job from then on, logged one warning, and went on advertising both stages in
+// the registry, so `scour nodes` showed capacity that answered nothing and the
+// driving node's requests timed out until somebody noticed.
+func TestAResubmissionThisNodeCannotBuildLeavesItServingWhatItHad(t *testing.T) {
+	server, _ := site(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	conn, err := bus.Connect(bus.Options{Name: "one", StoreDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	store, err := conn.OpenJobs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Put(ctx, "news", []byte(document(server))); err != nil {
+		t.Fatal(err)
+	}
+
+	// No Eval, so a job whose plugins want a secret is refused when it is
+	// built here, by name, which is the right answer on a node with no way to
+	// read one.
+	joined, err := node.Join(ctx, conn, node.Options{Name: "worker", Bodies: bodies(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer joined.Close()
+	go joined.Watch(ctx)
+
+	waitFor(t, func() bool { return len(joined.Serving()) == 1 })
+	was, _ := joined.Revision("news")
+
+	// Parses, validates, and cannot be built on a node with no sealing key.
+	wants := strings.Replace(document(server), "  scheduler {", `  downloader {
+    plugin "cache" {
+      backend = "local"
+      dir     = secret("where")
+    }
+  }
+
+  scheduler {`, 1)
+	if wants == document(server) {
+		t.Fatal("the document was not changed, so this would pass without testing anything")
+	}
+	if _, err := store.Put(ctx, "news", []byte(wants)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Give the node long enough to have tried and failed.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if revision, ok := joined.Revision("news"); ok && revision != was {
+			t.Fatalf("the node took up a revision it cannot build: %d", revision)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if serving := joined.Serving(); len(serving) != 1 {
+		t.Errorf("the node is serving %v; a resubmission it could not build took away "+
+			"the revision that was working", serving)
+	}
+	if revision, ok := joined.Revision("news"); !ok || revision != was {
+		t.Errorf("revision = %d, %v; want the one it was already serving (%d)", revision, ok, was)
+	}
+}
