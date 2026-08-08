@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/rangertaha/scour/internal/classify"
+	"github.com/rangertaha/scour/internal/scope"
+	"github.com/rangertaha/scour/internal/urls"
 )
 
 // Validate reports every problem in the document at once.
@@ -68,6 +70,9 @@ func (j *Job) validate() []error {
 			problems = append(problems, prefix(fmt.Errorf("start[%d] %q: %w", i, raw, err)))
 		}
 	}
+	for _, err := range j.validateStartIsInScope() {
+		problems = append(problems, prefix(err))
+	}
 
 	if len(j.Items) == 0 {
 		problems = append(problems, prefix(errors.New("no item blocks, so there is nothing to extract")))
@@ -114,6 +119,66 @@ func (j *Job) validate() []error {
 	}
 
 	return problems
+}
+
+// validateStartIsInScope refuses a job whose own boundary excludes every URL it
+// starts from.
+//
+// A crawl seeds by handing its start URLs to the scheduler, which drops what is
+// out of scope before it is queued. If all of them are dropped the frontier is
+// empty, nothing is ever fetched, and the run finishes in a millisecond and
+// exits zero. It is the worst shape a mistake can take: a success that did
+// nothing.
+//
+// It is not hypothetical. Three of the four templates scour ships had
+// `included = ["*.example.com"]` beside `domains = ["example.com"]`, written
+// meaning "this site and below it", which is what `domains` already says. As an
+// inclusion pattern it means something else: if any are given a URL has to
+// match one, and `*.example.com` matches the subdomains and refuses the apex.
+// So `scour init news > news.hcl && scour run news.hcl`, which is the first
+// thing anybody does, crawled nothing and said it was fine. The book's own
+// example had it too.
+//
+// Refused rather than warned about, because there is no reading of a document
+// under which this is what somebody meant, and a warning on a crawl nobody is
+// watching is a warning nobody sees.
+func (j *Job) validateStartIsInScope() []error {
+	if len(j.Start) == 0 {
+		return nil
+	}
+	if len(j.Domains) == 0 && len(j.Included) == 0 && len(j.Excluded) == 0 {
+		return nil
+	}
+
+	bounds, err := scope.New(j.Domains, j.Included, j.Excluded)
+	if err != nil {
+		// The scope is unusable for its own reasons, which is a problem the
+		// scheduler reports when it builds one. Saying it twice helps nobody.
+		return nil
+	}
+
+	var refused []string
+	for _, raw := range j.Start {
+		normalised, err := urls.Normalise(raw, urls.Options{})
+		if err != nil {
+			continue // already reported by checkStartURL
+		}
+		if !bounds.Allows(normalised) {
+			refused = append(refused, raw)
+		}
+	}
+
+	// Some refused is a job that starts in more places than it may go, which is
+	// a reasonable thing to write. All refused is a job that cannot begin.
+	if len(refused) < len(j.Start) {
+		return nil
+	}
+	return []error{fmt.Errorf(
+		"every start URL is outside this job's own scope, so the crawl would seed nothing and finish immediately: %s.\n"+
+			"  domains  = %v  (a host matches if it is one of these or a subdomain)\n"+
+			"  included = %v  (if any are given, every URL has to match one)\n"+
+			"  excluded = %v  (these never, whatever else matches)",
+		strings.Join(refused, ", "), j.Domains, j.Included, j.Excluded)}
 }
 
 // checkStartURL refuses anything that is not a page on the web.

@@ -8,7 +8,6 @@
 job {{.Name | quote}} {
   start    = ["https://example.com/news/"]
   domains  = ["example.com"]
-  included = ["*.example.com"]
 
   # Section indexes and tag pages are worth crawling but rarely worth
   # extracting. Leaving them in scope and letting the scorer rank them is

@@ -16,7 +16,7 @@ const document = `
 job "news" {
   domains  = ["example.com"]
   start    = ["https://example.com/topic"]
-  included = ["*.example.com"]
+  included = ["*/topic/*", "https://example.com/topic"]
   excluded = []
 
   item "article" {
@@ -213,7 +213,7 @@ func TestScopeAndSchema(t *testing.T) {
 	if len(j.Domains) != 1 || j.Domains[0] != "example.com" {
 		t.Errorf("domains = %v", j.Domains)
 	}
-	if len(j.Included) != 1 || j.Included[0] != "*.example.com" {
+	if len(j.Included) != 2 || j.Included[0] != "*/topic/*" {
 		t.Errorf("included = %v", j.Included)
 	}
 
@@ -696,6 +696,67 @@ job "news" {
 `)
 	if err := doc.Validate(); err == nil {
 		t.Fatal("accepted the same job name twice")
+	}
+}
+
+// TestAJobThatCannotSeedIsRefused.
+//
+// The mistake this catches shipped four times: in three of the four templates,
+// in the notes, and in the book. `included = ["*.example.com"]` beside
+// `domains = ["example.com"]` reads as "this site and below it", which is what
+// `domains` already says; as an inclusion pattern it refuses the apex, so the
+// start URL was dropped before it was queued and the crawl finished having
+// fetched nothing, successfully.
+func TestAJobThatCannotSeedIsRefused(t *testing.T) {
+	job := func(start, included string) string {
+		return `
+job "news" {
+  start    = ["` + start + `"]
+  domains  = ["example.com"]
+  included = ["` + included + `"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+}
+`
+	}
+
+	err := parse(t, job("https://example.com/", "*.example.com")).Validate()
+	if err == nil {
+		t.Fatal("accepted a job whose scope refuses every URL it starts from")
+	}
+	for _, want := range []string{"seed nothing", "https://example.com/", "included"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not mention %q, so nobody can fix it:\n%v", want, err)
+		}
+	}
+
+	// The subdomain the pattern was written for is still fine, so this refuses
+	// the mistake rather than the feature.
+	if err := parse(t, job("https://www.example.com/", "*.example.com")).Validate(); err != nil {
+		t.Errorf("refused a job whose start does match its inclusion:\n%v", err)
+	}
+
+	// And a job that starts in more places than it may go is a reasonable
+	// thing to write: only losing every seed is fatal.
+	both := `
+job "news" {
+  start    = ["https://example.com/", "https://www.example.com/"]
+  domains  = ["example.com"]
+  included = ["*.example.com"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+}
+`
+	if err := parse(t, both).Validate(); err != nil {
+		t.Errorf("refused a job that can still seed from one of its start URLs:\n%v", err)
 	}
 }
 

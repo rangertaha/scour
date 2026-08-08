@@ -8,7 +8,11 @@
 job {{.Name | quote}} {
   start    = ["https://shop.example/"]
   domains  = ["shop.example"]
-  included = ["*/product/*", "*/p/*"]
+  # Not `included = ["*/product/*"]`, tempting as it looks: an inclusion list
+  # every URL has to match would refuse the index and category pages that are
+  # the only route to a product, and the crawl would stop at the front page.
+  # Rank them instead, and let `excluded` take out what is never wanted.
+  included = []
   excluded = ["*/cart*", "*/checkout*", "*/account*"]
 
   item "product" {

@@ -7,9 +7,12 @@
 
 job {{.Name | quote}} {
   # Where the crawl starts, and how far it may wander.
+  # `domains` is the site, and a subdomain of it counts. `included` is a
+  # narrower thing: if you give any pattern at all, every URL has to match one
+  # of them, which is how a scope ends up refusing the page you started from.
   start    = ["https://example.com/"]
   domains  = ["example.com"]
-  included = ["*.example.com"]
+  included = []
   excluded = []
 
   # What to pull out of a page. Aliases are the other names a field goes by,

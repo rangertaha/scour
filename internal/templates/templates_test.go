@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/rangertaha/scour/internal/engine"
+	"github.com/rangertaha/scour/internal/scope"
+	"github.com/rangertaha/scour/internal/urls"
 )
 
 // TestEveryTemplateIsAJobThatWorks is the promise a shipped template makes.
@@ -66,6 +68,52 @@ func TestEveryTemplateExtractsSomething(t *testing.T) {
 			}
 			if len(job.Exporters) == 0 {
 				t.Error("has nowhere to put what it finds")
+			}
+		})
+	}
+}
+
+// TestEveryTemplateCanFetchItsOwnStart.
+//
+// The first thing anybody does is `scour init news > news.hcl` and then `scour
+// run news.hcl`. Three of the four templates could not fetch the URL they
+// themselves name: `included = ["*.example.com"]` was written meaning "this
+// site and below it", which is what `domains` already says, and as an
+// inclusion pattern it matches subdomains and refuses the apex. So the seed was
+// out of scope, nothing was queued, and the run reported success having fetched
+// nothing.
+//
+// Nothing failed. That is the whole reason this test exists: a scope that
+// excludes everything and a scope that excludes nothing both parse, both
+// validate, and only one of them crawls.
+func TestEveryTemplateCanFetchItsOwnStart(t *testing.T) {
+	for _, tmpl := range All() {
+		t.Run(tmpl.Name, func(t *testing.T) {
+			src, _ := Render(tmpl.Name, "test")
+			doc, err := engine.Parse(src, "t.hcl")
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			job := doc.Jobs[0].Resolved()
+
+			bounds, err := scope.New(job.Domains, job.Included, job.Excluded)
+			if err != nil {
+				t.Fatalf("scope: %v", err)
+			}
+
+			if len(job.Start) == 0 {
+				t.Fatal("has no start URLs, so it cannot crawl anything")
+			}
+			for _, start := range job.Start {
+				normalised, err := urls.Normalise(start, urls.Options{})
+				if err != nil {
+					t.Fatalf("start %q: %v", start, err)
+				}
+				if !bounds.Allows(normalised) {
+					t.Errorf("start %q is outside the job's own scope, so a crawl seeds nothing:\n"+
+						"  domains  = %v\n  included = %v\n  excluded = %v",
+						start, job.Domains, job.Included, job.Excluded)
+				}
 			}
 		})
 	}
