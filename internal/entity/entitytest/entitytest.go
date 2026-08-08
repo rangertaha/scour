@@ -81,6 +81,7 @@ func Run(t *testing.T, open Open) {
 	t.Run("AProposedMergeIsAcceptedByTheStore", func(t *testing.T) { testAProposedMergeIsAcceptedByTheStore(t, open) })
 	t.Run("RetractKeepsWhatIsStillAsserted", func(t *testing.T) { testRetractKeepsWhatIsStillAsserted(t, open) })
 	t.Run("AKindIsTheSameKindWhoeverSpelledIt", func(t *testing.T) { testAKindIsTheSameKindWhoeverSpelledIt(t, open) })
+	t.Run("AMergeGoesToTheNameTheRuleActuallyFound", func(t *testing.T) { testAMergeGoesToTheNameTheRuleFound(t, open) })
 }
 
 func said(job, url string) entity.Provenance {
@@ -686,5 +687,114 @@ func testAKindIsTheSameKindWhoeverSpelledIt(t *testing.T, open Open) {
 	}
 	if len(topics) != 1 {
 		t.Errorf("the type's topics = %+v, want the one it was tagged with", topics)
+	}
+
+	// Every method that takes a kind, not just the two that were fixed when
+	// this test was written.
+	//
+	// The store canonicalises a kind by lowercasing AND trimming it, and only
+	// some of the methods did both: an entity asserted from `entity = "person "`
+	// was stored under `person` and then invisible to every reader that only
+	// lowercased. Nothing failed. The store simply reported that a type nobody
+	// had misspelled contained nothing, so a job's whole entity graph came back
+	// empty and the document that produced it looked fine.
+	//
+	// Written as a walk over the methods rather than one assertion, because the
+	// defect is per method and the next one added is the next one to forget.
+	// The same graph, not a fresh one. Opening a second graph inside a subtest
+	// is fine for a store on this machine and wrong for one on a bus: the
+	// harness there serves each graph on the same subject in one queue group,
+	// so a second service means requests land on whichever store answers first
+	// and an entity asserted through one is invisible to the other.
+	t.Run("EveryMethodThatTakesAKind", func(t *testing.T) {
+		alex := plain
+		paper, err := g.Assert(ctx, "work", "A Paper", from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := g.Relate(ctx, paper, alex, "author", "", 0, from); err != nil {
+			t.Fatal(err)
+		}
+
+		// Each of these is the same question asked with a stray space.
+		if got, err := g.Find(ctx, "person ", "Alex Doe"); err != nil || got == nil {
+			t.Errorf("Find with a spaced kind found nothing: %v, %v", got, err)
+		}
+		if got, err := g.Kind(ctx, "person "); err != nil || len(got) != 1 {
+			t.Errorf("Kind with a spaced kind returned %d entities, want 1: %v", len(got), err)
+		}
+		if got, err := g.Related(ctx, paper, "author ", ""); err != nil || len(got) != 1 {
+			t.Errorf("Related with a spaced kind returned %d entities, want 1: %v", len(got), err)
+		}
+		if got, err := g.Candidates(ctx, "person ", "A. Doe"); err != nil || len(got) != 1 {
+			t.Errorf("Candidates with a spaced kind returned %d, want the one it would find spelled plainly: %v", len(got), err)
+		}
+
+		// And a relation asserted with a stray space is the same relation, so
+		// the reader that spells it plainly still finds it.
+		if _, err := g.Relate(ctx, paper, alex, "author ", "", 0, from); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := g.Related(ctx, paper, "author", ""); err != nil || len(got) != 1 {
+			t.Errorf("relating with a spaced kind made a second relation: %d, %v", len(got), err)
+		}
+	})
+}
+
+// testAMergeGoesToTheNameTheRuleFound: the initial rule may only merge into the
+// one full name it actually found.
+//
+// The rule is "an initial may be merged into a full name when exactly one full
+// name shares its surname and its first letter". The check counted those full
+// names and required there to be one, and then never looked at whether the
+// entity being merged INTO was that one. So the count could be satisfied by
+// Alex Doe while the merge went to Bob Roe, and "A. Doe" became Bob Roe
+// permanently: an alias is a row, and every article bylined "A. Doe" reads as
+// the wrong person from then on.
+//
+// Reachable from outside the process. `internal/bus` passes a caller's From, To
+// and Rule straight into Merge, so this is not only what the store's own
+// proposer would ask for.
+//
+// Merging wrongly is worse than not merging, which is the whole reason this
+// rule is conservative in the first place.
+func testAMergeGoesToTheNameTheRuleFound(t *testing.T, open Open) {
+	ctx := context.Background()
+	g := open(t)
+	from := said("news", "https://a.example/1")
+
+	full, err := g.Assert(ctx, "person", "Alex Doe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := g.Assert(ctx, "person", "A. Doe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stranger, err := g.Assert(ctx, "person", "Bob Roe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Exactly one full "Doe" beginning with A exists, so the count is
+	// satisfied. It is satisfied by Alex Doe, and this merge is to Bob Roe.
+	if err := g.Merge(ctx, initial, stranger, entity.RuleInitial, from); err == nil {
+		t.Error("merged an initial into a name that shares neither its surname nor its first letter, " +
+			"because the rule counted a different entity entirely")
+	}
+
+	// The merge the rule really did find is still allowed, or the fix would
+	// have retired the feature rather than the defect.
+	if err := g.Merge(ctx, initial, full, entity.RuleInitial, from); err != nil {
+		t.Errorf("refused the merge the rule actually found: %v", err)
+	}
+
+	// And it took effect: the initial now resolves to the full name.
+	got, err := g.Find(ctx, "person", "A. Doe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.ID != full {
+		t.Errorf("after merging, A. Doe resolves to %+v, want Alex Doe", got)
 	}
 }

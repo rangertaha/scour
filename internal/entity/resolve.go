@@ -188,13 +188,9 @@ func (s *graph) Candidates(ctx context.Context, kind, name string) ([]Candidate,
 // shares its surname and its first letter. Asked here so that the counting and
 // the alias row happen with nothing able to slip between them.
 func unambiguous(ctx context.Context, tx *sql.Tx, kind, loser, keeper string) (bool, error) {
-	var loserName, keeperName string
+	var loserName string
 	if err := tx.QueryRowContext(ctx,
 		`SELECT name FROM entities WHERE id = ?`, loser).Scan(&loserName); err != nil {
-		return false, fmt.Errorf("entity: merge: %w", err)
-	}
-	if err := tx.QueryRowContext(ctx,
-		`SELECT name FROM entities WHERE id = ?`, keeper).Scan(&keeperName); err != nil {
 		return false, fmt.Errorf("entity: merge: %w", err)
 	}
 
@@ -223,6 +219,7 @@ SELECT DISTINCT c.id, c.name
 	defer rows.Close()
 
 	fulls := 0
+	only := ""
 	for rows.Next() {
 		var id, name string
 		if err := rows.Scan(&id, &name); err != nil {
@@ -236,11 +233,25 @@ SELECT DISTINCT c.id, c.name
 			continue
 		}
 		fulls++
+		only = id
 	}
 	if err := rows.Err(); err != nil {
 		return false, fmt.Errorf("entity: merge: %w", err)
 	}
-	return fulls == 1, nil
+
+	// One full name, AND it is the one being merged into.
+	//
+	// Counting alone was the whole check, and a count answers a question about
+	// the store rather than about this merge. "Exactly one full name shares the
+	// surname and the first letter" was satisfied by Alex Doe while the merge
+	// went to Bob Roe, so the rule licensed a merge it had not found: "A. Doe"
+	// became Bob Roe, permanently, and every article bylined that way attached
+	// to the wrong person.
+	//
+	// Both ids are already canonical here, because [Store.Merge] resolves them
+	// before calling, so this compares the two things the merge is actually
+	// between.
+	return fulls == 1 && only == keeper, nil
 }
 
 func (s *graph) Merge(ctx context.Context, from, to, rule string, said Provenance) error {
