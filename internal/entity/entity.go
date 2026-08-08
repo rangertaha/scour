@@ -364,8 +364,25 @@ func ID(kind, name string) string {
 	return hex.EncodeToString(sum[:12])
 }
 
-// normaliseKind is how a type name is compared: trimmed and lowered, matching
-// what [KindID] does, so the two cannot disagree about what a type is called.
+// normaliseKind is how a type name is compared: trimmed and lowered.
+//
+// # Every method that takes a kind goes through this one
+//
+// Not "should": there is no other spelling of the rule anywhere in the package,
+// and a new method that lowercases a kind by hand is a bug even though it will
+// compile, pass review and look exactly like the line above it.
+//
+// Four methods did lowercase by hand. `Assert` and [KindID] trimmed as well, so
+// an entity asserted from `entity = "person "` was stored under `person`, and
+// `Kind`, `Related`, `Candidates` and [RelationID] then could not see it: they
+// asked for `person ` and the store answered, correctly, that it had nothing
+// of that type. Nothing failed anywhere. A job's entire entity graph came back
+// empty and the document that produced it was perfectly valid, so the only
+// visible symptom was a feature that appeared not to work.
+//
+// The suite holds it now: `AKindIsTheSameKindWhoeverSpelledIt` walks every
+// method taking a kind and asks each one with a stray space, so the next method
+// added is caught by the build rather than by somebody's empty graph.
 func normaliseKind(kind string) string {
 	return strings.ToLower(strings.TrimSpace(kind))
 }
@@ -430,7 +447,7 @@ func (s *graph) Relate(ctx context.Context, from, to, kind, topic string, positi
 		said.At = time.Now().UTC()
 	}
 	at := said.At.UnixNano()
-	kind = strings.ToLower(kind)
+	kind = normaliseKind(kind)
 	id := RelationID(from, to, kind, topic)
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -469,7 +486,7 @@ ON CONFLICT (from_id, to_id, kind, topic) DO UPDATE SET
 // and which is what lets a relation carry properties of its own.
 func RelationID(from, to, kind, topic string) string {
 	sum := sha256.Sum256([]byte(from + "\x00" + to + "\x00" +
-		strings.ToLower(kind) + "\x00" + topic))
+		normaliseKind(kind) + "\x00" + topic))
 	return hex.EncodeToString(sum[:12])
 }
 
@@ -543,7 +560,7 @@ SELECT c.id, c.kind, c.name, c.first_seen, c.last_seen, SUM(r.assertions)
   JOIN resolved rt ON rt.id = r.to_id
   JOIN entities c  ON c.id  = rt.canonical
  WHERE rf.canonical = (SELECT canonical FROM resolved WHERE id = ?) AND r.kind = ?`
-	args := []any{id, strings.ToLower(kind)}
+	args := []any{id, normaliseKind(kind)}
 
 	if topic != "" {
 		query += ` AND r.topic = ?`
@@ -588,7 +605,7 @@ SELECT c.id, c.kind, c.name, MIN(e.first_seen), MAX(e.last_seen), SUM(e.assertio
   JOIN entities c ON c.id = r.canonical
  WHERE e.kind = ?
  GROUP BY c.id
- ORDER BY SUM(e.assertions) DESC, c.name ASC`, strings.ToLower(kind))
+ ORDER BY SUM(e.assertions) DESC, c.name ASC`, normaliseKind(kind))
 	if err != nil {
 		return nil, fmt.Errorf("entity: kind: %w", err)
 	}
