@@ -106,6 +106,45 @@ type Frontier interface {
 	// that URL to a third worker while the second is still fetching it.
 	Fail(ctx context.Context, job, hash string, attempt int) error
 
+	// Pace records the least time a host asked for between requests, and holds
+	// it off for that long from now.
+	//
+	// It is how a site's own `Crawl-delay` reaches the one place that can
+	// honour it. Politeness is decided here, and robots.txt is read in the
+	// downloader, so without a way back the file was parsed and obeyed in every
+	// respect but this one: `robots.Rules.Delay` had no caller at all, and a
+	// site asking for thirty seconds was crawled at whatever `scheduler.rate`
+	// happened to say.
+	//
+	// # The longer of the two wins
+	//
+	// [Config.Rate] is how fast this job is willing to go and the delay is how
+	// fast the site is willing to be crawled, so [Frontier.Lease] waits for
+	// whichever is longer. A job cannot use a permissive robots.txt to go
+	// faster than it configured, and it cannot use its own rate to go faster
+	// than the site asked.
+	//
+	// # Not job-scoped
+	//
+	// For the same reason host state is shared: robots.txt is the host's
+	// instruction to everybody, so two jobs on one site honour one delay
+	// between them rather than one each. That is the same argument politeness
+	// is built on, applied to where the number came from.
+	//
+	// # It holds the host off, rather than only recording the number
+	//
+	// A crawl-delay is learnt on the first fetch of a host, by which point that
+	// host has already been paced at the job's rate. Recording the number alone
+	// would let the second request, the one that proves the file was read at
+	// all, go out a second after the first. So this also pushes the host out to
+	// now+delay, and never pulls it in: a host already cooling for longer stays
+	// that way.
+	//
+	// A delay of zero records that the site asked for nothing, which is not the
+	// same as never having asked and is worth storing so that a site dropping
+	// its `Crawl-delay` takes effect.
+	Pace(ctx context.Context, host string, now time.Time, delay time.Duration) error
+
 	// Len is how many requests are still waiting, leased or not.
 	Len(ctx context.Context, job string) (int, error)
 

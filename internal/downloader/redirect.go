@@ -47,11 +47,20 @@ func (f *follower) wrap(next Handler) Handler {
 		asked := req
 		trail := []string{req.URL}
 
+		// What the hops asked for between requests. Every response but the last
+		// is thrown away here, and each one carries the `Crawl-delay` of the
+		// host that served it, so anything learnt on the way has to be brought
+		// along or it is lost: a chain crossing two hosts would leave the first
+		// paced at the job's own rate for the rest of the crawl, with its file
+		// read and understood and dropped one frame up.
+		var learnt []CrawlDelay
+
 		for hop := 0; ; hop++ {
 			resp, err := next.Handle(ctx, req)
 			if err != nil {
 				return resp, err
 			}
+			learnt = append(learnt, resp.Delays...)
 
 			target, ok := redirected(resp)
 			if !ok {
@@ -59,6 +68,7 @@ func (f *follower) wrap(next Handler) Handler {
 				// that says so. Where the body came from is [Response.URL],
 				// and the two differing is what "this redirected" looks like.
 				resp.Request = asked
+				resp.Delays = learnt
 				return resp, nil
 			}
 

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -467,6 +468,84 @@ func TestPolitenessIsHonouredAcrossWorkers(t *testing.T) {
 	}
 	if got := r.Stats().Fetched.Load(); got != 5 {
 		t.Errorf("fetched %d pages", got)
+	}
+}
+
+// TestASiteThatAsksToBeCrawledSlowlyIs.
+//
+// The one test that starts where a person starts: a real site, a real
+// robots.txt, a real crawl. Everything under it was built and tested and
+// nothing joined it up, so `robots.Rules.Delay` had no caller anywhere in the
+// module. scour parsed `Crawl-delay`, and its own documentation explained why it
+// was worth keeping, and then crawled every site at `scheduler.rate` whatever
+// its file said.
+//
+// A unit test could not have found that. Each layer did its part: the parser
+// returned the number, the frontier paced the host, and nothing carried the
+// first to the second.
+func TestASiteThatAsksToBeCrawledSlowlyIs(t *testing.T) {
+	const delay = time.Second
+
+	var (
+		mu   sync.Mutex
+		hits []time.Time
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			fmt.Fprintf(w, "User-agent: *\nCrawl-delay: %d\n", int(delay.Seconds()))
+			return
+		}
+
+		mu.Lock()
+		hits = append(hits, time.Now())
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/":
+			fmt.Fprint(w, `<html><head><title>Index</title></head><body>
+			  <a href="/story/1">one</a>
+			</body></html>`)
+		case "/story/1":
+			fmt.Fprint(w, `<html><head><meta property="og:title" content="Story"></head>
+			  <body><article>Words.</article></body></html>`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	// A rate far below what the site asked for, so anything that honours only
+	// the job's own setting fetches both pages at once and fails here.
+	r, ending := crawl(t, document(t, server, `
+  scheduler {
+    rate = "1ms"
+  }
+`), "")
+
+	if ending != run.Finished {
+		t.Errorf("ending = %q", ending)
+	}
+	if got := r.Stats().Fetched.Load(); got != 2 {
+		t.Fatalf("fetched %d pages, want the index and the story", got)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(hits) < 2 {
+		t.Fatalf("the site was asked %d times", len(hits))
+	}
+	for i := 1; i < len(hits); i++ {
+		gap := hits[i].Sub(hits[i-1])
+
+		// A little under the delay, because the crawl measures from when the
+		// response came back and the server from when the request arrived, and
+		// the difference is one page's worth of handling. Well clear of the 1ms
+		// the job configured, which is what this is distinguishing.
+		if gap < delay-100*time.Millisecond {
+			t.Errorf("requests %d and %d were %s apart; the site asked for %s",
+				i-1, i, gap, delay)
+		}
 	}
 }
 

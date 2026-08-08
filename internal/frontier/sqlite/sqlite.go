@@ -168,9 +168,18 @@ CREATE TABLE IF NOT EXISTS urls (
 	PRIMARY KEY (job, hash)
 );
 
+-- hosts is politeness, and it is deliberately not keyed by job: a rate limit is
+-- per site, so two jobs crawling one host get one allowance between them.
+--
+-- delay is what the host asked for in its own robots.txt, kept beside next_at
+-- rather than folded into it because they are different facts: next_at is when
+-- this host may be touched again and delay is how long it wants to be left
+-- alone every time. Folding them would mean re-deriving the second from the
+-- first, which cannot be done once the first has been overwritten.
 CREATE TABLE IF NOT EXISTS hosts (
 	host    TEXT PRIMARY KEY,
-	next_at INTEGER NOT NULL
+	next_at INTEGER NOT NULL,
+	delay   INTEGER NOT NULL DEFAULT 0
 );
 
 -- One index per ordering, because a policy is an ORDER BY and an ORDER BY
@@ -180,10 +189,27 @@ CREATE TABLE IF NOT EXISTS hosts (
 --
 -- Each is (job, status) equality and then the ordering, and nothing else. Both
 -- of the other conditions, whether the row is ready and whether its host is
--- cooling, are left as residuals checked per row: SQLite walks the index in
--- policy order and stops at the first row that passes, which is nearly always
--- the first row it looks at. Putting ready_at in the index ahead of the
+-- cooling, are left as residuals checked per row, and SQLite walks the index in
+-- policy order until one passes. Putting ready_at in the index ahead of the
 -- ordering columns would turn the walk back into a sort.
+--
+-- This comment used to claim the walk stops at "nearly always the first row it
+-- looks at". That is true when cooling is independent of the ordering and
+-- exactly false under the priority policy, where the ordering causes the
+-- cooling: the
+-- lease hands out the best-scoring row and then cools that row's host, so the
+-- head of this index becomes a run of rows whose hosts are all cooling and
+-- which grows by one host's worth on every lease. Measured at 50,000 URLs over
+-- 5,000 hosts with a 30s delay, the per-lease cost is linear in how many leases
+-- have happened inside one politeness window: 1.7ms after 250, 3.8ms after 500,
+-- 8ms after 1,000, 17ms after 2,000, falling back once the window turns over.
+-- Total work inside a window is quadratic.
+--
+-- The guard at the top of [Frontier.Lease] fixes the case where NOTHING is due,
+-- which is the common one and was the worst. The case above, where something is
+-- due but the best rows are cooling, is not fixed here: it wants the host to be
+-- the unit of scheduling rather than the URL, which is a bigger change than an
+-- index.
 --
 -- The rowid the orderings tie-break on is not named here: SQLite appends it to
 -- every index entry already, and naming it is an error.
@@ -193,11 +219,100 @@ CREATE INDEX IF NOT EXISTS urls_breadth
 	ON urls (job, status, depth, discovered);
 CREATE INDEX IF NOT EXISTS urls_depth
 	ON urls (job, status, depth DESC, discovered DESC);
+
+-- Hosts by when they are next free, so that "is anything due at all" is a seek
+-- rather than a walk. See the guard at the top of [Frontier.Lease] for what
+-- that question costs when it is asked of the urls table instead.
+CREATE INDEX IF NOT EXISTS hosts_next_at ON hosts (next_at);
 `
 	if _, err := db.Exec(ddl); err != nil {
 		return fmt.Errorf("frontier/sqlite: schema: %w", err)
 	}
+	return migrate(db)
+}
+
+// schemaVersion is what the DDL above builds. A database recording anything
+// lower is brought up to it by [migrate], and one recording this is left alone.
+const schemaVersion = 1
+
+// migrate brings a database made by an older build up to the schema above.
+//
+// `CREATE TABLE IF NOT EXISTS` does nothing to a table that is already there,
+// so a column added later reaches new databases and no existing one. A frontier
+// is the state a crawl resumes from and there is no acceptable answer that
+// involves deleting it, so it is changed in place.
+//
+// # Why there is a version now
+//
+// Adding a column can be asked for idempotently: the database is asked whether
+// it has one. Backfilling cannot. `hosts` has to hold a row for every host in
+// the frontier, because [Frontier.Lease] now answers "is anything due at all"
+// from that table alone and a missing row would read as a host that is not
+// there rather than one that is free, which loses URLs rather than slowing
+// them down. Filling it is a scan of the urls table, and doing that on every
+// open to discover there was nothing to do is the cost this version exists to
+// skip.
+//
+// Every step is still written to be safe if it runs twice, because the version
+// is the optimisation and not the guarantee.
+func migrate(db *sql.DB) error {
+	var have int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&have); err != nil {
+		return fmt.Errorf("frontier/sqlite: read schema version: %w", err)
+	}
+	if have >= schemaVersion {
+		return nil
+	}
+
+	added := []struct{ table, column, spec string }{
+		{"hosts", "delay", "INTEGER NOT NULL DEFAULT 0"},
+	}
+	for _, add := range added {
+		has, err := hasColumn(db, add.table, add.column)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		if _, err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", add.table, add.column, add.spec)); err != nil {
+			return fmt.Errorf("frontier/sqlite: add %s.%s: %w", add.table, add.column, err)
+		}
+	}
+
+	// A row per host already in the frontier. Zero means free, which is what a
+	// host that has never been leased is.
+	// `WHERE true` is not a filter. SQLite cannot tell where a SELECT ends and
+	// an upsert clause begins without one, and rejects the statement outright.
+	if _, err := db.Exec(`
+INSERT INTO hosts (host, next_at, delay)
+SELECT DISTINCT host, 0, 0 FROM urls WHERE true
+ON CONFLICT (host) DO NOTHING`); err != nil {
+		return fmt.Errorf("frontier/sqlite: fill hosts: %w", err)
+	}
+
+	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+		return fmt.Errorf("frontier/sqlite: record schema version: %w", err)
+	}
 	return nil
+}
+
+// hasColumn asks the database what it has, rather than inferring it from a
+// failed ALTER: a duplicate-column error and a real one are the same string
+// from here, and treating every failure as "already there" would swallow the
+// second.
+func hasColumn(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf("SELECT 1 FROM pragma_table_info(%q) WHERE name = ?", table), column)
+	if err != nil {
+		return false, fmt.Errorf("frontier/sqlite: read %s: %w", table, err)
+	}
+	defer rows.Close()
+
+	has := rows.Next()
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("frontier/sqlite: read %s: %w", table, err)
+	}
+	return has, nil
 }
 
 // ordering is the ORDER BY a policy means.
@@ -248,10 +363,41 @@ ON CONFLICT (job, hash) DO NOTHING`)
 	}
 	defer stmt.Close()
 
+	// Every host in the frontier has a row in hosts, so that "is anything due
+	// at all" can be answered from that table alone. A host with no row would
+	// be invisible to that question, and invisible reads as "nothing here"
+	// rather than "free", which loses a URL instead of delaying it.
+	//
+	// Zero means free. Written once per distinct host in the batch rather than
+	// once per URL, because a page's links are overwhelmingly to the page's own
+	// host and this is on the path every discovered link takes.
+	//
+	// Unconditional, including for the empty host. The scheduler normalises
+	// before it queues, so a URL with no host should never arrive, but "should
+	// never" is the wrong footing for the thing a guard's correctness rests on:
+	// the invariant is that every host in urls has a row here, and one written
+	// only for the hosts that look reasonable is an invariant with a caller in
+	// it. A row for the empty host costs nothing and makes the guard sound by
+	// construction rather than by argument.
+	known, err := tx.PrepareContext(ctx, `
+INSERT INTO hosts (host, next_at, delay) VALUES (?, 0, 0)
+ON CONFLICT (host) DO NOTHING`)
+	if err != nil {
+		return 0, fmt.Errorf("frontier/sqlite: add: %w", err)
+	}
+	defer known.Close()
+
 	var added int
+	seen := make(map[string]bool, 1)
 	for _, r := range reqs {
 		if r.Hash == "" {
 			continue
+		}
+		if !seen[r.Host] {
+			seen[r.Host] = true
+			if _, err := known.ExecContext(ctx, r.Host); err != nil {
+				return 0, fmt.Errorf("frontier/sqlite: add %s: %w", r.URL, err)
+			}
 		}
 		result, err := stmt.ExecContext(ctx, job, r.Hash, r.URL, r.Host,
 			r.Depth, r.Score, r.Parent, r.Discovered.UnixNano())
@@ -288,8 +434,36 @@ func (f *Frontier) Lease(ctx context.Context, job string, now time.Time, hold ti
 	// hold about to be taken, and Done and Fail will only act on a report that
 	// still names it. Reading it here costs nothing: the row is being fetched
 	// for its URL anyway.
+	// Is any host free at all? If none is, nothing can be leased, and saying so
+	// from the hosts table costs one seek.
+	//
+	// Asked of the urls table instead, the same question is a walk of the whole
+	// frontier: every row fails the politeness residual, so SQLite reads all of
+	// them before concluding there is nothing. Measured on one host with its
+	// delay running, that was 0.55ms at a thousand URLs, 5.3ms at ten thousand
+	// and 69ms at a hundred thousand, and it is not asked once. A crawl of one
+	// site is the commonest shape there is and every worker asks this again
+	// every [run.Idle] for the whole of the delay, holding the write lock each
+	// time, which also blocks the Add that would queue what the crawl is
+	// finding. At a hundred thousand URLs that is more than a core spent
+	// proving there is nothing to do.
+	//
+	// Sound because every host in the frontier has a row here, which
+	// [Frontier.Add] maintains and [migrate] backfilled. A ready host does not
+	// mean a leasable URL, so this only ever answers "no" early; the query
+	// below still decides everything else.
+	var free int
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT 1 FROM hosts WHERE next_at <= ? LIMIT 1`, now.UnixNano()).Scan(&free); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, frontier.ErrEmpty
+	case err != nil:
+		return nil, fmt.Errorf("frontier/sqlite: lease: %w", err)
+	}
+
 	query := `
-SELECT u.hash, u.url, u.host, u.depth, u.score, u.parent, u.discovered, u.attempts
+SELECT u.hash, u.url, u.host, u.depth, u.score, u.parent, u.discovered, u.attempts,
+       COALESCE(h.delay, 0)
   FROM urls u LEFT JOIN hosts h ON h.host = u.host
  WHERE u.job = ? AND u.status = '` + waiting + `'
    AND u.ready_at <= ?
@@ -303,9 +477,10 @@ SELECT u.hash, u.url, u.host, u.depth, u.score, u.parent, u.discovered, u.attemp
 		req        frontier.Request
 		discovered int64
 		attempts   int
+		delay      int64
 	)
 	err = tx.QueryRowContext(ctx, query, job, stamp, stamp).Scan(
-		&req.Hash, &req.URL, &req.Host, &req.Depth, &req.Score, &req.Parent, &discovered, &attempts)
+		&req.Hash, &req.URL, &req.Host, &req.Depth, &req.Score, &req.Parent, &discovered, &attempts, &delay)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, frontier.ErrEmpty
@@ -330,11 +505,19 @@ UPDATE urls SET ready_at = ?, attempts = ?
 		return nil, fmt.Errorf("frontier/sqlite: lease: %w", err)
 	}
 
-	if f.rate > 0 {
+	// The longer of what this job configured and what the site asked for. Read
+	// from the row above rather than from f.rate alone, because a crawl-delay
+	// belongs to the host and the rate belongs to the job, and honouring only
+	// the second is how `Crawl-delay` came to be parsed and ignored.
+	//
+	// delay alone can be the reason to write the row, so the guard is on the
+	// wait rather than on the rate: a job with no rate of its own still owes a
+	// site the delay it asked for.
+	if wait := max(f.rate, time.Duration(delay)); wait > 0 {
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO hosts (host, next_at) VALUES (?, ?)
 ON CONFLICT (host) DO UPDATE SET next_at = excluded.next_at`,
-			req.Host, now.Add(f.rate).UnixNano()); err != nil {
+			req.Host, now.Add(wait).UnixNano()); err != nil {
 			return nil, fmt.Errorf("frontier/sqlite: lease: %w", err)
 		}
 	}
@@ -343,6 +526,48 @@ ON CONFLICT (host) DO UPDATE SET next_at = excluded.next_at`,
 		return nil, fmt.Errorf("frontier/sqlite: lease: %w", err)
 	}
 	return &req, nil
+}
+
+// Pace implements [frontier.Frontier].
+//
+// One upsert, doing both halves at once: it records what the site asked for and
+// takes the hold that number implies. Splitting them into a read and a write
+// would be a read-then-write across two statements on a row two jobs share,
+// which is the shape that has already produced two defects here.
+//
+// next_at only ever moves forward. `MAX(next_at, ?)` rather than an assignment,
+// because a host cooling for longer than this delay is a host somebody else is
+// already being polite to, and the shorter of two politeness rules is never the
+// answer.
+func (f *Frontier) Pace(ctx context.Context, host string, now time.Time, delay time.Duration) error {
+	if delay < 0 {
+		delay = 0
+	}
+
+	// The site's number alone, not the longer of the two.
+	//
+	// The job's rate has already been applied, by the lease that led here, and
+	// measured from when that lease was taken. Applying it again from now would
+	// measure it from after the fetch instead, so every host that asked for
+	// nothing, which is nearly all of them, would be left alone for a rate plus
+	// however long its page took to arrive. That is a slower crawl for every
+	// ordinary site, bought by a feature about the unusual ones.
+	//
+	// A delay shorter than the rate therefore falls out correctly rather than
+	// needing a case: it pushes next_at to a moment already passed, and MAX
+	// keeps the hold the lease took. The floor lives in [Frontier.Lease], which
+	// is where the two numbers are compared for the next handout.
+	until := now.Add(delay).UnixNano()
+
+	if _, err := f.db.ExecContext(ctx, `
+INSERT INTO hosts (host, next_at, delay) VALUES (?, ?, ?)
+ON CONFLICT (host) DO UPDATE SET
+	delay   = excluded.delay,
+	next_at = MAX(hosts.next_at, excluded.next_at)`,
+		host, until, int64(delay)); err != nil {
+		return fmt.Errorf("frontier/sqlite: pace %q: %w", host, err)
+	}
+	return nil
 }
 
 // Done implements [frontier.Frontier].

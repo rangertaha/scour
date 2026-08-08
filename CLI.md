@@ -213,6 +213,13 @@ pipeline: 2 wave(s), 2 at once at the widest
   2. rank.article, score.article
 ```
 
+`rate` here is what the job asked for, and it is a floor rather than the whole
+answer. With `robots` on, a site asking for longer in its own `Crawl-delay` gets
+it: the wait is whichever of the two is longer, so this crawl would leave a host
+requesting thirty seconds alone for thirty and one requesting one alone for two.
+The number a site asked for is learnt on the first fetch of that host and applies
+from then on, including to the crawl that learnt it.
+
 The chain is printed in the order it runs, with the order numbers, because that
 is the whole reason the numbers exist. The pipeline is printed as waves rather
 than as a list, because a list hides the concurrency that is the point of having

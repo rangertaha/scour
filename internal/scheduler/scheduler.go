@@ -31,6 +31,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/hcl/v2"
@@ -103,6 +104,11 @@ type Stage struct {
 	scope    *scope.Scope
 	maxDepth int
 	canon    urls.Options
+
+	// paced is the crawl-delay already recorded for each host, so that a number
+	// arriving on every page is written once. See [Stage.Pace].
+	mu    sync.Mutex
+	paced map[string]time.Duration
 }
 
 // Options are what a caller supplies that the job document cannot.
@@ -170,6 +176,7 @@ func New(ctx context.Context, job *engine.Job, opts Options, open func(frontier.
 		scope:    bounds,
 		maxDepth: job.Scheduler.Depth(),
 		canon:    opts.Canon,
+		paced:    map[string]time.Duration{},
 	}
 	s.handler = built.Handler(HandlerFunc(s.enqueue))
 	return s, nil
@@ -282,6 +289,47 @@ func (s *Stage) Done(ctx context.Context, hash string, attempt int) error {
 // that no longer holds the lease is ignored.
 func (s *Stage) Fail(ctx context.Context, hash string, attempt int) error {
 	return s.queue.Fail(ctx, s.job, hash, attempt)
+}
+
+// Pace records what a host's robots.txt asked for between requests, so that the
+// stage which decides politeness knows what the site actually wants.
+//
+// The number is learnt in the downloader, where robots.txt is read, and acted
+// on here, where the frontier is. That split is why `Crawl-delay` was parsed
+// and thrown away: there was no way back, so every host was crawled at
+// `scheduler.rate` whatever its file said.
+//
+// # The repetition is filtered here, and only here
+//
+// Every response carries the delay of the host that served it, so this is
+// called once per page and has to write once per host. The downloader cannot do
+// that filtering: it does not know whether the response carrying its report
+// survived the trip, and when it tried, the redirect follower was quietly
+// eating them.
+//
+// This stage can, because it is the one holding the frontier: what it has
+// already written is a thing only it knows. A repeat with the same number is
+// dropped and a changed one is written, so a site that alters its file mid-crawl
+// still takes effect.
+func (s *Stage) Pace(ctx context.Context, host string, now time.Time, delay time.Duration) error {
+	s.mu.Lock()
+	known, seen := s.paced[host]
+	if seen && known == delay {
+		s.mu.Unlock()
+		return nil
+	}
+	s.mu.Unlock()
+
+	if err := s.queue.Pace(ctx, host, now, delay); err != nil {
+		// Not remembered, so the next page for this host tries again. A write
+		// that failed is not a delay that was recorded.
+		return err
+	}
+
+	s.mu.Lock()
+	s.paced[host] = delay
+	s.mu.Unlock()
+	return nil
 }
 
 // Waiting is how many requests are still to be fetched.

@@ -616,6 +616,13 @@ func (r *Run) one(ctx context.Context, req *scheduler.Request) {
 		r.stats.Cached.Add(1)
 	}
 
+	// What the site asked for, on its way to the only stage that can honour it.
+	//
+	// Before the page is read rather than after, because reading it is the slow
+	// part and the next lease of this host may happen while it is going on. The
+	// downloader sends each host once, so this is one write per host.
+	r.pace(ctx, resp)
+
 	out, err := r.read.Handle(ctx, resp)
 	switch {
 	case chain.Dropped(err):
@@ -665,6 +672,31 @@ func (r *Run) done(ctx context.Context, req *scheduler.Request) {
 	r.report(ctx, "report a page finished", req.URL, func(ctx context.Context) error {
 		return r.sched.Done(ctx, req.Hash, req.Attempt)
 	})
+}
+
+// pace tells the scheduler what the hosts on this response asked for between
+// requests.
+//
+// Called once per page, because every response carries the delay of the host
+// that served it. It is not a write per page: [scheduler.Stage.Pace] keeps what
+// it has already recorded and drops a repeat, which is the only place that
+// knows.
+//
+// Routed through report because it is the same kind of write as the others
+// here: it describes something that has already happened, a failure is
+// recoverable, and the crawl should be counted as having had a store problem
+// rather than stopped. The cost of losing one is that the host stays at the
+// job's own rate, which is the behaviour this whole path exists to replace, so
+// it must be visible rather than silent.
+func (r *Run) pace(ctx context.Context, resp *downloader.Response) {
+	for _, asked := range resp.Delays {
+		r.report(ctx, "record a host's crawl-delay", asked.Host, func(ctx context.Context) error {
+			// r.now rather than time.Now, because the frontier is paced and
+			// leased against one clock and a hold taken on a different one is a
+			// hold in the wrong place. See [Options.Now].
+			return r.sched.Pace(ctx, asked.Host, r.now(), asked.Delay)
+		})
+	}
 }
 
 // report performs a frontier write that describes work already done, and counts

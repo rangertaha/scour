@@ -4,16 +4,69 @@ package sqlite_test
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	_ "modernc.org/sqlite"
+
 	"github.com/rangertaha/scour/internal/frontier"
 	"github.com/rangertaha/scour/internal/frontier/frontiertest"
 	"github.com/rangertaha/scour/internal/frontier/sqlite"
 )
+
+// TestAnOlderDatabaseIsBroughtForward.
+//
+// A frontier is the state a crawl resumes from, so there is no acceptable
+// answer to a schema change that involves deleting it. `CREATE TABLE IF NOT
+// EXISTS` does nothing to a table that already exists, so a column added to the
+// DDL reaches new databases and no existing one, and the failure is not at
+// startup: it is the first lease of the resumed crawl, reporting a column that
+// the file it just opened does not have.
+//
+// This builds the hosts table as an older build left it and then opens it.
+func TestAnOlderDatabaseIsBroughtForward(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	old, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "frontier.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := old.Exec(`
+CREATE TABLE hosts (host TEXT PRIMARY KEY, next_at INTEGER NOT NULL);
+INSERT INTO hosts (host, next_at) VALUES ('example.com', 0);`); err != nil {
+		t.Fatalf("build the old schema: %v", err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	f, err := sqlite.Open(frontier.Config{Dir: dir, Rate: time.Second})
+	if err != nil {
+		t.Fatalf("open a database an older build made: %v", err)
+	}
+	defer f.Close()
+
+	// The whole point of the column: the crawl that resumes has to be able to
+	// pace a host and then honour it.
+	if _, err := f.Add(ctx, "news", frontiertest.Req("/a", "example.com", 0, 1, 0)); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := f.Pace(ctx, "example.com", frontiertest.Origin, 10*time.Second); err != nil {
+		t.Fatalf("pace: %v", err)
+	}
+	if req, _ := f.Lease(ctx, "news", frontiertest.Origin.Add(2*time.Second), time.Minute); req != nil {
+		t.Errorf("the resumed crawl ignored the delay the site asked for: %v", req)
+	}
+	if req, _ := f.Lease(ctx, "news", frontiertest.Origin.Add(10*time.Second), time.Minute); req == nil {
+		t.Error("the resumed crawl never got the host back")
+	}
+}
 
 // The contract, run against the store a crawl actually uses. It is the same
 // suite the memory implementation runs, which is what stops the contract from
@@ -258,6 +311,110 @@ func TestTheLeaseIsServedByAnIndex(t *testing.T) {
 				t.Errorf("the lease scans the table:\n%s", joined)
 			}
 		})
+	}
+}
+
+// TestNoUrlIsInvisibleToTheGuard.
+//
+// [TestAnEmptyLeaseDoesNotReadTheFrontier] buys its speed by letting the hosts
+// table answer for the urls table, and that trade is only safe while every host
+// in the frontier has a row there. A host with no row is not read as a host that
+// is free; it is not seen at all, so the guard says nothing is due and the URLs
+// behind it are never handed out for as long as the crawl runs. A performance
+// change that loses URLs is worse than the cost it saved.
+//
+// The empty host is the case worth pinning, because it is the one an argument
+// about callers gets wrong: the scheduler normalises before queueing, so it
+// should not arrive, and [frontier.Frontier] is an interface anybody can call.
+func TestNoUrlIsInvisibleToTheGuard(t *testing.T) {
+	ctx := context.Background()
+	f := open(t, frontier.Config{Rate: time.Second})
+
+	// Straight at the interface, the way a caller that is not the scheduler
+	// reaches it.
+	odd := frontier.Request{URL: "urn:example:1", Hash: "h1", Host: ""}
+	if _, err := f.Add(ctx, "news", odd); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	got, err := f.Lease(ctx, "news", frontiertest.Origin, time.Minute)
+	if err != nil {
+		t.Fatalf("a queued URL was never handed out, so the guard cannot see it: %v", err)
+	}
+	if got.Hash != odd.Hash {
+		t.Errorf("leased %q, want the one URL that was queued", got.Hash)
+	}
+}
+
+// TestAnEmptyLeaseDoesNotReadTheFrontier.
+//
+// A cost, asserted as a cost. [TestTheLeaseIsServedByAnIndex] pins the query
+// plan, and a plan can stay exactly right while what it costs goes through the
+// floor: this whole class of defect hid behind that test for as long as it
+// existed.
+//
+// The case is the commonest crawl there is, one site. While its host is cooling
+// every lease returns nothing, and finding that out by walking the urls table
+// means reading all of it, because every row fails the politeness check and
+// SQLite cannot know that until it has looked. Measured before the guard that
+// fixed it: 0.55ms at a thousand URLs, 5.3ms at ten thousand, 69ms at a hundred
+// thousand. Each worker asks again every [run.Idle] for the whole delay and
+// holds the write lock to do it, which also blocks the Add queueing whatever
+// the crawl is finding, so at a hundred thousand URLs a crawl spends more than
+// a core proving it has nothing to do.
+//
+// A ratio rather than a number of milliseconds, so it means the same thing on a
+// slow machine as on a fast one. The bound is loose on purpose: what it has to
+// separate is flat from linear, and the defect it exists to catch was a
+// hundredfold.
+func TestAnEmptyLeaseDoesNotReadTheFrontier(t *testing.T) {
+	ctx := context.Background()
+
+	cost := func(size int) time.Duration {
+		t.Helper()
+
+		f, err := sqlite.Open(frontier.Config{Dir: t.TempDir(), Rate: time.Hour})
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		defer f.Close()
+
+		reqs := make([]frontier.Request, 0, size)
+		for i := range size {
+			reqs = append(reqs, frontiertest.Req(
+				fmt.Sprintf("/page/%d", i), "one.example",
+				i%6, float64(i%1000)/1000, time.Duration(i)*time.Millisecond))
+		}
+		if _, err := f.Add(ctx, "news", reqs...); err != nil {
+			t.Fatalf("add: %v", err)
+		}
+
+		// One lease, so the only host is cooling. Everything still waiting is
+		// now behind it, which is the state a crawl of one site spends most of
+		// its life in.
+		now := frontiertest.Origin
+		if _, err := f.Lease(ctx, "news", now, time.Minute); err != nil {
+			t.Fatalf("first lease: %v", err)
+		}
+
+		const runs = 200
+		start := time.Now()
+		for range runs {
+			if _, err := f.Lease(ctx, "news", now, time.Minute); err != frontier.ErrEmpty {
+				t.Fatalf("size %d: leased something while the only host was cooling: %v", size, err)
+			}
+		}
+		return time.Since(start) / runs
+	}
+
+	small, large := cost(1_000), cost(100_000)
+
+	// Ten, against a defect worth a hundred. Anything inside this is noise on a
+	// busy machine; anything outside it is the frontier being read again.
+	if large > 10*small {
+		t.Errorf("an empty lease costs %s at 100,000 URLs and %s at 1,000, so it "+
+			"grows with the frontier: it is reading the queue to find out that "+
+			"nothing is due, rather than asking which hosts are free.", large, small)
 	}
 }
 

@@ -55,6 +55,16 @@ type fetchReply struct {
 	Fetched time.Time   `json:"fetched"`
 	Cached  bool        `json:"cached"`
 
+	// Delays is what the hosts read on the way to this response asked for
+	// between requests.
+	//
+	// It travels because politeness is decided by the scheduler and robots.txt
+	// is read by the downloader, and over the bus those are two machines. A
+	// reply that dropped it would be a cluster that obeyed `Crawl-delay` when
+	// the stages were wired directly and ignored it when they were not, which
+	// is exactly the difference the bus must not have.
+	Delays []downloader.CrawlDelay `json:"delays,omitempty"`
+
 	// Dropped says a stage refused this on purpose. Carried as a field rather
 	// than as an error string, because a drop is an ordinary outcome and a
 	// caller has to be able to tell it from a stage that broke.
@@ -167,6 +177,7 @@ func (c *Conn) ServeDownloader(ctx context.Context, job string, stage downloader
 				Bytes:   len(resp.Body),
 				Fetched: resp.Fetched,
 				Cached:  resp.Cached,
+				Delays:  resp.Delays,
 			})
 		})
 }
@@ -243,6 +254,7 @@ func (d *Downloader) Handle(ctx context.Context, req *downloader.Request) (*down
 		Body:    body,
 		Fetched: got.Fetched,
 		Cached:  got.Cached,
+		Delays:  got.Delays,
 	}, nil
 }
 

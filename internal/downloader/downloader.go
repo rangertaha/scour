@@ -108,6 +108,39 @@ type Response struct {
 
 	// Cached reports that this came from the cache rather than the network.
 	Cached bool
+
+	// Delays carries what a host's robots.txt asked for between requests, for
+	// each host whose file was read on the way to this response.
+	//
+	// It rides back on the response because this is where robots.txt is read
+	// and the scheduler is where politeness is decided, and there is no other
+	// way between them: the two stages may be on different machines, and what
+	// crosses is a request and a reply. Anything else would be a second channel
+	// between two stages that already have one, and it would not survive the
+	// bus.
+	//
+	// A list rather than one value because a redirect re-enters the whole
+	// chain, so one fetch can read the robots.txt of every host in it, and the
+	// follower keeps only the last response. Anything learnt on a hop that was
+	// discarded has to travel on the one that survives or it is lost.
+	//
+	// Every response carries it, rather than the first one per host. Nothing
+	// here can tell whether a report survives the trip, which is exactly how
+	// the redirect case above went wrong when this was tried the other way. The
+	// scheduler writes it once, because the stage holding the frontier is the
+	// only one that knows what it has already recorded. See [Stage.Pace] there.
+	Delays []CrawlDelay
+}
+
+// CrawlDelay is one host's `Crawl-delay`, on its way to the only stage that can
+// honour it.
+//
+// A delay of zero is a site that asked for nothing, which is worth carrying: it
+// is different from never having asked, and it is how a site that drops its
+// `Crawl-delay` takes effect.
+type CrawlDelay struct {
+	Host  string        `json:"host"`
+	Delay time.Duration `json:"delay"`
 }
 
 // ContentType is what the server said the body was, which is the first and best

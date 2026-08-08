@@ -26,6 +26,11 @@ type Frontier struct {
 	mu    sync.Mutex
 	jobs  map[string]*queue
 	hosts map[string]time.Time // when each host may next be touched
+
+	// delays is what each host asked for in its own robots.txt, kept apart from
+	// rate because they answer different questions and the wait is the longer
+	// of the two. Shared across jobs, like hosts and for the same reason.
+	delays map[string]time.Duration
 }
 
 type queue struct {
@@ -55,7 +60,18 @@ func Open(cfg frontier.Config) (*Frontier, error) {
 		rate:   cfg.Rate,
 		jobs:   map[string]*queue{},
 		hosts:  map[string]time.Time{},
+		delays: map[string]time.Duration{},
 	}, nil
+}
+
+// wait is how long a host must be left alone after being touched: the longer of
+// what this job configured and what the site asked for.
+//
+// Not the caller's choice at either end. A permissive robots.txt does not make
+// a job faster than it configured itself to be, and a job's own rate does not
+// make it faster than the site asked.
+func (f *Frontier) wait(host string) time.Duration {
+	return max(f.rate, f.delays[host])
 }
 
 // Policy is the ordering this was built with.
@@ -136,8 +152,8 @@ func (f *Frontier) Lease(_ context.Context, job string, now time.Time, hold time
 
 	best.leased = now.Add(hold)
 	best.attempts++
-	if f.rate > 0 {
-		f.hosts[best.req.Host] = now.Add(f.rate)
+	if wait := f.wait(best.req.Host); wait > 0 {
+		f.hosts[best.req.Host] = now.Add(wait)
 	}
 
 	// The copy carries the attempt and the stored request does not, because the
@@ -145,6 +161,27 @@ func (f *Frontier) Lease(_ context.Context, job string, now time.Time, hold time
 	req := best.req
 	req.Attempt = best.attempts
 	return &req, nil
+}
+
+// Pace implements [frontier.Frontier].
+func (f *Frontier) Pace(_ context.Context, host string, now time.Time, delay time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if delay < 0 {
+		delay = 0
+	}
+	f.delays[host] = delay
+
+	// The site's number alone, and never pulled in. The job's rate was already
+	// applied by the lease that led here, measured from when that lease was
+	// taken; applying it again from now would measure it from after the fetch,
+	// so every host that asked for nothing would be left alone for a rate plus
+	// however long its page took. The floor lives in [Frontier.Lease].
+	if until := now.Add(delay); until.After(f.hosts[host]) {
+		f.hosts[host] = until
+	}
+	return nil
 }
 
 // Done implements [frontier.Frontier].

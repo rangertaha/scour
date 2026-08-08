@@ -211,6 +211,11 @@ job "news" {
   # leaned on. Politeness is here rather than in the downloader because pacing
   # is decided when work is handed out, and because a rate is per host and
   # shared between jobs.
+  #
+  # `rate` is a floor, not the whole answer. A site asking for longer in its
+  # own robots.txt `Crawl-delay` gets it, and the wait is the longer of the
+  # two: a job cannot use a permissive robots.txt to go faster than it
+  # configured, and cannot use its own rate to go faster than the site asked.
   scheduler {
     policy      = "priority"
     rate        = "2s"
@@ -1277,8 +1282,8 @@ implementation's 4.6.
 
 The working shape is `(job, status)` equality and then the ordering columns, and
 nothing else. Whether a row is ready, and whether its host is cooling, are
-residuals checked per row as SQLite walks the index in policy order and stops at
-the first row that passes, which is nearly always the first row it looks at.
+residuals checked per row as SQLite walks the index in policy order until one
+passes.
 
 | Lease | 1,000 URLs | 100,000 URLs |
 | --- | --- | --- |
@@ -1291,6 +1296,45 @@ query is the ceiling on how fast anything can go. `EXPLAIN QUERY PLAN` is
 asserted in a test rather than left to a benchmark somebody remembers to read.
 `random` is exempt and always sorts, because sampling without regard to score is
 a shuffle of everything waiting and no index can express one.
+
+**That table is measured with politeness off, and this note used to stop here.**
+`Config{}` has no rate, so no host ever cools, so the residual never skips
+anything. Turn politeness on, which every real job does, and the walk is what
+pays. Two cases, and they are different problems:
+
+**Nothing is due.** A crawl of one site spends most of its life here: the host is
+cooling, every waiting row is behind it, and finding that out by walking the urls
+table means reading all of it, because SQLite cannot know a row fails the check
+until it looks. That is 0.55 ms at a thousand URLs, 5.3 ms at ten thousand and
+69 ms at a hundred thousand, and it is not asked once: every worker asks again
+every `run.Idle` for the length of the delay, holding the write lock each time,
+which also blocks the `Add` that queues what the crawl is finding. At a hundred
+thousand URLs a one-site crawl spends more than a core proving it has nothing to
+do.
+
+Fixed by asking the right table. `hosts` holds a row for every host in the
+frontier, so "is any host free at all" is one seek, and a lease that cannot
+possibly succeed says so without reading the queue. 17 µs at a hundred thousand
+URLs, and flat. `hosts_next_at` makes it flat in the number of hosts too: with
+5,000 hosts all cooling it is 10 µs against 238 µs without the index. Held by a
+test that asserts the cost as a ratio, because the plan was already right when
+it was 69 ms and the plan assertion could not see it.
+
+**Something is due, but the best rows are cooling.** Not fixed. Under `priority`
+the lease hands out the best-scoring row and then cools that row's host, so the
+head of the index becomes a run of cooling rows that grows by one host's worth
+per lease, and every later lease in the same window walks it. Per-lease cost is
+linear in leases-per-politeness-window and total work inside a window is
+quadratic: at 50,000 URLs over 5,000 hosts with a 30-second delay, 1.7 ms after
+250 leases, 3.8 ms after 500, 8 ms after 1,000, 17 ms after 2,000, dropping back
+when the window turns over. Honouring `Crawl-delay` makes this more pressing
+rather than less, because the delays sites actually ask for are tens of seconds.
+
+The fix is Heritrix's shape and not an index: one queue per host, a heap of the
+ready ones and a delay queue of the snoozed, so a cooling host leaves the
+candidate set instead of sitting at the head of it. That makes the host the unit
+of scheduling rather than the URL, which is what politeness has been saying all
+along.
 
 What is given up, and it is worth being honest: ad-hoc analytics over records
 are not this store's job, and cross-machine writes to one job's frontier are not
@@ -1597,6 +1641,7 @@ open.
 | The `cache` middleware: hits, sidecar, ttl, statuses | Built, tested |
 | `internal/robots`: RFC 9309, written rather than imported | Built, tested |
 | robots.txt obeyed, outside the whole chain | Built, tested |
+| `Crawl-delay` carried back to the frontier and paced against | Built, tested |
 | Redirects followed, every hop checked and cached on its own | Built, tested |
 | HCL job document, stage blocks, nested plugins, multiple jobs | Built, tested |
 | Vocabulary: bare types and transforms | Built, tested |

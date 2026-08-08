@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/rangertaha/scour/internal/chain"
 	"github.com/rangertaha/scour/internal/robots"
+	"github.com/rangertaha/scour/internal/urls"
 )
 
 // Errors a robots.txt decision produces. Both wrap [chain.ErrDrop], because a
@@ -64,35 +66,71 @@ func newGuard(fetch Handler, agent string) *guard {
 
 func (g *guard) wrap(next Handler) Handler {
 	return HandlerFunc(func(ctx context.Context, req *Request) (*Response, error) {
-		if err := g.check(ctx, req.URL); err != nil {
+		asked, err := g.check(ctx, req.URL)
+		if err != nil {
 			return nil, err
 		}
-		return next.Handle(ctx, req)
+
+		resp, err := next.Handle(ctx, req)
+		if err != nil || resp == nil {
+			return resp, err
+		}
+
+		// Reported on every response rather than once per host.
+		//
+		// Saying it once and remembering was tried and is wrong, because
+		// nothing here can know whether a report survives: this wrapper is
+		// inside the redirect follower, which throws away every response but
+		// the last, so the one hop that carried the number was usually the one
+		// discarded. A site redirecting http to https, which robots.txt's own
+		// documentation calls entirely ordinary, lost its `Crawl-delay`
+		// permanently, because the guard had already crossed the host off.
+		//
+		// So the number rides on every response and the scheduler writes it
+		// once. Only the stage holding the frontier knows what it has already
+		// recorded, which makes it the only stage that can decide not to.
+		//
+		// Appended rather than assigned: a redirect re-enters this wrapper, so
+		// an inner hop may have put its own host on the response already.
+		if host := urls.Host(req.URL); host != "" {
+			resp.Delays = append(resp.Delays, CrawlDelay{Host: host, Delay: asked})
+		}
+		return resp, nil
 	})
 }
 
-// check reports why this URL may not be fetched, or nil.
-func (g *guard) check(ctx context.Context, rawURL string) error {
+// check reports why this URL may not be fetched, or nil, and what the host's
+// robots.txt asked for between requests.
+//
+// The delay comes back from here because this is the one place that already has
+// the rules in hand. Reading the file a second time to ask it a second question
+// would be a second fetch of somebody's robots.txt per page.
+func (g *guard) check(ctx context.Context, rawURL string) (time.Duration, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		// Not a drop: a URL that will not parse is a bug upstream, and the
 		// fetch is about to say so with a better message.
-		return nil
+		return 0, nil
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		// robots.txt is an HTTP protocol. Anything else is somebody else's
 		// rules to enforce.
-		return nil
+		return 0, nil
 	}
 
 	rules, err := g.rules(ctx, parsed.Scheme+"://"+parsed.Host)
 	if err != nil {
-		return fmt.Errorf("%s: %w: %v", rawURL, ErrNoRobots, err)
+		return 0, fmt.Errorf("%s: %w: %v", rawURL, ErrNoRobots, err)
 	}
 	if !rules.Allowed(g.agent, parsed.RequestURI()) {
-		return fmt.Errorf("%s: %w", rawURL, ErrDisallowed)
+		return 0, fmt.Errorf("%s: %w", rawURL, ErrDisallowed)
 	}
-	return nil
+
+	// A file with no `Crawl-delay` and a file asking for none are both reported
+	// as zero, and both are worth telling the scheduler: what it must not do is
+	// go on applying a delay a site has stopped asking for.
+	delay, _ := rules.Delay(g.agent)
+	return delay, nil
 }
 
 // rules returns one host's robots.txt, fetching it at most once.

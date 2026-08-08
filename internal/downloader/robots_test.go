@@ -12,10 +12,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/rangertaha/scour/internal/chain"
 	"github.com/rangertaha/scour/internal/downloader"
 	"github.com/rangertaha/scour/internal/plugin"
+	"github.com/rangertaha/scour/internal/urls"
 )
 
 // policed is a site with a robots.txt, counting what was asked of it. The two
@@ -424,5 +426,60 @@ func TestRobotsStopsFollowingEventually(t *testing.T) {
 	}
 	if got := asked.Load(); got > 10 {
 		t.Errorf("robots.txt was fetched %d times before giving up", got)
+	}
+}
+
+// TestEveryHostOnTheWayReportsWhatItAskedFor.
+//
+// A crawl-delay reaches the frontier by riding back on the response, and a
+// redirect throws away every response but the last. So a chain that crosses a
+// host loses that host's `Crawl-delay` unless the follower carries it along,
+// and the loss is permanent and silent: the file was fetched, parsed and
+// understood, and the number went in the bin one frame up.
+//
+// Not a hypothetical shape. A site serving http and redirecting to https is the
+// ordinary case, and this package's own documentation says so.
+func TestEveryHostOnTheWayReportsWhatItAskedFor(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			fmt.Fprint(w, "User-agent: *\nCrawl-delay: 5\n")
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<html><body>arrived</body></html>")
+	}))
+	defer target.Close()
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			fmt.Fprint(w, "User-agent: *\nCrawl-delay: 9\n")
+			return
+		}
+		http.Redirect(w, r, target.URL+"/", http.StatusFound)
+	}))
+	defer origin.Close()
+
+	resp, err := stage(t, job(t, "")).Handle(context.Background(),
+		&downloader.Request{URL: origin.URL + "/"})
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+
+	got := map[string]time.Duration{}
+	for _, asked := range resp.Delays {
+		got[asked.Host] = asked.Delay
+	}
+
+	for _, want := range []struct {
+		host  string
+		delay time.Duration
+	}{
+		{urls.Host(origin.URL), 9 * time.Second},
+		{urls.Host(target.URL), 5 * time.Second},
+	} {
+		if got[want.host] != want.delay {
+			t.Errorf("%s asked for %s between requests and the response carried %s;\n"+
+				"  the whole chain is: %+v", want.host, want.delay, got[want.host], resp.Delays)
+		}
 	}
 }

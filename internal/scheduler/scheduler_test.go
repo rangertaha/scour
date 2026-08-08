@@ -550,6 +550,9 @@ func (b *brokenFrontier) Lease(context.Context, string, time.Time, time.Duration
 	return nil, b.err
 }
 
+func (b *brokenFrontier) Pace(context.Context, string, time.Time, time.Duration) error {
+	return b.err
+}
 func (b *brokenFrontier) Done(context.Context, string, string, int) error { return b.err }
 func (b *brokenFrontier) Fail(context.Context, string, string, int) error { return b.err }
 func (b *brokenFrontier) Len(context.Context, string) (int, error)        { return 0, b.err }
