@@ -81,6 +81,9 @@ func find(lines []string, from, to int, proposal Proposal) (insertAt int, indent
 	property := `property "` + proposal.Property + `"`
 
 	inItem, depth := false, 0
+
+	// relation is the brace depth inside a relation block, zero when outside one.
+	relation := 0
 	for i := from; i < to; i++ {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
@@ -89,6 +92,29 @@ func find(lines []string, from, to int, proposal Proposal) (insertAt int, indent
 			if strings.HasPrefix(trimmed, item) {
 				inItem = true
 			}
+			continue
+		}
+
+		// A relation is skipped whole, never looked inside.
+		//
+		// An item holds property blocks and relation blocks, and a relation
+		// holds property blocks of its own, spelled identically. So a scan
+		// looking for the item's `role` found `relation "author"`'s `role`
+		// whenever the relation was written first, and the induced locator went
+		// onto the edge. Nothing failed: the item's property still had none, so
+		// extraction went on missing it on every page while the edge quietly
+		// gained a selector induced for a different field.
+		//
+		// Skipped rather than descended into because induction does not propose
+		// locators for relation properties at all: [Learn] walks item.Properties
+		// and nothing else, so anything found in there is a name collision and
+		// never the thing being looked for.
+		if relation > 0 {
+			relation += strings.Count(line, "{") - strings.Count(line, "}")
+			continue
+		}
+		if strings.HasPrefix(trimmed, "relation ") {
+			relation = strings.Count(line, "{") - strings.Count(line, "}")
 			continue
 		}
 
@@ -240,9 +266,24 @@ func MarkInduced(document []byte, job string) map[string]bool {
 		return induced
 	}
 
+	// Relations are skipped whole, for the reason [find] skips them: they hold
+	// property blocks of their own, spelled identically to the item's. A marker
+	// inside `relation "author"`'s `role` reported the ITEM's `role` as
+	// induced, so a locator a person had written by hand was offered for
+	// replacement on the strength of a marker belonging to a different field.
 	var item, property string
+	relation := 0
 	for _, line := range lines[from:to] {
 		trimmed := strings.TrimSpace(line)
+
+		if relation > 0 {
+			relation += strings.Count(line, "{") - strings.Count(line, "}")
+			continue
+		}
+		if strings.HasPrefix(trimmed, "relation ") {
+			relation = strings.Count(line, "{") - strings.Count(line, "}")
+			continue
+		}
 
 		switch {
 		case strings.HasPrefix(trimmed, `item "`):

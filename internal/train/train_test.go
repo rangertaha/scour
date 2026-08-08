@@ -505,3 +505,104 @@ job "eu" {
 		t.Error("the job's own marker was not seen")
 	}
 }
+
+// TestALocatorGoesToTheItemsPropertyAndNotARelations.
+//
+// An item holds property blocks and relation blocks, and a relation holds
+// property blocks of its own. Both spellings are `property "name" {`, so a scan
+// looking for the item's `role` found the relation's `role` when the relation
+// was written first, and the induced locator went onto the edge instead.
+//
+// Nothing failed. The item's property still had no locator, so extraction went
+// on missing it on every page, while the author edge quietly gained a selector
+// induced for a different field. MarkInduced then attributed that marker to the
+// item's property, so a later run would report a hand-written locator as
+// replaceable.
+func TestALocatorGoesToTheItemsPropertyAndNotARelations(t *testing.T) {
+	document := []byte(`
+job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/"]
+
+  item "article" {
+    relation "author" {
+      entity = "person"
+
+      property "role" {
+        type = str
+      }
+    }
+
+    property "role" {
+      type = str
+    }
+  }
+}
+`)
+
+	edited, written, err := train.Write(document, "news", []train.Proposal{
+		{Item: "article", Property: "role", Selector: ".byline-role", Pages: 5, Total: 5},
+	})
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if written != 1 {
+		t.Fatalf("wrote %d proposals, want 1", written)
+	}
+
+	// The relation comes first in the document, so the wrong answer is the one
+	// nearer the top. Comparing the two halves says which block it landed in.
+	text := string(edited)
+	relation := strings.Index(text, `relation "author"`)
+	item := strings.LastIndex(text, `property "role"`)
+	locator := strings.Index(text, ".byline-role")
+
+	if locator < 0 {
+		t.Fatalf("the locator was not written at all:\n%s", text)
+	}
+	if locator < item {
+		t.Errorf("the locator landed inside relation \"author\" at %d rather than the item's own "+
+			"property at %d, so the edge gained a selector induced for a different field "+
+			"and article.role still has none:\n%s", relation, item, text)
+	}
+
+	// And it still parses, because a document that stops decoding is how this
+	// was noticed the last time it went wrong.
+	if _, err := engine.Parse(edited, "job.hcl"); err != nil {
+		t.Errorf("the edited document no longer parses: %v\n%s", err, text)
+	}
+}
+
+// TestAMarkerInARelationIsNotTheItemsMarker.
+//
+// MarkInduced is what tells Learn which locators it may replace, and it tracked
+// the last `item` and the last `property` it had seen without noticing that a
+// relation's property blocks are spelled the same as an item's. So a marker
+// inside relation "author"'s `role` recorded article.role as induced, and a
+// locator a person had written by hand on the item was offered for replacement
+// on the strength of a marker belonging to a different field.
+func TestAMarkerInARelationIsNotTheItemsMarker(t *testing.T) {
+	document := []byte(`
+job "news" {
+  item "article" {
+    relation "author" {
+      entity = "person"
+
+      property "role" {
+        css = [".edge"] ` + train.Marker + `
+      }
+    }
+
+    property "role" {
+      css = [".mine"]
+    }
+  }
+}
+`)
+
+	induced := train.MarkInduced(document, "news")
+	if induced["article.role"] {
+		t.Errorf("a marker inside relation \"author\" reported article.role as induced, "+
+			"so the hand-written locator on the item would be replaced: %v", induced)
+	}
+}
