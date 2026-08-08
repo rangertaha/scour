@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/rangertaha/scour/internal/safefile"
 )
 
 // Write puts proposals back into a job document.
@@ -213,12 +215,11 @@ func WriteFile(path, job string, proposals []Proposal) (int, error) {
 		return 0, fmt.Errorf("train: %w", err)
 	}
 
-	temporary := path + ".scour-train"
-	if err := os.WriteFile(temporary, edited, info.Mode().Perm()); err != nil {
-		return 0, fmt.Errorf("train: %w", err)
-	}
-	if err := os.Rename(temporary, path); err != nil {
-		os.Remove(temporary)
+	// A failure halfway must leave the original: this is somebody's job
+	// document, and half of one is worse than none. [internal/safefile] is
+	// shared with the two other places that rewrite a file, because the third
+	// of them wrote in place and truncated a live file that had readers.
+	if err := safefile.Replace(path, edited, info.Mode().Perm()); err != nil {
 		return 0, fmt.Errorf("train: %w", err)
 	}
 	return written, nil

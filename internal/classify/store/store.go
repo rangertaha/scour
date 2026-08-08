@@ -38,6 +38,7 @@ import (
 	"sync"
 
 	"github.com/rangertaha/scour/internal/classify"
+	"github.com/rangertaha/scour/internal/safefile"
 )
 
 // ErrNotTrained reports a classifier nobody has trained.
@@ -99,23 +100,12 @@ func (s *Store) Put(kind string, cfg classify.Config) error {
 	return s.write(kind, cfg, os.O_CREATE|os.O_EXCL|os.O_WRONLY)
 }
 
-// write puts a topic on disk, whether or not one was there.
+// encode is the on-disk form of one trained version.
 //
-// Shared by [Store.Put] and [Store.Replace] so the two cannot drift into
-// writing different files: the difference between them is the check above and
-// nothing else.
-// write puts a topic on disk under the given open flags.
-//
-// The flags are what tells [Store.Put] from [Store.Replace], and they are flags
-// rather than a check because a check is a race. Put used to Stat and then
-// write: two `scour topic train` runs starting together both read the same
-// Latest, both computed the same next version, both saw no file and both wrote
-// it. The second won, silently, and a job that had already pinned that version
-// scored pages with a model nobody chose — which is precisely what versions
-// exist to prevent, and what this package's own documentation promises cannot
-// happen. O_EXCL makes the check and the write one operation the filesystem
-// performs, so the loser is told rather than ignored.
-func (s *Store) write(kind string, cfg classify.Config, flags int) error {
+// Separate from writing it, because the two callers put it there differently:
+// [Store.Put] must fail if the version already exists, and [Store.Replace] must
+// overwrite one atomically. Same bytes, different obligation.
+func encode(kind string, cfg classify.Config) ([]byte, error) {
 	body, err := json.MarshalIndent(Topic{
 		Kind:    kind,
 		Name:    cfg.Name,
@@ -125,7 +115,25 @@ func (s *Store) write(kind string, cfg classify.Config, flags int) error {
 		Model:   cfg.Model,
 	}, "", "  ")
 	if err != nil {
-		return fmt.Errorf("classify: %w", err)
+		return nil, fmt.Errorf("classify: %w", err)
+	}
+	return body, nil
+}
+
+// write creates a topic file under the given open flags.
+//
+// The flags are what makes this [Store.Put]'s path and not [Store.Replace]'s,
+// and they are flags rather than a check because a check is a race. Put used to
+// Stat and then write: two `scour topic train` runs starting together both read
+// the same Latest, both computed the same next version, both saw no file and
+// both wrote it. The second won, silently, and a job that had already pinned
+// that version scored pages with a model nobody chose, which is precisely what
+// versions exist to prevent. O_EXCL makes the check and the write one operation
+// the filesystem performs, so the loser is told rather than ignored.
+func (s *Store) write(kind string, cfg classify.Config, flags int) error {
+	body, err := encode(kind, cfg)
+	if err != nil {
+		return err
 	}
 
 	ref := classify.Ref{Name: cfg.Name, Version: cfg.Version}
@@ -239,11 +247,31 @@ func (s *Store) Replace(kind string, cfg classify.Config) error {
 		return err
 	}
 
+	body, err := encode(kind, cfg)
+	if err != nil {
+		return err
+	}
+
+	// Renamed into place rather than written over. Opening the live file with
+	// O_TRUNC destroys the model before the replacement is written, and this
+	// store has readers: `scour service` subscribes `load` and `replace` on one
+	// connection and NATS dispatches each on its own goroutine, so a node
+	// asking for a model while an operator corrects it got a truncated file and
+	// failed to build its chain, reporting "unexpected end of JSON input" for a
+	// topic that is perfectly valid. See [internal/safefile], which is shared
+	// with the two other places in this repository that rewrite a file.
+	if err := safefile.Replace(s.path(ref), body, 0o640); err != nil {
+		return fmt.Errorf("classify: %w", err)
+	}
+
+	// Evicted after the write, not before. Before, a Get landing between the
+	// eviction and the rename reloaded the model that was being corrected away
+	// and put it back in the cache, where it stayed for the life of the
+	// process: the correction took effect on disk and never in memory.
 	s.mu.Lock()
 	delete(s.loaded, ref.String())
 	s.mu.Unlock()
-
-	return s.write(kind, cfg, os.O_CREATE|os.O_TRUNC|os.O_WRONLY)
+	return nil
 }
 
 // Delete removes one trained version.

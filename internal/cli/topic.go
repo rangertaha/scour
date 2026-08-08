@@ -21,6 +21,7 @@ import (
 	"github.com/rangertaha/scour/internal/classify/store"
 	"github.com/rangertaha/scour/internal/decode"
 	"github.com/rangertaha/scour/internal/engine"
+	"github.com/rangertaha/scour/internal/safefile"
 )
 
 // Topic manages what a crawl has been taught to recognise.
@@ -447,15 +448,10 @@ func writeLabels(path string, doc *engine.Topics) error {
 		return err
 	}
 
-	temporary := path + ".scour-topic"
-	if err := os.WriteFile(temporary, []byte(b.String()), info.Mode().Perm()); err != nil {
-		return err
-	}
-	if err := os.Rename(temporary, path); err != nil {
-		os.Remove(temporary)
-		return err
-	}
-	return nil
+	// A failure halfway must leave the original: a corrected labels document
+	// is somebody's work. See [internal/safefile], shared with the two other
+	// places that rewrite a file.
+	return safefile.Replace(path, []byte(b.String()), info.Mode().Perm())
 }
 
 func trainTopics(ctx context.Context, a *App, path, dir, corpusDir string) error {
