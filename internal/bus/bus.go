@@ -237,6 +237,63 @@ func cleanup(dir string) {
 	}
 }
 
+// DrainFor is how long a teardown waits for requests it has already taken.
+//
+// Bounded, because a subscription that never empties must not hold a shutdown
+// open. Past the bound the caller gets its timeout, which is the same answer it
+// would have got anyway.
+const DrainFor = 30 * time.Second
+
+// settling is how often a drain is asked whether it has finished. Short,
+// because this is the gap between a message arriving and a handler returning,
+// which is microseconds when nothing is wrong.
+const settling = 5 * time.Millisecond
+
+// Drain stops a set of subscriptions taking new work and waits for the work
+// they have already been handed.
+//
+// # Why this is one function and not two
+//
+// Because it was two, and one of them was wrong. Both places that tear down
+// NATS subscriptions in this repository have the same obligation: a request
+// already delivered to this member has to be answered, because nothing will
+// redeliver it and the caller has no way to tell a dropped request from a slow
+// one. [internal/node] worked that out, wrote it down, and drained. The
+// services did not, and unsubscribed, which throws those requests away.
+//
+// That is the shape worth naming: the knowledge existed, in a comment, one
+// package away, and the second site was written in good faith without it. So
+// the knowledge is a function now, and a third site gets it by calling this
+// rather than by reading node.go first.
+//
+// # Waiting for the drain rather than for the queue
+//
+// Draining is asynchronous: the call marks the subscription and returns, and
+// NATS delivers what is left on another goroutine. The subscription becomes
+// invalid once it has finished, so that is what is waited on. Polling the
+// pending count instead answers a weaker question, because a count of zero is
+// also true in the moment between the last message being taken off the queue
+// and its handler being entered.
+func Drain(subs []*nats.Subscription, limit time.Duration) error {
+	var first error
+	for _, sub := range subs {
+		if sub == nil {
+			continue
+		}
+		if err := sub.Drain(); err != nil && first == nil {
+			first = fmt.Errorf("bus: %w", err)
+		}
+	}
+
+	deadline := time.Now().Add(limit)
+	for _, sub := range subs {
+		for sub != nil && sub.IsValid() && time.Now().Before(deadline) {
+			time.Sleep(settling)
+		}
+	}
+	return first
+}
+
 // noResponders turns NATS's own answer into ours, because "nothing is serving
 // that stage" is a misconfiguration and a timeout is a busy cluster, and a
 // node's operator needs to tell them apart.

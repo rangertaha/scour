@@ -421,33 +421,6 @@ func (n *Node) Close() error {
 // Drain is how long a node waits for the requests it had already taken.
 const Drain = 30 * time.Second
 
-// settled is how often the subscriptions are asked whether they have handed
-// everything over. Short, because this is the gap between a message arriving
-// and a handler starting, which is microseconds when nothing is wrong.
-const settled = 5 * time.Millisecond
-
-// settle waits until nothing is buffered in the subscriptions.
-//
-// Bounded by [Drain] like everything else here: a subscription that never
-// empties must not hold a shutdown open, and past the bound the in-flight wait
-// is still there to catch what did start.
-func (s *served) settle() {
-	deadline := time.Now().Add(Drain)
-
-	for time.Now().Before(deadline) {
-		pending := 0
-		for _, sub := range s.subs {
-			if n, _, err := sub.Pending(); err == nil {
-				pending += n
-			}
-		}
-		if pending == 0 {
-			return
-		}
-		time.Sleep(settled)
-	}
-}
-
 // close stops taking work, waits for what is in flight, and only then releases
 // what the stages hold.
 //
@@ -458,24 +431,20 @@ func (s *served) settle() {
 // own context is cancelled last, so a request that was in flight is answered
 // rather than aborted with "context canceled".
 func (s *served) close() {
-	// Drained, not unsubscribed: unsubscribing discards the requests NATS has
-	// already handed this member, and core NATS does not redeliver them, so
-	// whoever asked would wait out its timeout for an answer nobody was ever
-	// going to give.
-	for _, sub := range s.subs {
-		_ = sub.Drain()
-	}
-
-	// Then wait for the delivered-but-not-yet-started messages to reach the
-	// handler, because the in-flight counter cannot see them.
+	// Drained, not unsubscribed, and waited for: unsubscribing discards the
+	// requests NATS has already handed this member, and core NATS does not
+	// redeliver them, so whoever asked would wait out its timeout for an answer
+	// nobody was ever going to give.
 	//
-	// Drain is asynchronous. A request already buffered in the subscription has
-	// not entered the counter, so the wait below returned at once, the context
-	// was cancelled and the chain closed under a callback that was about to
-	// run. That is the use-after-close this function's own comment claims to
-	// have fixed; it did not cover the window before a message reaches the
-	// handler.
-	s.settle()
+	// [bus.Drain] rather than a loop here, because the services had the same
+	// obligation and did not know it: this was the only place that got it
+	// right, and being right in one package is how the other one was written
+	// wrong. It also waits for the drain itself to finish rather than for the
+	// pending count to reach zero, which is a stronger signal than the settle
+	// this used to do: a count of zero is also true in the moment between the
+	// last message leaving the queue and its handler being entered.
+	_ = bus.Drain(s.subs, Drain)
+
 	if s.work != nil {
 		s.work.wait(Drain)
 	}

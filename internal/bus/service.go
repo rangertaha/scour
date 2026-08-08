@@ -240,16 +240,23 @@ func (s *Service) ready(c *Conn) error {
 	return nil
 }
 
-// Close unsubscribes everything, reporting the first failure and still trying
-// the rest: a subscription left behind would keep taking work the store can no
-// longer do.
+// Close stops taking work and waits for the requests already taken.
+//
+// Drained rather than unsubscribed, and this stopped being a detail the moment
+// anything depended on it. Unsubscribing marks the subscription closed, and
+// NATS then abandons every message already sitting in it without replying:
+// core NATS does not redeliver, so a caller that had been routed to this member
+// waits out its whole timeout for an answer nobody was ever going to give. Two
+// minutes, by default, for a write the cluster had already accepted.
+//
+// It also returned while a handler was still running, which is worse, because
+// `scour service` closes the store immediately afterwards: the handler finished
+// against a closed database and reported a failure for work that had been
+// accepted.
+//
+// See [Drain] for why this is shared with the node rather than written twice.
 func (s *Service) Close() error {
-	var first error
-	for _, sub := range s.subs {
-		if err := sub.Unsubscribe(); err != nil && first == nil {
-			first = fmt.Errorf("bus: %w", err)
-		}
-	}
+	err := Drain(s.subs, DrainFor)
 	s.subs = nil
-	return first
+	return err
 }

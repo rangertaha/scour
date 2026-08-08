@@ -320,3 +320,74 @@ func TestAServiceBoundsARequestByTheTimeItWasGiven(t *testing.T) {
 		t.Error("the handler was never let go: the service used its own timeout, not the document's")
 	}
 }
+
+// pausedGraph answers Assert after a pause, so a test can close the service
+// while requests are sitting in its subscription.
+type pausedGraph struct {
+	bus.Graph
+	pause time.Duration
+}
+
+func (g *pausedGraph) Assert(context.Context, string, string, entity.Provenance) (string, error) {
+	time.Sleep(g.pause)
+	return "an-id", nil
+}
+
+// TestClosingAServiceAnswersWhatItHadAlreadyTaken.
+//
+// A service stops by draining, not by unsubscribing, and the difference is the
+// whole of what a caller sees. NATS hands a queue-group member its share of the
+// requests up front; unsubscribing marks the subscription closed and abandons
+// everything still sitting in it WITHOUT replying. Core NATS does not
+// redeliver, so those callers do not fail fast and do not get routed elsewhere:
+// they block until their own timeout expires, for writes the cluster had
+// already accepted and could have completed.
+//
+// `internal/node` worked this out and drained; the services did not and
+// unsubscribed. One package away, in a comment, is not far enough for the
+// knowledge to reach the second site, which is why both now call [bus.Drain].
+//
+// The requests are slow enough to still be queued when Close runs, and the
+// client's wait is short enough that a dropped one fails the test quickly
+// rather than hanging it.
+func TestClosingAServiceAnswersWhatItHadAlreadyTaken(t *testing.T) {
+	conn := connect(t)
+
+	service, err := conn.ServeEntities(&pausedGraph{pause: 60 * time.Millisecond}, 0)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+
+	const asking = 5
+	client := conn.NewEntities(2 * time.Second)
+	answers := make(chan error, asking)
+	for i := range asking {
+		go func() {
+			_, err := client.Assert(context.Background(), "person",
+				fmt.Sprintf("Alex Doe %d", i), entity.Provenance{
+					Job: "news", URL: "https://a.example/1",
+					At: time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC),
+				})
+			answers <- err
+		}()
+	}
+
+	// Long enough for all five to have reached the service and short enough
+	// that none of them can have been answered yet.
+	time.Sleep(30 * time.Millisecond)
+	if err := service.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	for i := range asking {
+		select {
+		case err := <-answers:
+			if err != nil {
+				t.Errorf("request %d was taken by the service and then thrown away when it "+
+					"closed, so its caller waited for a reply that was never coming: %v", i, err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("request %d never came back at all", i)
+		}
+	}
+}
