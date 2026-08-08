@@ -13,6 +13,7 @@ import (
 	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/plugin"
 	"github.com/rangertaha/scour/internal/robots"
+	"github.com/rangertaha/scour/internal/scope"
 )
 
 // Stage is a job's downloader: the core, the middleware it asked for, and
@@ -104,8 +105,18 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Stage, error) {
 	// Outside even that: a redirect is a different URL on a host with its own
 	// rules, so every hop re-enters from the top rather than skipping the
 	// checks the first one passed.
+	//
+	// The job's scope goes with it. A redirect is the one URL a crawl fetches
+	// that neither the job nor a page the job chose to read picked out: the
+	// server on the other end did. The scheduler cannot vet it, because it has
+	// already handed this request over, so the check has to happen here or
+	// nowhere. It used to happen nowhere.
 	if hops := job.Downloader.Redirects(); hops > 0 {
-		handler = (&follower{max: hops}).wrap(handler)
+		bounds, err := scope.New(job.Domains, job.Included, job.Excluded)
+		if err != nil {
+			return nil, fmt.Errorf("downloader: job %q: %w", job.Name, err)
+		}
+		handler = (&follower{max: hops, bounds: bounds}).wrap(handler)
 	}
 
 	return &Stage{

@@ -4,7 +4,10 @@ package main
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -372,5 +375,79 @@ func TestACrawlHonoursTheSitesCrawlDelay(t *testing.T) {
 	if want := 2 * delay; took < want-200*time.Millisecond {
 		t.Errorf("three pages took %s; the site asked for %s between requests, so it should have taken about %s\n%s",
 			took, delay, want, out)
+	}
+}
+
+// TestARedirectCannotCarryTheCrawlOutOfScope.
+//
+// A redirect target is the one URL a crawl fetches that neither the job nor a
+// page the job chose to read picked out: the server on the other end picked it.
+// The scheduler drops out-of-scope URLs before they are queued, and a redirect
+// happens after queueing, inside the fetch, so nothing checked it at all. The
+// scope package documents three stages that enforce it and only one imported it.
+//
+// Scope here is `excluded` rather than another host, and that is deliberate:
+// two httptest servers both listen on 127.0.0.1, and a port is not part of a
+// site's name, so to this crawler they are one site and always were. An
+// exclusion is unambiguous, needs one server, and is the same rule.
+func TestARedirectCannotCarryTheCrawlOutOfScope(t *testing.T) {
+	var landed atomic.Int32
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/robots.txt":
+			w.Header().Set("Content-Type", "text/plain")
+			fmt.Fprint(w, "User-agent: *\n")
+		case "/":
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, `<html><head><meta property="og:title" content="Index"></head>
+			  <body><a href="/leaves">away</a><a href="/forbidden/direct">direct</a></body></html>`)
+		case "/leaves":
+			http.Redirect(w, r, "/forbidden/landed", http.StatusFound)
+		default:
+			if strings.HasPrefix(r.URL.Path, "/forbidden/") {
+				landed.Add(1)
+			}
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, `<html><head><meta property="og:title" content="Forbidden"></head><body>x</body></html>`)
+		}
+	}))
+	defer site.Close()
+
+	path := document(t, fmt.Sprintf(`
+job "news" {
+  domains  = ["%s"]
+  start    = ["%s/"]
+  excluded = ["*/forbidden/*"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+
+  scheduler {
+    rate = "1ms"
+  }
+}
+`, strings.TrimPrefix(site.URL, "http://"), site.URL))
+
+	out, errOut, code := run(t, "run", path)
+	if code != 0 {
+		t.Fatalf("exit %d\n%s%s", code, out, errOut)
+	}
+
+	// Not once, by either route. The direct link is dropped by the scheduler,
+	// which always worked; the redirect is dropped by the follower, which is
+	// what this is about.
+	if n := landed.Load(); n != 0 {
+		t.Errorf("`excluded` names /forbidden/ and the crawl fetched it %d times;\n"+
+			"a redirect can hand this crawler a URL its own job refused\n%s", n, out)
+	}
+
+	// And the crawl carried on: an out-of-scope redirect is an ordinary drop,
+	// not a failure, because that is what the scheduler calls the same URL when
+	// it arrives as a link.
+	if !strings.Contains(out, "finished") {
+		t.Errorf("the crawl did not finish:\n%s", out)
 	}
 }

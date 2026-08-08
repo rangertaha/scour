@@ -14,13 +14,25 @@
 // printer-friendly copies" by naming the domain and excluding the pattern,
 // rather than by writing out an inclusion for everything else.
 //
-// # One implementation, three stages
+// # One implementation, two stages that need it
 //
-// The scheduler drops an out-of-scope URL before it is queued, the downloader
-// before it is fetched, and the spider before a discovered link is reported.
-// Three chances to enforce one rule, so the rule has to be one piece of code:
-// three subtly different scope checks is a crawl that leaves the site through
-// whichever of them is loosest.
+// The scheduler drops an out-of-scope URL before it is queued. That covers
+// every URL a crawl decides to fetch, because deciding is what the scheduler
+// is for.
+//
+// The downloader covers the one it cannot: a redirect. A hop is chosen by
+// whoever controls a page the crawl was already fetching, and it happens after
+// queueing, so the scheduler has already had its say and cannot have another.
+// [Scope.Allows] is called there on the target before the hop is taken. This
+// comment used to claim the downloader checked, and nothing in it imported this
+// package: a job naming one exclusion followed a redirect straight past it.
+//
+// The spider does not check, and does not need to. Its output is links, which
+// go to the scheduler, which drops what is out of bounds before queueing. A
+// check there would be the same rule applied twice on one path.
+//
+// One rule, one implementation, whoever asks: two subtly different scope checks
+// is a crawl that leaves the site through whichever of them is looser.
 package scope
 
 import (

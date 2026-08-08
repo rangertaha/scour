@@ -9,12 +9,47 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/rangertaha/scour/internal/chain"
+	"github.com/rangertaha/scour/internal/scope"
+	"github.com/rangertaha/scour/internal/urls"
 )
 
 // ErrTooManyRedirects reports a request that was forwarded more times than the
 // job allows. Not a drop: a site that redirects in a circle is broken, and a
 // crawl that quietly counted it as politeness would hide that.
 var ErrTooManyRedirects = errors.New("too many redirects")
+
+// ErrRedirectOutOfScope reports a redirect pointing somewhere the job said it
+// would not go.
+//
+// A drop, because it is the ordinary outcome for a URL outside the scope and
+// that is what the scheduler calls the same thing. Sites redirect off their own
+// hosts all day, to a login, a consent wall, a CDN or somebody who bought the
+// domain, and none of that is a crawl going wrong.
+var ErrRedirectOutOfScope = fmt.Errorf("the redirect leaves the job's scope: %w", chain.ErrDrop)
+
+// allowed reports why a redirect target may not be followed, or nil.
+//
+// The URL is normalised first, because that is what the scope was built to
+// compare against: the scheduler normalises before it checks, and a check
+// against the raw form would answer a different question about the same page.
+func (f *follower) allowed(target *url.URL) error {
+	if f.bounds == nil {
+		return nil
+	}
+
+	normalised, err := urls.Normalise(target.String(), urls.Options{})
+	if err != nil {
+		// Not somewhere this job may go, because it is not anywhere: a target
+		// that will not normalise is not a URL the crawl can hold.
+		return fmt.Errorf("%s: %w", target, ErrRedirectOutOfScope)
+	}
+	if !f.bounds.Allows(normalised) {
+		return fmt.Errorf("%s: %w", normalised, ErrRedirectOutOfScope)
+	}
+	return nil
+}
 
 // follower forwards a request to where the server says the thing actually is.
 //
@@ -34,13 +69,38 @@ var ErrTooManyRedirects = errors.New("too many redirects")
 // original URL, and the target host's robots.txt would never be read. So the
 // client is told to hand 3xx back, and this decides what to do with it.
 //
-// # What this will become
+// # A hop is checked against the job's scope
 //
-// When the frontier exists, a redirect that leaves the host should become a
-// frontier request rather than an inline hop, so dedup, scope and politeness
-// each get a say. Following inline is right for the same-host case, which is
-// nearly all of them, and is what this does today.
-type follower struct{ max int }
+// Because the stage that normally does that has already run. The scheduler
+// drops an out-of-scope URL before it is queued, and a redirect happens after
+// queueing, inside the fetch: so a site could hand a crawl any URL in the world
+// and it would be fetched. It was not theoretical, and it was not subtle
+// either. A job naming one host followed a redirect to another and fetched it,
+// robots.txt and all, having been told to stay put.
+//
+// That is worse than an ordinary scope leak. Every other URL a crawl considers
+// came from a page the job chose to read; this one is chosen by whoever
+// controls a page the crawl was already fetching, which makes it the one place
+// a third party picks the next request.
+//
+// An out-of-scope hop is a drop rather than a failure, which is how the
+// scheduler treats the same URL discovered as a link. The page is not fetched
+// and the crawl carries on.
+//
+// # What this will still become
+//
+// A redirect that stays inside the scope but moves to another host is still
+// followed inline, so that host is fetched without being paced. Making the hop
+// a frontier request instead would give dedup and politeness a say too, and is
+// the shape this wants in the end.
+type follower struct {
+	max int
+
+	// bounds is the job's scope, or nil for a caller that has none: a job with
+	// no domains, included or excluded allows everything, which is what `scour
+	// try` on a single URL means.
+	bounds *scope.Scope
+}
 
 func (f *follower) wrap(next Handler) Handler {
 	return HandlerFunc(func(ctx context.Context, req *Request) (*Response, error) {
@@ -74,6 +134,13 @@ func (f *follower) wrap(next Handler) Handler {
 
 			if hop >= f.max {
 				return nil, fmt.Errorf("downloader: %w: %s", ErrTooManyRedirects, strings.Join(trail, " -> "))
+			}
+
+			// Checked before the hop is taken, so a URL outside the job's scope
+			// is not fetched and its host's robots.txt is not fetched either.
+			// Checking after would already have made both requests.
+			if err := f.allowed(target); err != nil {
+				return nil, err
 			}
 
 			req = forward(req, resp, target)
