@@ -177,6 +177,23 @@ func runCrawl(ctx context.Context, a *App, path, jobName, dir string, verbose, f
 		return Failedf("%v", err)
 	}
 
+	// The exporters flush here, and this is the last thing that can fail.
+	//
+	// Left to the deferred Close above, it failed after the summary had already
+	// said the records were written and after this function had returned nil.
+	// A `json` exporter that cannot write its closing bracket, or a parquet one
+	// that cannot write its footer, left an unreadable file behind while
+	// `scour run` printed "exported 7000 / wrote out.json" and exited 0. A
+	// pipeline reading the exit code treated the run as complete.
+	//
+	// Closed before the summary rather than checked after it, so that what the
+	// summary claims and what is on disk cannot disagree. Closing twice is
+	// safe: every exporter's Close is idempotent, so the deferred one stays as
+	// the net for the paths that return early.
+	if err := crawl.Close(); err != nil {
+		return Failedf("%v", err)
+	}
+
 	stats := crawl.Stats()
 	a.Printf("%s in %s\n", ending, elapsed.Round(time.Millisecond))
 	a.Printf("  fetched   %d (%d from the cache)\n", stats.Fetched.Load(), stats.Cached.Load())
