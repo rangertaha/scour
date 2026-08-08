@@ -214,10 +214,34 @@ func TestTwoNodesOneJobWorkOnBoth(t *testing.T) {
 		t.Errorf("extracted %d items", got)
 	}
 
-	// The point of the whole arrangement.
+	// The point of the whole arrangement, and the one claim here that is
+	// statistical rather than certain.
+	//
+	// NATS hands each request to one member of the queue group and promises
+	// nothing about which one. Over the seven pages above, both members getting
+	// some is only likely: all seven landing on the same node is 2 x 2^-7, about
+	// one run in sixty-four, and asserting it there failed at about that rate.
+	// Measured at a hundred runs each, on this change and at the commit before
+	// it, it was one in a hundred both times, so it is the test and not the
+	// cluster. A gate that goes red one run in sixty is a gate people learn to
+	// run twice, which is worse than not having one.
+	//
+	// So the claim is made over as many requests as it takes to see it, with a
+	// bound that turns "one node did all of it" from unlucky into evidence: two
+	// hundred requests all landing on one member is 2^-199. It stops at the
+	// first request that proves the point, so the ordinary run costs one.
+	const most = 200
+	fetch := first.NewDownloader("news", shared, 0)
+	for i := 0; i < most && (workedFirst.Load() == 0 || workedSecond.Load() == 0); i++ {
+		if _, err := fetch.Handle(ctx, &downloader.Request{URL: server.URL + "/", Job: "news"}); err != nil {
+			t.Fatalf("fetch %d: %v", i, err)
+		}
+	}
+
 	if workedFirst.Load() == 0 || workedSecond.Load() == 0 {
-		t.Errorf("one node did all of it: first %d, second %d",
-			workedFirst.Load(), workedSecond.Load())
+		t.Errorf("one node did all of %d requests: first %d, second %d; "+
+			"the queue group is not spreading work at all",
+			most, workedFirst.Load(), workedSecond.Load())
 	}
 	t.Logf("first served %d, second served %d", workedFirst.Load(), workedSecond.Load())
 }
