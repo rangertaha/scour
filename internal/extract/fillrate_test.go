@@ -122,7 +122,7 @@ func TestFillRatesOverTheCorpusClearTheFloor(t *testing.T) {
 		least    float64
 	}{
 		// Measured 2026-08-05, and each floor is about one page of the corpus
-		// below what was measured. The table is in NOTES.md.
+		// below what was measured, which is written beside it.
 		{"title", 0.85},     // measured 93.3%
 		{"url", 0.65},       // measured 73.3%
 		{"body", 0.80},      // measured 86.7%
@@ -172,7 +172,7 @@ func TestMostOfTheFillRateIsGuessedRatherThanTaught(t *testing.T) {
 		t.Error("no title was found semantically, which cannot be right for a corpus with Open Graph in it")
 	}
 	if got := title.Guessed(); got < 0.9 {
-		t.Errorf("titles guessed %.1f%% of the time; if this has fallen, a locator was taught and the note in NOTES.md is stale", got*100)
+		t.Errorf("titles guessed %.1f%% of the time; if this has fallen, a locator was taught and the floors above are stale", got*100)
 	}
 
 	// The job teaches two selectors and one regex, and each has to be doing

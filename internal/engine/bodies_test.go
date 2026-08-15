@@ -47,7 +47,7 @@ import (
 // the notes got "Unsupported argument" on the first run.
 //
 // So this decodes them, against the same schema the implementation decodes them
-// with. The table below is the seam, and TestNotesEveryBuiltBlockHasASchema is
+// with. The table below is the seam, and TestBookEveryBuiltBlockHasASchema is
 // what stops it going stale: a new plugin or exporter with no entry fails.
 
 // schemas is what a documented block body is decoded against: a value of the
@@ -84,15 +84,34 @@ var schemas = map[engine.Stage]map[string]any{
 // kinds of opaque block.
 const stageExporter = engine.Stage("exporter")
 
-// documents are the files whose examples somebody types. The book's chapters
-// are read the same way, from bookPages, because a chapter's examples are the
-// ones most likely to be copied out.
-var documents = []string{"../../NOTES.md", "../../CLI.md"}
+// documents are the files whose examples somebody types.
+//
+// This was NOTES.md and CLI.md, the two documents at the repository root. Both
+// have been deleted and the book carries what they carried, so the book is what
+// this reads: every chapter, because a chapter's examples are the ones most
+// likely to be copied out.
+func documentPaths(t *testing.T) []string {
+	t.Helper()
 
-// TestNotesEveryBuiltBlockHasASchema keeps the table above honest. A plugin or
+	paths, err := filepath.Glob(filepath.Join(bookDir, "*.md"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("docs/ has no chapters, so these checks are not checking anything")
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+// hclBlock is a fenced HCL example. It lived in notes_test.go, which went with
+// NOTES.md.
+var hclBlock = regexp.MustCompile("(?s)```hcl\n(.*?)```")
+
+// TestBookEveryBuiltBlockHasASchema keeps the table above honest. A plugin or
 // an exporter this build ships and this file does not know about is a block
 // that would go back to being checked by nothing.
-func TestNotesEveryBuiltBlockHasASchema(t *testing.T) {
+func TestBookEveryBuiltBlockHasASchema(t *testing.T) {
 	for _, tc := range []struct {
 		stage engine.Stage
 		built []string
@@ -116,16 +135,16 @@ func TestNotesEveryBuiltBlockHasASchema(t *testing.T) {
 // A package or a file the documents point at.
 var namedPath = regexp.MustCompile(`internal/[a-z0-9_]+(?:/[a-z0-9_]+)*(?:\.go)?`)
 
-// TestNotesNamesNothingThatMoved.
+// TestBookNamesNothingThatMoved.
 //
 // The documents send a reader to the code by name, and a rename is the one kind
 // of drift that happens without anybody editing prose at all. Cheap to check,
 // and the alternative is a reader concluding the thing described does not
 // exist.
-func TestNotesNamesNothingThatMoved(t *testing.T) {
+func TestBookNamesNothingThatMoved(t *testing.T) {
 	checked := 0
 
-	for _, path := range append(documents, "../../PLAN.md") {
+	for _, path := range documentPaths(t) {
 		src, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
@@ -163,7 +182,7 @@ func examples(t *testing.T) []example {
 	t.Helper()
 
 	var out []example
-	for _, path := range documents {
+	for _, path := range documentPaths(t) {
 		src, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
@@ -232,9 +251,9 @@ func bookExamples(t *testing.T) []example {
 	return out
 }
 
-// TestNotesAndCliBlockBodiesDecode reads every hcl example in the documents and
+// TestBookAndCliBlockBodiesDecode reads every hcl example in the documents and
 // holds each plugin and exporter block to the schema of whatever decodes it.
-func TestNotesAndCliBlockBodiesDecode(t *testing.T) {
+func TestBookAndCliBlockBodiesDecode(t *testing.T) {
 	checked := 0
 	for _, ex := range append(examples(t), bookExamples(t)...) {
 		checked += checkBlocks(t, ex.path, ex.body, "")
@@ -247,14 +266,14 @@ func TestNotesAndCliBlockBodiesDecode(t *testing.T) {
 	}
 }
 
-// TestNotesAndCliDocumentTypesAreReal parses each example as whatever kind of
+// TestBookAndCliDocumentTypesAreReal parses each example as whatever kind of
 // document it is.
 //
 // There are three, and only the job document was ever checked. A service
 // document and a labels document are read by their own parsers, which decode
 // strictly, so an example naming a field that has been renamed is a file the
 // binary refuses and every test passes.
-func TestNotesAndCliDocumentTypesAreReal(t *testing.T) {
+func TestBookAndCliDocumentTypesAreReal(t *testing.T) {
 	seen := map[string]int{}
 
 	for _, ex := range examples(t) {
@@ -372,7 +391,7 @@ func checkBody(t *testing.T, path string, block *hclsyntax.Block, stage engine.S
 	}
 	if len(candidates) == 0 {
 		// A catalogued position with nothing behind it yet. The catalogue
-		// tables say which those are, and TestNotesCatalogueMatchesTheCode is
+		// tables say which those are, and TestBookCataloguesEveryPluginTheCodeShips is
 		// what holds them to the code.
 		return 0
 	}

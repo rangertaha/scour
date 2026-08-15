@@ -92,6 +92,37 @@ who Acme is.
 > what makes it recoverable: every assertion knows which page and which run
 > produced it, so a bad run can be retracted rather than argued with.
 
+## Merging wrongly is worse than not merging
+
+The same person under four spellings is the problem an entity store exists to
+solve, and the two ways of getting it wrong are not symmetric. Two people
+wrongly collapsed into one look exactly like a store working: the rows are
+there, the counts go up, and every later answer is confident and wrong. Two
+spellings left apart are visible, and somebody says so.
+
+So nothing merges by itself. Proposing a merge and making one are two calls, and
+the automatic rule is one: an initial and a surname against **exactly one** full
+name, and the merge has to go to that name. Two candidates means "A. Doe" is
+Alex or Anna, the evidence cannot say which, and taking the more asserted one
+would be a popularity contest dressed as evidence. A person saying two spellings
+are one person is exempt, because the rule exists to stop the machine guessing,
+not to overrule somebody who knows.
+
+There is no edit distance anywhere. A threshold that merges "Jon Smith" with
+"Jan Smith" is one character from a threshold that does not, and nobody can say
+which side a given pair should fall on.
+
+> **A rule that measured the wrong thing**
+>
+> The second half of that rule was missing for a while, and it is worth
+> keeping as an example. The check counted, and a count answers a question
+> about the store rather than about this merge: "exactly one full name shares
+> the surname and the first letter" was satisfied by Alex Doe existing, while
+> the merge being licensed went to Bob Roe. So "A. Doe" became Bob Roe,
+> permanently, and every article bylined that way attached to the wrong
+> person. The counting now happens inside the transaction that writes the
+> alias, so nothing can be asserted between the question and the answer.
+
 ## Tags, fields, time
 
 | Part | Comes from |

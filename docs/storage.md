@@ -50,7 +50,7 @@ and the cache, and a parsing node needs the cache and the spec.*
 | Run state | NATS KV, `SCOUR_RUNS`, no history | Changes constantly and must not churn a job's revisions |
 | Secrets | NATS KV, `SCOUR_SECRETS`, sealed | Per job, so the environment cannot carry them |
 | Nodes | NATS KV, `SCOUR_NODES`, with a TTL | Not durable state. A row outliving its process is a lie |
-| Frontier and hosts | SQLite, one shared database | Politeness is shared, so this cannot be partitioned |
+| Frontier and hosts | SQLite, one shared database | Politeness is shared, so this cannot be partitioned. The hosts half also keeps what each site asked for |
 | Records and marks | SQLite, one database per job | Unbounded, unshared, deleted by unlinking |
 | Entities | SQLite, shared, behind a service | Its whole value is that two jobs agree who Acme is |
 | Events | SQLite, shared, behind a service | The same, and the one most likely to want another backend |
@@ -89,8 +89,9 @@ is no `scour secret get`.
 | Chains, the registry, and the plugin seam | Built, tested |
 | The cache: local, S3 and GCS on one contract suite | Built, tested |
 | The downloader: the fetch, the chain, robots.txt, redirects | Built, tested |
-| The frontier in SQLite, with a flat lease | Built, tested |
+| The frontier in SQLite, and a lease that is flat while nothing is due | Built, tested |
 | The scheduler: scope, budget, politeness, `dupefilter` | Built, tested |
+| A site's own `Crawl-delay`, carried back from the downloader and paced against | Built, tested |
 | The spider: four ways to find a value, link discovery | Built, tested |
 | The pipeline: waves, concurrency, five step kinds | Built, tested |
 | Exporters: json, jsonlines, csv, parquet, nats, sqlite | Built, tested |
@@ -118,17 +119,28 @@ distributed-systems problem here.
 
 > **On this book**
 >
-> The working notes it is drawn from are checked by tests: every job document
-> quoted in them is parsed and validated, every number in the plugin tables is
-> compared against the catalogue the code uses, and every plugin and exporter
-> block is decoded against the schema the implementation itself reads it with.
-> These chapters are held to the same checks, plus their own: a link that goes
-> nowhere, a chapter the contents leave out, a Back or Next that points past
-> its neighbour, a diagram with nothing in it, and a diagram nobody described
-> for a reader who cannot see it. The lease this chapter's neighbour prints is
-> compared line by line with the query the frontier actually runs. A chapter
-> that drifts from the code fails the build rather than misleading somebody
-> quietly.
+> These chapters are checked by tests rather than trusted. Every job document
+> printed in them is parsed and validated, every bare word in one is checked
+> against the vocabulary the parser resolves against, and every plugin and
+> exporter block is decoded against the schema the implementation itself reads
+> it with, those bodies being opaque to the engine and therefore the one part
+> of an example nothing else looks inside. Every number in the position tables
+> is compared with the catalogue the code uses, in both directions, so a plugin
+> the code ships and no chapter lists is a failure too. The command chapter's
+> table of what exists is held to the commands the binary has, and its flags to
+> the flags they take, again both ways. The lease the frontier chapter prints is
+> compared with the query the frontier runs, in both directions, after it had
+> quietly lost a column.
+>
+> Then the checks about being a book: a link that goes nowhere, a chapter the
+> contents leave out, a Back or Next that points past its neighbour, a diagram
+> with nothing in it, and a diagram nobody described for a reader who cannot see
+> it. A chapter that drifts from the code fails the build rather than misleading
+> somebody quietly.
+>
+> There were two documents at the repository root, working notes and a command
+> reference, and both are gone: what they carried is in these chapters, and the
+> checks that held them were repointed here rather than deleted with them.
 
 ---
 

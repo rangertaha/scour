@@ -34,7 +34,8 @@ const (
 //
 // Because the class came back. It was retired once, after `external_timeout`
 // turned out to be parsed, defaulted, validated, carried into the resolved job,
-// documented in CLI.md, reported by `scour show` as "yes, waiting 5m0s", and
+// documented in the command-line reference, reported by `scour show` as "yes,
+// waiting 5m0s", and
 // read by no running crawl. Then the service document's `url` arrived with the
 // same shape: a service told to answer on nats://10.0.0.5:4222 started an
 // embedded broker on an ephemeral port, said it was ready, and answered nobody.

@@ -13,15 +13,31 @@ import (
 	"testing"
 
 	"github.com/rangertaha/scour/internal/engine"
+	"github.com/rangertaha/scour/internal/pipeline"
 )
 
-// docs/ is checked against the code, for the same reason NOTES.md is.
+// docs/ is checked against the code rather than trusted.
 //
-// The book says of itself that a chapter which drifts from the code fails the
-// build rather than misleading somebody quietly. This is what makes that true:
-// every job document printed in it is parsed and validated, every plugin
-// position quoted in it is compared with the catalogue the code uses, and the
-// SQL it prints is compared with the query the frontier runs.
+// A design document that has drifted is worse than none: it is confidently
+// wrong, and everybody who reads it believes it. The book says of itself that a
+// chapter which drifts from the code fails the build rather than misleading
+// somebody quietly. This is what makes that true: every job document printed in
+// it is parsed and validated, every plugin position quoted in it is compared
+// with the catalogue the code uses, and the SQL it prints is compared with the
+// query the frontier runs.
+//
+// This is the whole reason "clean" can mean something. A human reading a file
+// five times finds fewer mistakes each pass because they remember what they
+// meant; a test finds the same ones every time.
+//
+// # These checks used to read NOTES.md
+//
+// The working notes were the document of record and carried the catalogue
+// tables, the pipeline kinds and the vocabulary, with a test per claim. NOTES.md
+// is gone and the book is what is left, so the checks were repointed here rather
+// than deleted with it. The tables they read are the same tables: the downloader
+// and the spider are printed side by side in chains.md, and the scheduler's own
+// in frontier.md, because ordering the queue is what that chapter is about.
 //
 // # Markdown, and what that changed
 //
@@ -119,7 +135,7 @@ func TestBookHCLIsReal(t *testing.T) {
 
 // standalone turns a printed fragment into a document that can be parsed, and
 // reports whether it was a job document at all. A service document and a labels
-// document are neither, and TestNotesAndCliDocumentTypesAreReal has those.
+// document are neither, and TestBookAndCliDocumentTypesAreReal has those.
 func standalone(fragment string) (string, bool) {
 	fragment = strings.TrimSpace(fragment)
 
@@ -302,6 +318,67 @@ func TestBookSQLIsTheQuery(t *testing.T) {
 
 	if checked == 0 {
 		t.Fatal("no SQL was found in the book, so this check is not checking anything")
+	}
+}
+
+// leaseQuery is the raw literal the frontier assigns to `query` in Lease. The
+// closing backtick is the end of it, and there is no way to write a backtick
+// inside one, so the first is the last.
+var leaseQuery = regexp.MustCompile("(?s)\tquery := `(.*?)`")
+
+// TestBookSQLIsTheWholeQuery walks the other way: every line the frontier's
+// lease really runs has to appear in the book.
+//
+// [TestBookSQLIsTheQuery] only asks that what the book prints exists in the
+// source, which cannot see a column ADDED to the query. That is not a
+// hypothetical direction to have missed. The book printed the lease without
+// `COALESCE(h.delay, 0)` for as long as crawl delays had been honoured, and
+// every line it did print was still a substring of the real query, so the check
+// stayed green while the chapter described a lease that stopped existing.
+//
+// A missing line is the case that matters: it makes the chapter's argument
+// about a query nobody runs. The pieces are matched the same way as above,
+// because the source splices the status and the ordering in.
+func TestBookSQLIsTheWholeQuery(t *testing.T) {
+	source, err := os.ReadFile("../frontier/sqlite/sqlite.go")
+	if err != nil {
+		t.Fatalf("read the frontier: %v", err)
+	}
+
+	m := leaseQuery.FindStringSubmatch(string(source))
+	if m == nil {
+		t.Fatal("the frontier has no `query :=` literal, so this check cannot find the lease")
+	}
+
+	// Every SQL block in the book, as one haystack: the chapter prints the
+	// guard and the lease as separate statements in one fence, and a later
+	// chapter may quote a line of either.
+	var printed strings.Builder
+	for _, page := range bookPages(t) {
+		for _, block := range blocks(page, "sql") {
+			printed.WriteString(block)
+			printed.WriteString("\n")
+		}
+	}
+	book := printed.String()
+
+	var checked int
+	for _, line := range strings.Split(m[1], "\n") {
+		for _, piece := range strings.FieldsFunc(line, func(r rune) bool { return r == '\'' }) {
+			piece = strings.TrimSpace(piece)
+			piece = strings.TrimSpace(strings.TrimPrefix(piece, "ORDER BY"))
+			if len(piece) < 16 {
+				continue
+			}
+			checked++
+			if !strings.Contains(book, piece) {
+				t.Errorf("the lease runs SQL the book does not print:\n  %s", piece)
+			}
+		}
+	}
+
+	if checked == 0 {
+		t.Fatal("nothing was taken from the lease, so this check is not checking anything")
 	}
 }
 
@@ -518,5 +595,261 @@ func TestEveryDiagramIsADiagram(t *testing.T) {
 
 	if checked == 0 {
 		t.Fatal("no diagrams were found, so this test proves nothing")
+	}
+}
+
+// stageTable is the chapter each stage's catalogue is printed in, and the cell
+// its order column starts at. chains.md prints the downloader and the spider
+// side by side as one table with two order columns; frontier.md prints the
+// scheduler's own, because ordering the queue is what that chapter is about.
+var stageTable = map[engine.Stage]struct {
+	page string
+	at   int
+}{
+	engine.StageDownloader: {"chains.md", 0},
+	engine.StageSpider:     {"chains.md", 2},
+	engine.StageScheduler:  {"frontier.md", 0},
+}
+
+// tableCells splits a Markdown table row into its trimmed cells, or returns nil
+// if the line is not one.
+func tableCells(line string) []string {
+	line = strings.TrimSpace(line)
+	if len(line) < 2 || !strings.HasPrefix(line, "|") || !strings.HasSuffix(line, "|") {
+		return nil
+	}
+	cells := strings.Split(strings.TrimSuffix(strings.TrimPrefix(line, "|"), "|"), "|")
+	for i := range cells {
+		cells[i] = strings.TrimSpace(cells[i])
+	}
+	return cells
+}
+
+// placedAt reads the plugin named in the cell after `at`, when the cell at `at`
+// is an order.
+//
+// It reports false for anything that is not that pair, which is how the other
+// tables in these chapters are skipped without naming them: a separator row, the
+// lease benchmark, the exit codes. A table that stops being a catalogue stops
+// being read rather than being read wrongly.
+func placedAt(cells []string, at int) (string, bool) {
+	if at+1 >= len(cells) {
+		return "", false
+	}
+	m := backticked.FindStringSubmatch(cells[at+1])
+	if m == nil {
+		return "", false
+	}
+	if _, err := strconv.Atoi(cells[at]); err != nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+var backticked = regexp.MustCompile("^`([a-z_]+)`$")
+
+// TestBookCataloguesEveryPluginTheCodeShips is the direction the other two
+// catalogue checks cannot walk.
+//
+// [TestBookPlacementsMatchTheCatalogue] holds every position the book prints to
+// the code, and [TestBookMentionsNoPluginTheCatalogueDropped] refuses ones that
+// became attributes. Neither can see a plugin the code ships and the book has
+// never heard of, because both start from what is written. A reader takes these
+// tables for the whole catalogue, so one missing row is a plugin nobody knows
+// they can write.
+//
+// This check came off NOTES.md, which carried a per-stage table and had this
+// direction from the start.
+func TestBookCataloguesEveryPluginTheCodeShips(t *testing.T) {
+	pages := bookPages(t)
+
+	for stage, where := range stageTable {
+		t.Run(string(stage), func(t *testing.T) {
+			page, ok := pages[where.page]
+			if !ok {
+				t.Fatalf("the book has no %s, so the %s catalogue cannot be checked", where.page, stage)
+			}
+
+			said := map[string]bool{}
+			for _, line := range strings.Split(page, "\n") {
+				if name, ok := placedAt(tableCells(line), where.at); ok {
+					said[name] = true
+				}
+			}
+			if len(said) == 0 {
+				t.Fatalf("%s has no %s catalogue table, so this check is not checking anything",
+					where.page, stage)
+			}
+
+			for _, b := range engine.Placements[stage] {
+				if !said[b.Name] {
+					t.Errorf("the code ships %s/%s at %d, which %s does not list",
+						stage, b.Name, b.Order, where.page)
+				}
+			}
+		})
+	}
+}
+
+// | `clean` | Rule-driven tidying | Built |
+var kindRow = regexp.MustCompile("(?m)^\\|\\s*`([a-z]+)`\\s*\\|[^|]*\\|\\s*(Built|Catalogued)\\s*\\|")
+
+// TestBookSaysWhichKindsAreBuilt holds the pipeline's kinds table to both lists
+// that could disagree with it.
+//
+// A kinds table with no state column reads as a list of working parts, and four
+// of the nine are not: `python`, `rhai`, `nodejs` and `bash` are catalogued
+// positions, and a job naming one is refused when the pipeline is built.
+//
+// The catalogue is what a document may name, in principle. The registry is what
+// this build can actually run, and they are not the same list: `entities` was
+// registered, documented and reachable while the catalogue had never heard of
+// it, so a check that read only one of them could not have noticed the other
+// going stale.
+func TestBookSaysWhichKindsAreBuilt(t *testing.T) {
+	page := bookPages(t)["pipeline.md"]
+
+	built := map[string]bool{}
+	for _, kind := range pipeline.Registered() {
+		built[kind] = true
+	}
+	if len(built) == 0 {
+		t.Fatal("no pipeline kinds are registered, so this check is not checking anything")
+	}
+
+	said := map[string]bool{}
+	for _, row := range kindRow.FindAllStringSubmatch(page, -1) {
+		kind, state := row[1], row[2]
+		said[kind] = true
+
+		switch {
+		case state == "Built" && !built[kind]:
+			t.Errorf("pipeline.md says the %q step is built, and nothing registers one", kind)
+		case state == "Catalogued" && built[kind]:
+			t.Errorf("pipeline.md calls the %q step catalogued, and this build runs it", kind)
+		}
+	}
+	if len(said) == 0 {
+		t.Fatal("pipeline.md has no kinds table with a state column, so this check is not checking it")
+	}
+
+	for kind := range built {
+		if !said[kind] {
+			t.Errorf("pipeline.md leaves the %q step out of its kinds table", kind)
+		}
+	}
+	catalogued := map[string]bool{}
+	for _, kind := range engine.PipelineKindNames() {
+		catalogued[kind] = true
+		if !said[kind] {
+			t.Errorf("the code catalogues pipeline kind %q, which pipeline.md does not document", kind)
+		}
+	}
+	for kind := range built {
+		if !catalogued[kind] {
+			t.Errorf("this build runs pipeline kind %q, which engine.PipelineKinds does not list", kind)
+		}
+	}
+}
+
+var bareAssign = regexp.MustCompile(`^\s*(type|transforms)\s*=\s*(.+?)\s*(#.*)?$`)
+
+func bareWords(line string) (field string, values []string, ok bool) {
+	m := bareAssign.FindStringSubmatch(line)
+	if m == nil {
+		return "", nil, false
+	}
+	field = m[1]
+	raw := strings.Trim(m[2], "[]")
+	if raw == "" {
+		return field, nil, true
+	}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		part = strings.Trim(part, `"`)
+		if part != "" {
+			values = append(values, part)
+		}
+	}
+	return field, values, true
+}
+
+// TestBookVocabularyIsReal catches a type or transform named in an example that
+// the parser would refuse.
+//
+// [TestBookHCLIsReal] parses what it can, but it wraps a fragment to make it
+// stand alone and skips what will not wrap, so a bare word in a fragment nothing
+// could parse reaches nobody. These are the words a reader is most likely to
+// copy, being the whole vocabulary a property is written in.
+func TestBookVocabularyIsReal(t *testing.T) {
+	known := map[string]bool{}
+	for _, ty := range engine.TypeNames() {
+		known[ty] = true
+	}
+	for _, tr := range engine.TransformNames() {
+		known[tr] = true
+	}
+	if len(known) == 0 {
+		t.Fatal("the vocabulary is empty, so this check is not checking anything")
+	}
+
+	var checked int
+	for name, page := range bookPages(t) {
+		for _, block := range blocks(page, "hcl") {
+			for _, line := range strings.Split(block, "\n") {
+				field, values, ok := bareWords(line)
+				if !ok {
+					continue
+				}
+				for _, word := range values {
+					checked++
+					if !known[word] {
+						t.Errorf("%s uses %s = %s, which is not in the vocabulary", name, field, word)
+					}
+				}
+			}
+		}
+	}
+
+	if checked == 0 {
+		t.Fatal("no bare words were found in the book, so this check is not checking anything")
+	}
+}
+
+// TestBookStageListsMatchTheCode keeps the prose about what may be replaced and
+// what may be extended true.
+//
+// Each of these is a pair: an invariant the code has to hold, and the sentence
+// in the book that tells somebody about it. Checking only the first lets the
+// book stop saying it; checking only the second lets the code stop doing it.
+func TestBookStageListsMatchTheCode(t *testing.T) {
+	pages := bookPages(t)
+
+	// The pipeline is not a plugin stage, and cannot even be written as one: the
+	// block holds step blocks and nothing else, so it is a parse error rather
+	// than a rule. The book has to keep saying which spelling wins.
+	if engine.StagePipeline.ValidPlugin() {
+		t.Error("the code allows pipeline plugins, which the book says it does not")
+	}
+	if !strings.Contains(pages["pipeline.md"], "Not a plugin stage") {
+		t.Error("pipeline.md no longer says the pipeline is not a plugin stage")
+	}
+	if !strings.Contains(pages["pipeline.md"], "step <kind> <name>") {
+		t.Error("pipeline.md no longer documents the step spelling")
+	}
+
+	// The scheduler may be extended and not replaced, because politeness is per
+	// host and shared. It is the one asymmetry in the whole engine.
+	if engine.StageScheduler.ValidExternal() {
+		t.Error("the code allows an external scheduler, which the book says it does not")
+	}
+	if !strings.Contains(pages["index.md"], "one stage a job may not replace") {
+		t.Error("index.md no longer says the scheduler cannot be replaced")
+	}
+	if !engine.StageScheduler.ValidPlugin() {
+		t.Error("the code refuses scheduler plugins, which the book documents a table of")
+	}
+	if !strings.Contains(pages["frontier.md"], "Ordering is a plugin") {
+		t.Error("frontier.md no longer documents the scheduler's plugins")
 	}
 }

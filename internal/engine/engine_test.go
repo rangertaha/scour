@@ -10,8 +10,14 @@ import (
 	"github.com/rangertaha/scour/internal/engine"
 )
 
-// document is the job from NOTES.md. notes_test.go parses that file directly,
-// so the two cannot drift; this copy is here to be read beside the assertions.
+// document is a job exercising most of the schema at once, kept here to be read
+// beside the assertions below.
+//
+// It was a copy of the job printed in NOTES.md, which notes_test.go parsed
+// directly so the two could not drift. Both are gone. The documented examples
+// that still exist are the book's, and book_test.go parses and validates every
+// one of them; this is now an ordinary fixture rather than a second copy of a
+// document somebody reads.
 const document = `
 job "news" {
   domains  = ["example.com"]

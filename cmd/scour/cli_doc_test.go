@@ -13,17 +13,22 @@ import (
 	"github.com/rangertaha/scour/internal/cli"
 )
 
-// CLI.md is checked against the binary rather than trusted.
+// docs/cli.md is checked against the binary rather than trusted.
 //
 // A command surface that has drifted from its documentation is worse than an
 // undocumented one: somebody reads it, types what it says, and is told there is
 // no such flag.
+//
+// This read CLI.md, which was the command reference at the repository root and
+// has been folded into the book's own chapter on the command line. The chapter
+// carries the tables these checks need: what exists today, and a section per
+// command with its flags.
 
 func doc(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile("../../CLI.md")
+	b, err := os.ReadFile("../../docs/cli.md")
 	if err != nil {
-		t.Fatalf("read CLI.md: %v", err)
+		t.Fatalf("read the cli chapter: %v", err)
 	}
 	return string(b)
 }
@@ -37,7 +42,7 @@ func TestEveryCommandIsDocumented(t *testing.T) {
 			continue
 		}
 		if !strings.Contains(src, "scour "+cmd.Name) {
-			t.Errorf("CLI.md does not document `scour %s`", cmd.Name)
+			t.Errorf("the cli chapter does not document `scour %s`", cmd.Name)
 		}
 	}
 }
@@ -69,17 +74,17 @@ func TestWhatExistsTodayIsWhatExists(t *testing.T) {
 		claimed[row[1]] = true
 	}
 	if len(claimed) == 0 {
-		t.Fatal("CLI.md has no table of what exists, so this check is not checking anything")
+		t.Fatal("the cli chapter has no table of what exists, so this check is not checking anything")
 	}
 
 	for name := range claimed {
 		if !have[name] {
-			t.Errorf("CLI.md says `scour %s` is built, and the binary has no such command", name)
+			t.Errorf("the cli chapter says `scour %s` is built, and the binary has no such command", name)
 		}
 	}
 	for name := range have {
 		if !claimed[name] {
-			t.Errorf("`scour %s` is built, and CLI.md's table of what exists leaves it out", name)
+			t.Errorf("`scour %s` is built, and the cli chapter's table of what exists leaves it out", name)
 		}
 	}
 }
@@ -94,7 +99,7 @@ func TestEveryFlagIsDocumented(t *testing.T) {
 		section := between(t, src, "#### `scour "+cmd.Name, false)
 		if section == "" {
 			if len(flagNames(cmd)) > 0 {
-				t.Errorf("`scour %s` has flags and no section in CLI.md", cmd.Name)
+				t.Errorf("`scour %s` has flags and no section in the cli chapter", cmd.Name)
 			}
 			continue
 		}
@@ -149,7 +154,7 @@ func TestEveryDocumentedFlagExists(t *testing.T) {
 			checked++
 			name := strings.TrimPrefix(row[1], "--")
 			if !have[name] {
-				t.Errorf("CLI.md documents `scour %s --%s`, and nothing takes it", cmd.Name, name)
+				t.Errorf("the cli chapter documents `scour %s --%s`, and nothing takes it", cmd.Name, name)
 			}
 		}
 	}
@@ -180,7 +185,7 @@ func TestExitCodesAreDocumented(t *testing.T) {
 		"| 0 |", "| 1 |", "| 2 |", "| 3 |",
 	} {
 		if !strings.Contains(src, want) {
-			t.Errorf("CLI.md does not document exit code %s", want)
+			t.Errorf("the cli chapter does not document exit code %s", want)
 		}
 	}
 }

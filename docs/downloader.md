@@ -106,6 +106,19 @@ Disallow: /public/private/
 > meant otherwise has to say so with a longer pattern. This is the answer
 > RFC 9309 requires, and it is not the one most people expect.
 
+### The one thing in the file this stage cannot act on
+
+`Crawl-delay` is read here and honoured somewhere else. Politeness is per host
+and decided in the frontier, and these are two stages that may be on two
+machines, so a number read here has to travel to be worth reading at all.
+
+It rides back on the response, and over the bus in the fetch reply, as a delay
+per host rather than one for the request: a redirect chain reads the robots.txt
+of every host it passes through, and each of those sites asked for something.
+The scheduler is the one place that knows which of them it has already recorded,
+so that is where the list is deduplicated and handed to the frontier. What the
+frontier then does with it is [the next chapter but one](frontier.md).
+
 ## Redirects
 
 An HTTP client will follow redirects for you, and one it followed would be
@@ -132,12 +145,21 @@ A loop is not a drop. A site that redirects in a circle is broken, and
 counting it as politeness would hide that, so it is an error naming the trail
 it went round.
 
-> **What this will become**
+**A hop is checked against the job's scope before it is taken.** The scheduler
+drops an out-of-scope URL before it is queued, and a redirect happens after
+queueing, so the scheduler has already had its say and cannot have another.
+Without a check here a job naming one exclusion followed a redirect straight
+past it, which is worse than an ordinary scope leak: every other URL a crawl
+considers went through the one place that decides, and this one did not. An
+out-of-scope hop is a drop rather than a failure, because it is the ordinary
+outcome for a URL outside the scope and not a sign anything went wrong.
+
+> **What this will still become**
 >
-> When the frontier exists, a redirect that leaves the host should become a
-> frontier request rather than an inline hop, so that dedup, scope and
-> politeness each get a say in it. Following inline is right for the same-
-> host case, which is nearly all of them, and is what happens today.
+> A redirect that leaves the host is followed inline, which is right for the
+> same-host case and is nearly all of them. Turning an off-host hop into a
+> frontier request instead would give dedup and politeness a say in it as
+> well. Scope already has one.
 
 ---
 

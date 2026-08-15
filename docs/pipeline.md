@@ -75,6 +75,13 @@ References are bare, not strings, so a step requiring something that does not
 exist is caught with a line and a column. Cycles are refused, and the error
 names the steps stuck in one rather than saying that a cycle exists somewhere.
 
+**Not a plugin stage.** Every other stage takes a chain of middleware; this one
+does not, and the difference is not a rule a validator enforces. The `pipeline`
+block holds `step` blocks and nothing else, so writing `plugin` in it is a parse
+error with a line and a column rather than something refused later. A step is
+already the unit of extension here, and a stage with two of them would be two
+ways to say one thing.
+
 | Kind | What it does | State |
 | --- | --- | --- |
 | `clean` | Rule-driven tidying | Built |

@@ -52,3 +52,4 @@ __pycache__/
 
 # Agent worktrees, which are checkouts of this repository
 .claude/
+PLAN.md
