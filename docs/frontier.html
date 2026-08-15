@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What to fetch next · scour</title>
+<meta name="description" content="The queue is the crawler. Ordering it is most of what focused means.">
+<link rel="stylesheet" href="book.css">
+</head>
+<body>
+<div class="shell">
+  <nav class="nav">
+    <p class="brand"><a href="index.html">scour</a></p>
+    <p class="brand-sub">a focused crawler</p>
+    <ol>
+      <li><a href="index.html">The shape</a></li>
+      <li><a href="job.html">The job</a></li>
+      <li><a href="chains.html">Chains</a></li>
+      <li><a href="downloader.html">Fetching</a></li>
+      <li><a href="cache.html">The corpus</a></li>
+      <li><a href="frontier.html" aria-current="page">The frontier</a></li>
+      <li><a href="items.html">Items</a></li>
+      <li><a href="pipeline.html">The pipeline</a></li>
+      <li><a href="cli.html">The command line</a></li>
+      <li><a href="storage.html">Storage</a></li>
+    </ol>
+    <p class="nav-foot">Source and working notes:
+    <a href="https://github.com/rangertaha/scour">github.com/rangertaha/scour</a></p>
+  </nav>
+
+  <main>
+    <section class="page">
+      <p class="eyebrow">Chapter six</p>
+      <h1>What to fetch next</h1>
+      <p class="lede">An exhaustive crawler can use a queue: it is going
+      everywhere anyway and only the order changes. A focused crawler is
+      choosing what not to fetch, and that choice is the frontier.</p>
+
+      <figure>
+        <div class="well">
+          <svg viewBox="0 0 900 340" role="img" aria-label="Two tables. The urls table is per job and holds waiting URLs with a score, a depth and the time each becomes ready again. The hosts table is shared across jobs and holds, per host, the earliest time it may next be touched and the delay it asked for. A lease joins them, taking the highest-scoring ready URL whose host is not cooling.">
+            <defs>
+              <marker id="f1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+              </marker>
+              <marker id="f1k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="var(--blueprint)"/>
+              </marker>
+            </defs>
+
+            <rect class="box" x="24" y="46" width="360" height="164"/>
+            <text class="dl" x="40" y="70">urls</text>
+            <text class="dl-sm" x="96" y="70">one row per URL, per job</text>
+            <line class="ln" x1="40" y1="82" x2="368" y2="82"/>
+            <text class="dl-sm" x="40" y="102">hash  host    score  depth  status    ready_at</text>
+            <text class="dl-sm" x="40" y="124">a1f3  a.com    0.91     1   waiting          0</text>
+            <text class="dl-sm" x="40" y="142">b7c2  a.com    0.44     2   waiting          0</text>
+            <text class="dl-sm" x="40" y="160">c091  b.com    0.88     1   waiting  12:05:12</text>
+            <text class="dl-sm" x="40" y="192">a lease is a waiting row that is not ready yet, which is what keeps the index usable</text>
+
+            <rect class="box-key" x="520" y="46" width="356" height="164"/>
+            <text class="dl-key" x="536" y="70">hosts</text>
+            <text class="dl-sm" x="596" y="70">one row per host, shared by every job</text>
+            <line class="ln-key" x1="536" y1="82" x2="860" y2="82"/>
+            <text class="dl-sm" x="536" y="102">host     next_at        delay</text>
+            <text class="dl-sm" x="536" y="124">a.com    12:04:31.220    2s</text>
+            <text class="dl-sm" x="536" y="142">b.com    12:04:29.870    10s</text>
+            <text class="dl-sm" x="536" y="176">a rate limit is per host, so two jobs on</text>
+            <text class="dl-sm" x="536" y="192">one site get one allowance between them</text>
+
+            <path class="ln-key" d="M384 128 L452 128 L452 128 L516 128" marker-end="url(#f1k)"/>
+            <text class="dl-key" x="450" y="118" text-anchor="middle">join</text>
+
+            <rect class="box" x="180" y="248" width="540" height="52"/>
+            <text class="dl" x="200" y="272">the lease</text>
+            <text class="dl-sm" x="290" y="272">highest score, whose host is not cooling, held with a timeout</text>
+            <text class="dl-sm" x="200" y="290">every index in the schema exists for this one query</text>
+
+            <path class="ln" d="M204 210 L204 244" marker-end="url(#f1)"/>
+            <path class="ln" d="M698 210 L698 226 L620 226 L620 244" marker-end="url(#f1)"/>
+          </svg>
+        </div>
+        <figcaption>Two tables in one SQLite database. The urls table is
+        partitioned by job; the hosts table deliberately is not, because
+        politeness cannot be. <code>next_at</code> and <code>delay</code> are
+        kept apart rather than folded together: the first is when this host may
+        be touched again, the second is how long it wants to be left alone every
+        time, and folding them would mean re-deriving the second from the first
+        once the first has been overwritten.</figcaption>
+      </figure>
+
+      <h2>Why a database and not the bus</h2>
+
+      <p>NATS carries everything else. It cannot carry this. JetStream is a work
+      queue and work queues are FIFO; a focused crawl is ranking, and the ranking
+      changes as the model learns. The one thing the frontier has to do is the
+      one thing a broker does not.</p>
+
+      <p>What it has to do at once: dedup by URL, hand out the highest-scoring
+      entry whose host is not cooling, lease it with a timeout, and survive a
+      restart with all of that intact.</p>
+
+      <pre><code class="sql">BEGIN IMMEDIATE
+SELECT 1 FROM hosts WHERE next_at &lt;= ? LIMIT 1
+
+SELECT u.hash, u.url, u.host, u.depth, u.score, u.parent, u.discovered, u.attempts,
+       COALESCE(h.delay, 0)
+  FROM urls u LEFT JOIN hosts h ON h.host = u.host
+ WHERE u.job = ? AND u.status = 'waiting'
+   AND u.ready_at &lt;= ?
+   AND (h.next_at IS NULL OR h.next_at &lt;= ?)
+ ORDER BY u.score DESC, u.discovered ASC, u.rowid ASC
+ LIMIT 1</code></pre>
+
+      <p>Hand-written SQL, no ORM. There are half a dozen queries and every one
+      is shaped by an index; an ORM would hide the thing most worth looking
+      at.</p>
+
+      <p>The first query is a guard, and it is there for a reason worth reading
+      the performance section for: it asks whether any host is free at all,
+      which is one seek, and a lease that cannot possibly succeed says so
+      without reading the queue. It is sound because <code>hosts</code> holds a
+      row for every host in the frontier, which <code>Add</code> maintains and a
+      migration backfilled. A free host does not mean a leasable URL, so the
+      guard only ever answers no early; the query below still decides everything
+      else.</p>
+
+      <p>Selecting and claiming have to be one act, or two schedulers that both
+      chose before either claimed would fetch the same page twice. SQLite has no
+      <code>SELECT ... FOR UPDATE</code>; it rejects the syntax. What it has is
+      <code>BEGIN IMMEDIATE</code>, which takes the write lock when the
+      transaction opens rather than when it first writes. A port to Postgres
+      adds <code>FOR UPDATE SKIP LOCKED</code> there, because its readers are
+      concurrent and the row has to be locked rather than the database.</p>
+
+      <h2>The shape of the index is the whole performance story</h2>
+
+      <p>There is no <code>leased</code> status. A leased row is a waiting row
+      that is not ready yet, and it says so with <code>ready_at</code>. The
+      obvious schema, a second status, makes the lease ask for one status
+      <em>or</em> another, and an OR over the leading column of an index is an
+      index the query cannot use.</p>
+
+      <p>Each index is <code>(job, status)</code> equality and then the ordering
+      columns, and nothing else. Whether a row is ready and whether its host is
+      cooling are residuals, checked per row while SQLite walks the index in
+      policy order and stops at the first row that passes. Putting
+      <code>ready_at</code> into the
+      index ahead of the ordering columns would turn the walk back into a
+      sort.</p>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>Lease</th><th>1,000 URLs</th><th>100,000 URLs</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Memory, the floor</td><td class="num">43 µs</td><td class="num">4.7 ms</td></tr>
+            <tr><td>SQLite, sorting</td><td class="num">965 µs</td><td class="num">47.9 ms</td></tr>
+            <tr><td>SQLite, walking an index</td><td class="num">357 µs</td><td class="num">369 µs</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Flat is the property that matters. A crawl leases once per page, so
+      this query is the ceiling on how fast anything can go, which is why the
+      query plan is asserted in a test rather than left to a benchmark somebody
+      remembers to read. <code>random</code> is exempt and always sorts: a
+      shuffle of everything waiting is not something an index can express.</p>
+
+      <p><strong>That table is measured with politeness off,</strong> and this
+      chapter used to stop here. The benchmark's frontier has no rate, so no
+      host ever cools, so the residual never skips anything. Turn politeness on,
+      which every real job does, and the walk is what pays. There are two cases
+      and they are different problems.</p>
+
+      <p><strong>Nothing is due.</strong> A crawl of one site spends most of its
+      life here: the host is cooling, every waiting row is behind it, and
+      finding that out by walking the urls table means reading all of it,
+      because SQLite cannot know a row fails the check until it looks. That is
+      0.55 ms at a thousand URLs, 5.3 ms at ten thousand and 69 ms at a hundred
+      thousand, and it is not asked once: every worker asks again on every idle
+      tick for the length of the delay, holding the write lock each time, which
+      also blocks the <code>Add</code> that queues what the crawl is finding. At
+      a hundred thousand URLs a one-site crawl spent more than a core proving it
+      had nothing to do.</p>
+
+      <p>That is what the guard above fixes, by asking the right table. 17 µs at
+      a hundred thousand URLs, and flat. An index on <code>hosts (next_at)</code>
+      makes it flat in the number of hosts too: with 5,000 hosts all cooling it
+      is 10 µs against 238 µs without. Held by a test that asserts the cost as a
+      ratio rather than the plan, because the plan was already right when it was
+      69 ms.</p>
+
+      <p><strong>Something is due, but the best rows are cooling.</strong> Not
+      fixed, and it is worth knowing about. Under <code>priority</code> the
+      lease hands out the best-scoring row and then cools that row's host, so
+      the head of the index becomes a run of cooling rows that grows by one
+      host's worth per lease, and every later lease in the same window walks it.
+      Per-lease cost is linear in leases-per-politeness-window and total work
+      inside a window is quadratic: at 50,000 URLs over 5,000 hosts with a
+      30-second delay, 1.7 ms after 250 leases, 3.8 ms after 500, 8 ms after
+      1,000, 17 ms after 2,000, dropping back when the window turns over.</p>
+
+      <p>The fix is not an index. It is Heritrix's shape: one queue per host, a
+      heap of the ready ones and a delay queue of the snoozed, so a cooling host
+      leaves the candidate set instead of sitting at the head of it. That makes
+      the host the unit of scheduling rather than the URL, which is what
+      politeness has been saying all along.</p>
+
+      <h2>Politeness settles the layout</h2>
+
+      <p>A rate limit is per host and shared between jobs. Two schedulers
+      handing out the same host cannot honour a crawl delay between them, so the
+      frontier is single-writer per host by construction, and SQLite is what a
+      single writer wants. When one process can no longer keep up, the answer is
+      to shard by host, which makes each shard single-writer again.</p>
+
+      <p>That is also why it is one database rather than one per job. Per-job
+      files would be tidier and would make dropping a job a delete, but host
+      state cannot be partitioned per job without two jobs on one site each
+      getting their own allowance, which is exactly what must not happen.</p>
+
+      <h3>What the site asked for has to get here</h3>
+
+      <p>A site states its own <code>Crawl-delay</code> in robots.txt, which is
+      read in the downloader. Politeness is decided here. Those are two stages
+      and they may be on two machines, so without a way back the file was
+      parsed, obeyed in every respect but this one, and the number thrown
+      away.</p>
+
+      <p>So the delay rides back on the response and over the bus in the fetch
+      reply, and <code>Pace</code> records it against the host and takes the
+      hold it implies. A lease then waits the longer of what the job configured
+      and what the site asked for: a crawl-delay belongs to the host and the
+      rate belongs to the job, and honouring only the second is how a
+      <code>Crawl-delay</code> comes to be parsed and ignored.</p>
+
+      <p>Two things about <code>Pace</code> are easy to get wrong and are worth
+      stating, because both were. <strong>It adds the site's delay alone, never
+      the longer of the two:</strong> the job's rate has already been applied by
+      the lease that led here, measured from when that lease was taken, and
+      applying it again from now would measure it from after the fetch, so every
+      host that asked for nothing would be left alone for a rate plus however
+      long its page took to arrive. And <strong><code>next_at</code> only ever
+      moves forward:</strong> a host cooling for longer than this delay is a
+      host somebody else is already being polite to, and the shorter of two
+      politeness rules is never the answer.</p>
+
+      <h2>Ordering is a plugin, at 500</h2>
+
+      <p>The scheduler chains the same way the downloader does. A request passes
+      through on its way into the frontier and back out on its way to the
+      downloader, so low order is nearest the spider that discovered it and high
+      order is nearest the queue itself.</p>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>Order</th><th>Name</th><th>What it does</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="num">100</td><td><code>dupefilter</code></td><td>Decides what counts as already seen</td></tr>
+            <tr><td class="num">300</td><td><code>cron</code></td><td>Defers a URL until it is due again</td></tr>
+            <tr><td class="num">450</td><td><code>topic</code></td><td>Scores a URL against a topic, before the policy orders it</td></tr>
+            <tr><td class="num">500</td><td><code>priority</code></td><td>Best first, by score. The default</td></tr>
+            <tr><td class="num">500</td><td><code>breadth</code></td><td>Level by level, for an archival crawl</td></tr>
+            <tr><td class="num">500</td><td><code>depth</code></td><td>Follows a spur down before returning</td></tr>
+            <tr><td class="num">500</td><td><code>random</code></td><td>Samples without the sample being shaped by the scorer</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The four at 500 are alternatives, not a chain: a job picks one. They sit
+      against the queue because deciding what comes out next is the last thing
+      that happens on the way in and the first on the way out.</p>
+
+      <p><code>dupefilter</code> at 100 is outermost because everything after
+      it is work: a URL already seen should be recognised before anything pays
+      to think about it. What it actually decides is what "the same URL" means,
+      which is a question with no right answer, only a right answer per site.
+      Treating <code>?utm_source=x</code> as noise is right nearly everywhere
+      and wrong on a site that reads it; treating <code>/a/</code> and
+      <code>/a</code> as one page is right nearly everywhere and wrong on the
+      servers that do not. So a job that knows its site says so, and one that
+      does not gets only the transformations that cannot change what a server
+      returns.</p>
+
+      <h2>Scope and budget are not plugins</h2>
+
+      <p><code>domains</code>, <code>included</code>, <code>excluded</code>,
+      <code>max_depth</code> and <code>max_pages</code> are all attributes, and
+      an attribute's enforcement cannot be optional: a plugin that could be
+      turned off is a boundary that can be crossed by deleting a line. The
+      scheduler checks them itself, on the way into the frontier and outside the
+      chain, the same way robots.txt sits outside the downloader's.</p>
+
+      <p><strong>One rule, one implementation, and two stages that need
+      it.</strong> The scheduler covers every URL a crawl decides to fetch,
+      because deciding is what it is for. It cannot cover a redirect: a hop is
+      chosen by whoever controls a page the crawl was already fetching, and it
+      happens after queueing, so the scheduler has already had its say and
+      cannot have another. The downloader therefore checks the target of a hop
+      against the same scope before taking it, reading the job's boundary from
+      the one implementation rather than a second one of its own, because two
+      subtly different scope checks is a crawl that leaves the site through
+      whichever of them is looser.</p>
+
+      <p>The spider does not check and does not need to. Its output is links,
+      which go to the scheduler, which drops what is out of bounds before
+      queueing.</p>
+
+      <p><code>offsite</code> stays in the spider's and the downloader's tables,
+      and there it really is optional. Those two are catching work that did not
+      come through this scheduler, which on a single node is pure redundancy and
+      across a cluster with a spider somebody else wrote is not.</p>
+
+      <p>A job whose own boundary excludes every URL it starts from is refused
+      outright rather than crawled. Every start URL is dropped before it is
+      queued, the frontier is empty, and the run finishes in a millisecond and
+      exits zero, which is the worst shape a mistake can take: a success that
+      did nothing.</p>
+
+      <h2>A frontier is changed in place, never rebuilt</h2>
+
+      <p>It is the state a crawl resumes from, so there is no acceptable answer
+      that involves deleting it. <code>CREATE TABLE IF NOT EXISTS</code> does
+      nothing to a table that is already there, which means a column added later
+      reaches new databases and no existing one, so an older database is brought
+      up to the current schema on open.</p>
+
+      <p>Adding a column can be asked for idempotently: the database is asked
+      whether it has one. Backfilling cannot, and the guard on the lease needs a
+      backfill. <code>hosts</code> has to hold a row for every host in the
+      frontier, or a missing row reads as a host that is not there rather than
+      one that is free, which loses URLs rather than slowing them down. Filling
+      it is a scan of the urls table, and doing that on every open to discover
+      there was nothing to do is the cost a recorded schema version exists to
+      skip. Every step is still written to be safe if it runs twice, because the
+      version is the optimisation and not the guarantee.</p>
+
+      <div class="note">
+        <span class="tag">Two implementations, one contract</span>
+        <p>An in-memory frontier exists as the reference implementation and the
+        thing the contract suite was written against. Both run the same suite
+        and the same benchmarks, which is what stops the contract from being a
+        description of whichever store happened to be written first, and what
+        made the comparison above possible at all.</p>
+      </div>
+    </section>
+
+  <nav class="pager">
+    <a class="prev" href="cache.html"><span class="dir">Back</span>The cache is the corpus</a>
+    <a class="next" href="items.html"><span class="dir">Next</span>Shapes, entities, measurements</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>

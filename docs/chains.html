@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chains run both ways · scour</title>
+<meta name="description" content="Middleware wraps a stage, so every link sees the request going out and the response coming back.">
+<link rel="stylesheet" href="book.css">
+</head>
+<body>
+<div class="shell">
+  <nav class="nav">
+    <p class="brand"><a href="index.html">scour</a></p>
+    <p class="brand-sub">a focused crawler</p>
+    <ol>
+      <li><a href="index.html">The shape</a></li>
+      <li><a href="job.html">The job</a></li>
+      <li><a href="chains.html" aria-current="page">Chains</a></li>
+      <li><a href="downloader.html">Fetching</a></li>
+      <li><a href="cache.html">The corpus</a></li>
+      <li><a href="frontier.html">The frontier</a></li>
+      <li><a href="items.html">Items</a></li>
+      <li><a href="pipeline.html">The pipeline</a></li>
+      <li><a href="cli.html">The command line</a></li>
+      <li><a href="storage.html">Storage</a></li>
+    </ol>
+    <p class="nav-foot">Source and working notes:
+    <a href="https://github.com/rangertaha/scour">github.com/rangertaha/scour</a></p>
+  </nav>
+
+  <main>
+    <section class="page">
+      <p class="eyebrow">Chapter three</p>
+      <h1>Chains run both ways</h1>
+      <p class="lede">A chain wraps its stage rather than hooking it, so every
+      link sees the request on the way out and the response on the way back, in
+      opposite orders. That is what makes <code>order</code> mean something, and
+      it is the part that is easy to get wrong.</p>
+
+      <figure>
+        <div class="well">
+          <svg viewBox="0 0 900 300" role="img" aria-label="Three nested middleware boxes at orders 500, 550 and 900 wrap the fetch. A request travels outward through them to the network and the response travels back through them in reverse order. The cache at 900 short-circuits, returning a response without reaching the network.">
+            <defs>
+              <marker id="c1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+              </marker>
+              <marker id="c1k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="var(--blueprint)"/>
+              </marker>
+              <marker id="c1s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="var(--signal)"/>
+              </marker>
+            </defs>
+
+            <text class="dl-sm" x="60" y="34">order</text>
+            <text class="dl-sm" x="176" y="34" text-anchor="middle">500</text>
+            <text class="dl-sm" x="356" y="34" text-anchor="middle">550</text>
+            <text class="dl-sm" x="536" y="34" text-anchor="middle">900</text>
+
+            <rect class="box" x="96" y="48" width="160" height="150"/>
+            <text class="dl" x="176" y="72" text-anchor="middle">offsite</text>
+
+            <rect class="box" x="276" y="48" width="160" height="150"/>
+            <text class="dl" x="356" y="72" text-anchor="middle">retry</text>
+
+            <rect class="box-key" x="456" y="48" width="160" height="150"/>
+            <text class="dl-key" x="536" y="72" text-anchor="middle">cache</text>
+
+            <rect class="box" x="668" y="48" width="128" height="150"/>
+            <text class="dl" x="732" y="72" text-anchor="middle">network</text>
+
+            <line class="ln" x1="30" y1="112" x2="92" y2="112" marker-end="url(#c1)"/>
+            <line class="ln" x1="256" y1="112" x2="272" y2="112" marker-end="url(#c1)"/>
+            <line class="ln" x1="436" y1="112" x2="452" y2="112" marker-end="url(#c1)"/>
+            <line class="ln" x1="616" y1="112" x2="664" y2="112" marker-end="url(#c1)"/>
+            <text class="dl-sm" x="30" y="102">request</text>
+
+            <line class="ln" x1="664" y1="152" x2="620" y2="152" marker-end="url(#c1)"/>
+            <line class="ln" x1="452" y1="152" x2="440" y2="152" marker-end="url(#c1)"/>
+            <line class="ln" x1="272" y1="152" x2="260" y2="152" marker-end="url(#c1)"/>
+            <line class="ln" x1="92" y1="152" x2="34" y2="152" marker-end="url(#c1)"/>
+            <text class="dl-sm" x="30" y="172">response</text>
+
+            <path class="ln-key dash" d="M536 132 L536 176 L400 176 L400 152" marker-end="url(#c1k)"/>
+            <text class="dl-key" x="470" y="196" text-anchor="middle">a hit answers here</text>
+
+            <path class="ln-sig dash" d="M176 132 L176 236" marker-end="url(#c1s)"/>
+            <text class="dl-sig" x="192" y="240">a drop ends here</text>
+
+            <text class="dl-sm" x="30" y="278">low order is nearest the spider · high order is nearest the network</text>
+          </svg>
+        </div>
+        <figcaption>The same three links, seen twice. On the way out they run
+        low to high; on the way back, high to low. A cache hit returns without
+        calling the rest, so the links outside it still see a response and the
+        links inside it never ran.</figcaption>
+      </figure>
+
+      <p>The numbers are Scrapy's, because copying a known-good ordering is
+      cheaper than rediscovering it, and the reasoning transfers with them.
+      <code>cache</code> at 900 is the last thing before the network, so a hit
+      short-circuits the fetch only after every other request middleware has had
+      its say: a URL the offsite rule would drop is dropped whether or not it
+      happens to be cached.</p>
+
+      <h2>Two things every link may do</h2>
+
+      <p><strong>Short-circuit:</strong> return a result without calling the
+      rest. A cache hit is this and nothing more.</p>
+
+      <p><strong>Drop:</strong> return <code>ErrDrop</code>. Refusing a URL out
+      of scope is this. It is a sentinel rather than an ordinary error because a
+      dropped request is a normal outcome of a working crawl, and counting it as
+      a failure would make every politely behaved crawl look broken.</p>
+
+      <p>Both are in the contract from the start because neither can be added to
+      it later without changing every link ever written.</p>
+
+      <p>They also fall out of wrapping rather than needing anything added. The
+      alternative shape, a pair of <code>Request</code> and <code>Response</code>
+      methods, is worse in three ways: it needs a convention for a link that
+      wants to short-circuit, it makes a link that needs state across the two
+      directions stash it somewhere, and it cannot express "run this on the way
+      back even though the way out failed", which is what a timer and a stats
+      counter both want.</p>
+
+      <pre><code class="go">func timing(next Handler) Handler {
+    return HandlerFunc(func(ctx context.Context, req *Request) (*Response, error) {
+        started := time.Now()               // on the way out
+        resp, err := next.Handle(ctx, req)
+        log.Println(time.Since(started))    // on the way back
+        return resp, err
+    })
+}</code></pre>
+    </section>
+
+    <section class="page">
+      <h2>From a list of names to a chain that runs</h2>
+
+      <p>The job document can say a job wants a plugin called
+      <code>cache</code> at 900. The chain machinery can run an ordered set of
+      middleware. Neither of them can answer whether <code>cache</code> is a
+      thing that exists.</p>
+
+      <figure>
+        <div class="well">
+          <svg viewBox="0 0 900 292" role="img" aria-label="Plugin names from the job document are resolved against a registry of what this node has compiled in. Names that resolve become ordered links wrapping the core; a name nothing implements refuses the whole chain.">
+            <defs>
+              <marker id="s1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+              </marker>
+              <marker id="s1s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="var(--signal)"/>
+              </marker>
+            </defs>
+
+            <rect class="box" x="24" y="52" width="186" height="120"/>
+            <text class="dl" x="40" y="76">the job says</text>
+            <text class="dl-sm" x="40" y="100">plugin "offsite"</text>
+            <text class="dl-sm" x="40" y="118">plugin "cache"</text>
+            <text class="dl-sig" x="40" y="140">plugin "sentiment"</text>
+            <text class="dl-sm" x="40" y="162">names, and nothing more</text>
+
+            <line class="ln" x1="210" y1="112" x2="266" y2="112" marker-end="url(#s1)"/>
+
+            <rect class="box-key" x="270" y="52" width="186" height="120"/>
+            <text class="dl-key" x="286" y="76">this node has</text>
+            <text class="dl-sm" x="286" y="100">offsite</text>
+            <text class="dl-sm" x="286" y="118">cache</text>
+            <text class="dl-sm" x="286" y="136">retry</text>
+            <text class="dl-sm" x="286" y="162">whatever was compiled in</text>
+
+            <line class="ln" x1="456" y1="94" x2="516" y2="94" marker-end="url(#s1)"/>
+            <text class="dl-sm" x="466" y="86">two resolve</text>
+
+            <path class="ln-sig" d="M456 140 L516 140" marker-end="url(#s1s)"/>
+            <text class="dl-sig" x="466" y="132">one does not</text>
+
+            <rect class="box" x="520" y="52" width="176" height="76"/>
+            <text class="dl" x="608" y="78" text-anchor="middle">ordered links</text>
+            <text class="dl-sm" x="608" y="98" text-anchor="middle">offsite 500 · cache 900</text>
+            <text class="dl-sm" x="608" y="116" text-anchor="middle">wrapping the fetch</text>
+
+            <rect class="box-sig" x="520" y="146" width="356" height="56"/>
+            <text class="dl-sig" x="536" y="170">the whole chain is refused</text>
+            <text class="dl-sm" x="536" y="190">and told which names, all of them at once</text>
+
+            <text class="dl-sm" x="24" y="240">validation runs offline and in CI, where there is no way to know what some other node compiled in.</text>
+            <text class="dl-sm" x="24" y="258">this runs in the process that has the implementations, which is the first place the question can be asked.</text>
+          </svg>
+        </div>
+        <figcaption>The seam. It is the first place a job naming a plugin
+        nothing implements is refused, and it refuses the whole chain rather
+        than running a partial one.</figcaption>
+      </figure>
+
+      <p>Every missing name is reported at once, along with what the node does
+      have. A job loading six plugins on a node with four of them should be told
+      which two, not sent round the loop twice.</p>
+
+      <p>The chain that comes back owns whatever its plugins opened. A cache
+      plugin holding a bucket has nowhere to put a <code>Close</code>, because
+      what a plugin hands back is a function and a function has nowhere to keep
+      a method; so it registers one with the chain, and the chain closes them
+      last opened first when the job stops. A chain refused halfway closes what
+      it had already opened before it returns, because the caller has no chain
+      to close it with.</p>
+
+      <h2>Where middleware conventionally sits</h2>
+
+      <p>A catalogue of positions, not a list of working parts. A name in it is
+      a claim about where something would go if it existed. What exists is what
+      a registry says exists, and that is asked when a chain is built.</p>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>Order</th><th>Downloader</th><th>Order</th><th>Spider</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="num">500</td><td><code>offsite</code></td><td class="num">50</td><td><code>httperror</code></td></tr>
+            <tr><td class="num">520</td><td><code>contenttype</code></td><td class="num">300</td><td><code>topic</code></td></tr>
+            <tr><td class="num">543</td><td><code>cookies</code></td><td class="num">500</td><td><code>offsite</code></td></tr>
+            <tr><td class="num">544</td><td><code>auth</code></td><td class="num">700</td><td><code>referer</code></td></tr>
+            <tr><td class="num">550</td><td><code>retry</code></td><td class="num">800</td><td><code>urllength</code></td></tr>
+            <tr><td class="num">560</td><td><code>headers</code></td><td class="num">900</td><td><code>depth</code></td></tr>
+            <tr><td class="num">580</td><td><code>metarefresh</code></td><td></td><td></td></tr>
+            <tr><td class="num">610</td><td><code>proxy</code></td><td></td><td></td></tr>
+            <tr><td class="num">850</td><td><code>stats</code></td><td></td><td></td></tr>
+            <tr><td class="num">900</td><td><code>cache</code></td><td></td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <span class="tag">Not in the table</span>
+        <p>Decoding, robots and redirects. Each of them has exactly one correct
+        position, and a position that can be configured is a position that can
+        be configured wrongly. The next chapter is about what that means for a
+        request.</p>
+      </div>
+    </section>
+
+  <nav class="pager">
+    <a class="prev" href="job.html"><span class="dir">Back</span>One document, everything in it</a>
+    <a class="next" href="downloader.html"><span class="dir">Next</span>Fetching, politely</a>
+  </nav>
+  </main>
+</div>
+</body>
+</html>

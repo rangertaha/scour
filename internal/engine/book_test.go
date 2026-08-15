@@ -4,6 +4,7 @@ package engine_test
 
 import (
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -36,28 +37,29 @@ import (
 // tables, the pipeline kinds and the vocabulary, with a test per claim. NOTES.md
 // is gone and the book is what is left, so the checks were repointed here rather
 // than deleted with it. The tables they read are the same tables: the downloader
-// and the spider are printed side by side in chains.md, and the scheduler's own
-// in frontier.md, because ordering the queue is what that chapter is about.
+// and the spider are printed side by side in chains.html, and the scheduler's own
+// in frontier.html, because ordering the queue is what that chapter is about.
 //
-// # Markdown, and what that changed
+// # HTML, and what that changed
 //
-// The book was hand-written HTML with inline SVG, and is now Markdown with
-// mermaid, read on GitHub rather than served as a site. The checks that were
-// about being a website went with it: there is no stylesheet to link, no
-// doctype, no viewBox to fall outside of, and no sidebar repeated in ten files.
-// What replaced them is smaller and covers the same failures: a link that goes
-// nowhere, a chapter nothing reaches, a running order that disagrees with
-// itself, and a diagram that is empty.
+// The book was Markdown with mermaid for a while, and is hand-written HTML with
+// inline SVG again, served as a site with no build step. The checks that only a
+// website needs came back with it: a stylesheet that is linked, a doctype, a
+// viewBox nothing falls outside of, and a sidebar that is the same in every
+// chapter. GitHub's Markdown sanitiser strips inline <svg>, and Pages with
+// .nojekyll serves a .md file as raw text, so the two forms cannot both be rich
+// and there is no third option without a build step.
 //
 // The checks about the *content* did not change at all, which is the argument
-// for having written them against the text rather than against the markup.
+// for having written them against the text rather than against the markup: a
+// table is a table whether its cells are pipes or <td>.
 
 const bookDir = "../../docs"
 
 func bookPages(t *testing.T) map[string]string {
 	t.Helper()
 
-	paths, err := filepath.Glob(filepath.Join(bookDir, "*.md"))
+	paths, err := filepath.Glob(filepath.Join(bookDir, "*.html"))
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
@@ -77,24 +79,31 @@ func bookPages(t *testing.T) map[string]string {
 }
 
 var (
-	// A fenced block, with the language it claims to be.
-	fenced = regexp.MustCompile("(?s)```([a-z]*)\n(.*?)\n```")
+	// A printed block, and the language it claims to be. An untagged block is
+	// a console transcript or a listing, which no parser should be handed.
+	codeBlock = regexp.MustCompile(`(?s)<pre><code(?: class="([a-z]+)")?>(.*?)</code></pre>`)
 
-	// A markdown link to another chapter, which is the only kind that can rot.
-	chapterLink = regexp.MustCompile(`\]\((([a-z]+)\.md)\)`)
+	// A link to another chapter, which is the only kind that can rot.
+	chapterLink = regexp.MustCompile(`href="(([a-z]+)\.html)"`)
 
 	// A position and the plugin it belongs to, as the book's tables print them.
-	placement = regexp.MustCompile(`\|\s*(\d+)\s*\|\s*` + "`" + `([a-z]+)` + "`" + `\s*\|`)
+	placement = regexp.MustCompile(`<td class="num">(\d+)</td><td><code>([a-z]+)</code></td>`)
 
 	exporterOf = regexp.MustCompile(`exporter\s+"[a-z]+"\s+"([a-z_]+)"`)
 )
 
-// blocks returns every fenced block in a page that claims the given language.
+// blocks returns every printed block in a page that claims the given language,
+// as a reader would copy it: unescaped, because &lt; in the markup is < on the
+// page and a parser handed the markup would refuse it.
+//
+// The class is the language tag. Markdown had one on every fence and HTML has
+// none, so it is written on the blocks that are meant to parse; the rest are
+// console transcripts and command listings, which are not anybody's syntax.
 func blocks(page, language string) []string {
 	var out []string
-	for _, m := range fenced.FindAllStringSubmatch(page, -1) {
+	for _, m := range codeBlock.FindAllStringSubmatch(page, -1) {
 		if m[1] == language {
-			out = append(out, m[2])
+			out = append(out, html.UnescapeString(m[2]))
 		}
 	}
 	return out
@@ -388,7 +397,7 @@ var (
 	counted = regexp.MustCompile(`([A-Za-z]+) (?:kinds of thing|stores)`)
 
 	// The rows of the storage map, which is the table it is counting.
-	storeRow = regexp.MustCompile(`(?m)^\| [^|]+ \| (?:The cache|NATS KV|SQLite|Files|Whatever)`)
+	storeRow = regexp.MustCompile(`<tr><td>[^<]+</td><td>(?:The cache|NATS KV|SQLite|Files|Whatever)`)
 )
 
 var numberWords = map[string]int{
@@ -407,9 +416,9 @@ var numberWords = map[string]int{
 func TestBookCountsTheStoresItLists(t *testing.T) {
 	pages := bookPages(t)
 
-	rows := len(storeRow.FindAllString(pages["storage.md"], -1))
+	rows := len(storeRow.FindAllString(pages["storage.html"], -1))
 	if rows == 0 {
-		t.Fatal("storage.md has no store rows, so this check is not checking anything")
+		t.Fatal("storage.html has no store rows, so this check is not checking anything")
 	}
 
 	var found int
@@ -453,15 +462,15 @@ func TestBookLinksGoSomewhere(t *testing.T) {
 func chapterOrder(t *testing.T, pages map[string]string) []string {
 	t.Helper()
 
-	contents, _, ok := strings.Cut(pages["index.md"], "\n---\n")
+	contents, _, ok := strings.Cut(pages["index.html"], "\n---\n")
 	if !ok {
-		contents = pages["index.md"]
+		contents = pages["index.html"]
 	}
 
 	var order []string
 	seen := map[string]bool{}
 	for _, m := range chapterLink.FindAllStringSubmatch(contents, -1) {
-		if m[1] == "index.md" || seen[m[1]] {
+		if m[1] == "index.html" || seen[m[1]] {
 			continue
 		}
 		seen[m[1]] = true
@@ -470,7 +479,7 @@ func chapterOrder(t *testing.T, pages map[string]string) []string {
 	if len(order) < 2 {
 		t.Fatal("the cover lists fewer than two chapters, so this check is not checking anything")
 	}
-	return append([]string{"index.md"}, order...)
+	return append([]string{"index.html"}, order...)
 }
 
 // TestEveryChapterIsReachable, so a chapter cannot be added and left orphaned,
@@ -495,7 +504,9 @@ func TestEveryChapterIsReachable(t *testing.T) {
 	}
 }
 
-var pagerRel = regexp.MustCompile(`\[(Back|Next): [^\]]+\]\(([a-z]+\.md)\)`)
+// The pager, as the book prints it:
+// <a class="prev" href="cache.html"><span class="dir">Back</span>...
+var pagerRel = regexp.MustCompile(`<a class="(?:prev|next)" href="([a-z]+\.html)"><span class="dir">(Back|Next)</span>`)
 
 // TestThePagerChainIsWhole.
 //
@@ -509,7 +520,7 @@ func TestThePagerChainIsWhole(t *testing.T) {
 	for i, name := range order {
 		links := map[string]string{}
 		for _, m := range pagerRel.FindAllStringSubmatch(pages[name], -1) {
-			links[m[1]] = m[2]
+			links[m[2]] = m[1]
 		}
 
 		want := map[string]string{}
@@ -533,120 +544,37 @@ func TestThePagerChainIsWhole(t *testing.T) {
 	}
 }
 
-// TestEveryChapterIsWholeAndAccessible covers the handful of things that are
-// easy to leave out of one chapter and impossible to see without opening all of
-// them.
-func TestEveryChapterIsWholeAndAccessible(t *testing.T) {
-	for name, page := range bookPages(t) {
-		t.Run(name, func(t *testing.T) {
-			if !strings.HasPrefix(page, "# ") {
-				t.Error("does not open with its title")
-			}
-
-			// The house style has no em dashes.
-			if strings.Contains(page, "—") {
-				t.Error("an em dash got in")
-			}
-
-			// A mermaid diagram renders as a picture and nothing else, so
-			// somebody who cannot see it gets nothing unless the chapter says
-			// what it shows. That description is the alt text this book used to
-			// carry in aria-label, and it must not be lost.
-			drawings := len(blocks(page, "mermaid"))
-			described := strings.Count(page, "<summary>What this diagram shows</summary>")
-			if drawings != described {
-				t.Errorf("%d diagrams and %d descriptions of one", drawings, described)
-			}
-		})
-	}
-}
-
-// TestEveryDiagramIsADiagram.
-//
-// A mermaid block that does not begin with a diagram type renders as an error
-// box on GitHub, in the place where the picture should be. It is the one
-// failure that looks worse to a reader than having no diagram at all, and it
-// cannot be seen by reading the Markdown.
-func TestEveryDiagramIsADiagram(t *testing.T) {
-	kinds := []string{"flowchart", "graph", "sequenceDiagram", "erDiagram",
-		"classDiagram", "stateDiagram", "journey", "gantt", "pie"}
-
-	var checked int
-	for name, page := range bookPages(t) {
-		for i, drawing := range blocks(page, "mermaid") {
-			checked++
-			first, _, _ := strings.Cut(strings.TrimSpace(drawing), "\n")
-
-			var ok bool
-			for _, kind := range kinds {
-				if strings.HasPrefix(first, kind) {
-					ok = true
-					break
-				}
-			}
-			if !ok {
-				t.Errorf("%s: diagram %d starts with %q, which is not a mermaid diagram", name, i+1, first)
-			}
-			if len(strings.Split(strings.TrimSpace(drawing), "\n")) < 3 {
-				t.Errorf("%s: diagram %d has nothing in it", name, i+1)
-			}
-		}
-	}
-
-	if checked == 0 {
-		t.Fatal("no diagrams were found, so this test proves nothing")
-	}
-}
-
 // stageTable is the chapter each stage's catalogue is printed in, and the cell
-// its order column starts at. chains.md prints the downloader and the spider
-// side by side as one table with two order columns; frontier.md prints the
+// its order column starts at. chains.html prints the downloader and the spider
+// side by side as one table with two order columns; frontier.html prints the
 // scheduler's own, because ordering the queue is what that chapter is about.
 var stageTable = map[engine.Stage]struct {
 	page string
 	at   int
 }{
-	engine.StageDownloader: {"chains.md", 0},
-	engine.StageSpider:     {"chains.md", 2},
-	engine.StageScheduler:  {"frontier.md", 0},
+	engine.StageDownloader: {"chains.html", 0},
+	engine.StageSpider:     {"chains.html", 1},
+	engine.StageScheduler:  {"frontier.html", 0},
 }
 
-// tableCells splits a Markdown table row into its trimmed cells, or returns nil
-// if the line is not one.
-func tableCells(line string) []string {
-	line = strings.TrimSpace(line)
-	if len(line) < 2 || !strings.HasPrefix(line, "|") || !strings.HasSuffix(line, "|") {
-		return nil
-	}
-	cells := strings.Split(strings.TrimSuffix(strings.TrimPrefix(line, "|"), "|"), "|")
-	for i := range cells {
-		cells[i] = strings.TrimSpace(cells[i])
-	}
-	return cells
-}
+// tableRow is one row of any table in the book.
+var tableRow = regexp.MustCompile(`(?s)<tr>(.*?)</tr>`)
 
-// placedAt reads the plugin named in the cell after `at`, when the cell at `at`
-// is an order.
+// placedAt reads the nth order-and-plugin pair out of a row.
 //
-// It reports false for anything that is not that pair, which is how the other
-// tables in these chapters are skipped without naming them: a separator row, the
-// lease benchmark, the exit codes. A table that stops being a catalogue stops
-// being read rather than being read wrongly.
-func placedAt(cells []string, at int) (string, bool) {
-	if at+1 >= len(cells) {
+// chains.html prints two catalogues side by side, so a row there carries a
+// downloader pair at 0 and a spider pair at 1. It reports false for anything
+// that is not such a pair, which is how the other tables in these chapters are
+// skipped without naming them: a header, the lease benchmark, the exit codes. A
+// table that stops being a catalogue stops being read rather than being read
+// wrongly.
+func placedAt(row string, at int) (string, bool) {
+	pairs := placement.FindAllStringSubmatch(row, -1)
+	if at >= len(pairs) {
 		return "", false
 	}
-	m := backticked.FindStringSubmatch(cells[at+1])
-	if m == nil {
-		return "", false
-	}
-	if _, err := strconv.Atoi(cells[at]); err != nil {
-		return "", false
-	}
-	return m[1], true
+	return pairs[at][2], true
 }
-
-var backticked = regexp.MustCompile("^`([a-z_]+)`$")
 
 // TestBookCataloguesEveryPluginTheCodeShips is the direction the other two
 // catalogue checks cannot walk.
@@ -671,8 +599,8 @@ func TestBookCataloguesEveryPluginTheCodeShips(t *testing.T) {
 			}
 
 			said := map[string]bool{}
-			for _, line := range strings.Split(page, "\n") {
-				if name, ok := placedAt(tableCells(line), where.at); ok {
+			for _, row := range tableRow.FindAllStringSubmatch(page, -1) {
+				if name, ok := placedAt(row[1], where.at); ok {
 					said[name] = true
 				}
 			}
@@ -691,8 +619,8 @@ func TestBookCataloguesEveryPluginTheCodeShips(t *testing.T) {
 	}
 }
 
-// | `clean` | Rule-driven tidying | Built |
-var kindRow = regexp.MustCompile("(?m)^\\|\\s*`([a-z]+)`\\s*\\|[^|]*\\|\\s*(Built|Catalogued)\\s*\\|")
+// <tr><td><code>clean</code></td><td>Rule-driven tidying</td><td>Built</td></tr>
+var kindRow = regexp.MustCompile(`<tr><td><code>([a-z]+)</code></td><td>.*?</td><td>(Built|Catalogued)</td></tr>`)
 
 // TestBookSaysWhichKindsAreBuilt holds the pipeline's kinds table to both lists
 // that could disagree with it.
@@ -707,7 +635,7 @@ var kindRow = regexp.MustCompile("(?m)^\\|\\s*`([a-z]+)`\\s*\\|[^|]*\\|\\s*(Buil
 // it, so a check that read only one of them could not have noticed the other
 // going stale.
 func TestBookSaysWhichKindsAreBuilt(t *testing.T) {
-	page := bookPages(t)["pipeline.md"]
+	page := bookPages(t)["pipeline.html"]
 
 	built := map[string]bool{}
 	for _, kind := range pipeline.Registered() {
@@ -724,25 +652,25 @@ func TestBookSaysWhichKindsAreBuilt(t *testing.T) {
 
 		switch {
 		case state == "Built" && !built[kind]:
-			t.Errorf("pipeline.md says the %q step is built, and nothing registers one", kind)
+			t.Errorf("pipeline.html says the %q step is built, and nothing registers one", kind)
 		case state == "Catalogued" && built[kind]:
-			t.Errorf("pipeline.md calls the %q step catalogued, and this build runs it", kind)
+			t.Errorf("pipeline.html calls the %q step catalogued, and this build runs it", kind)
 		}
 	}
 	if len(said) == 0 {
-		t.Fatal("pipeline.md has no kinds table with a state column, so this check is not checking it")
+		t.Fatal("pipeline.html has no kinds table with a state column, so this check is not checking it")
 	}
 
 	for kind := range built {
 		if !said[kind] {
-			t.Errorf("pipeline.md leaves the %q step out of its kinds table", kind)
+			t.Errorf("pipeline.html leaves the %q step out of its kinds table", kind)
 		}
 	}
 	catalogued := map[string]bool{}
 	for _, kind := range engine.PipelineKindNames() {
 		catalogued[kind] = true
 		if !said[kind] {
-			t.Errorf("the code catalogues pipeline kind %q, which pipeline.md does not document", kind)
+			t.Errorf("the code catalogues pipeline kind %q, which pipeline.html does not document", kind)
 		}
 	}
 	for kind := range built {
@@ -831,11 +759,11 @@ func TestBookStageListsMatchTheCode(t *testing.T) {
 	if engine.StagePipeline.ValidPlugin() {
 		t.Error("the code allows pipeline plugins, which the book says it does not")
 	}
-	if !strings.Contains(pages["pipeline.md"], "Not a plugin stage") {
-		t.Error("pipeline.md no longer says the pipeline is not a plugin stage")
+	if !strings.Contains(pages["pipeline.html"], "Not a plugin stage") {
+		t.Error("pipeline.html no longer says the pipeline is not a plugin stage")
 	}
-	if !strings.Contains(pages["pipeline.md"], "step <kind> <name>") {
-		t.Error("pipeline.md no longer documents the step spelling")
+	if !strings.Contains(pages["pipeline.html"], "step &lt;kind&gt; &lt;name&gt;") {
+		t.Error("pipeline.html no longer documents the step spelling")
 	}
 
 	// The scheduler may be extended and not replaced, because politeness is per
@@ -843,13 +771,179 @@ func TestBookStageListsMatchTheCode(t *testing.T) {
 	if engine.StageScheduler.ValidExternal() {
 		t.Error("the code allows an external scheduler, which the book says it does not")
 	}
-	if !strings.Contains(pages["index.md"], "one stage a job may not replace") {
-		t.Error("index.md no longer says the scheduler cannot be replaced")
+	if !strings.Contains(pages["index.html"], "one stage a job may not replace") {
+		t.Error("index.html no longer says the scheduler cannot be replaced")
 	}
 	if !engine.StageScheduler.ValidPlugin() {
 		t.Error("the code refuses scheduler plugins, which the book documents a table of")
 	}
-	if !strings.Contains(pages["frontier.md"], "Ordering is a plugin") {
-		t.Error("frontier.md no longer documents the scheduler's plugins")
+	if !strings.Contains(pages["frontier.html"], "Ordering is a plugin") {
+		t.Error("frontier.html no longer documents the scheduler's plugins")
 	}
+}
+
+// TestEveryPageIsWholeAndAccessible.
+//
+// These checks came back with the HTML. A Markdown book had no stylesheet to
+// link and no doctype to forget, and GitHub rendered whatever it was given; a
+// site with no build step is ten hand-written files that have to agree about
+// their own scaffolding, and the way they stop agreeing is that somebody copies
+// a chapter to start a new one and edits the middle.
+func TestEveryPageIsWholeAndAccessible(t *testing.T) {
+	for name, page := range bookPages(t) {
+		t.Run(name, func(t *testing.T) {
+			for _, want := range []string{
+				`<!doctype html>`,
+				`<html lang="en">`,
+				`<meta name="viewport"`,
+				`<link rel="stylesheet" href="book.css">`,
+				`<title>`,
+				`<meta name="description"`,
+			} {
+				if !strings.Contains(page, want) {
+					t.Errorf("no %s", want)
+				}
+			}
+
+			// Every diagram has to say what it shows for a reader who cannot
+			// see it, and a book that is mostly diagrams cannot skip this.
+			for i, svg := range strings.Split(page, "<svg")[1:] {
+				head, _, _ := strings.Cut(svg, ">")
+				if !strings.Contains(head, `role="img"`) || !strings.Contains(head, "aria-label=") {
+					t.Errorf("diagram %d has no role and label", i+1)
+				}
+			}
+
+			// The house style has no em dashes.
+			if strings.Contains(page, "—") {
+				t.Error("an em dash got in")
+			}
+
+			// One sidebar, the same in every chapter, because a chapter that
+			// lists nine of the ten is a chapter you cannot get out of.
+			//
+			// Read from the <nav> alone. The cover repeats every chapter in its
+			// contents list, so a check over the whole page cannot tell a
+			// sidebar that is complete from a sidebar that is missing an entry
+			// the contents happen to carry: dropping the CLI chapter from
+			// index.html's nav left this passing.
+			sidebar, _, _ := strings.Cut(page, "</nav>")
+			for _, chapter := range []string{
+				"index.html", "job.html", "chains.html", "downloader.html",
+				"cache.html", "frontier.html", "items.html", "pipeline.html",
+				"cli.html", "storage.html",
+			} {
+				if !strings.Contains(sidebar, `<li><a href="`+chapter+`"`) {
+					t.Errorf("the sidebar leaves out %s", chapter)
+				}
+			}
+		})
+	}
+}
+
+var (
+	// The root element's own box. Read from the opening tag alone: a <marker>
+	// inside the defs has a viewBox too, and a regex over the whole diagram
+	// finds that one when the root has none, which reads as a tiny box that
+	// everything is outside of, or as an empty diagram that is fine.
+	viewBox = regexp.MustCompile(`viewBox="(-?[\d.]+) (-?[\d.]+) ([\d.]+) ([\d.]+)"`)
+	element = regexp.MustCompile(`(?s)<(rect|line|text|path)\s([^>]*?)/?>`)
+	attr    = regexp.MustCompile(`([a-zA-Z0-9-]+)="([^"]*)"`)
+	number  = regexp.MustCompile(`-?[\d.]+`)
+)
+
+type point struct {
+	what string
+	x, y float64
+}
+
+// TestEveryDiagramFitsItsViewBox.
+//
+// The diagrams are hand-authored, which means every coordinate in them was
+// worked out by arithmetic somebody did in their head. A shape placed outside
+// the viewBox is not a wrong drawing, it is an invisible one, and it looks
+// exactly like a drawing that was never added.
+func TestEveryDiagramFitsItsViewBox(t *testing.T) {
+	var checked int
+
+	for name, page := range bookPages(t) {
+		for i, svg := range strings.Split(page, "<svg")[1:] {
+			svg, _, _ = strings.Cut(svg, "</svg>")
+
+			head, body, _ := strings.Cut(svg, ">")
+			box := viewBox.FindStringSubmatch(head)
+			if box == nil {
+				t.Errorf("%s: diagram %d has no viewBox on its root element", name, i+1)
+				continue
+			}
+			width, height := atof(t, box[3]), atof(t, box[4])
+			checked++
+
+			for _, point := range points(t, body) {
+				if point.x < 0 || point.x > width || point.y < 0 || point.y > height {
+					t.Errorf("%s: diagram %d has %s at (%g, %g), outside its %g by %g box",
+						name, i+1, point.what, point.x, point.y, width, height)
+				}
+			}
+		}
+	}
+
+	if checked == 0 {
+		t.Fatal("no diagrams were found, so this test proves nothing")
+	}
+}
+
+// points lists every coordinate a diagram places something at. Text is measured
+// at its anchor rather than its extent, because how wide a word renders is the
+// font's business and not something a test can know.
+func points(t *testing.T, svg string) []point {
+	t.Helper()
+
+	var out []point
+	for _, el := range element.FindAllStringSubmatch(svg, -1) {
+		tag, rest := el[1], el[2]
+
+		attrs := map[string]string{}
+		for _, a := range attr.FindAllStringSubmatch(rest, -1) {
+			attrs[a[1]] = a[2]
+		}
+
+		switch tag {
+		case "rect":
+			x, y := atof(t, attrs["x"]), atof(t, attrs["y"])
+			out = append(out,
+				point{"a rect corner", x, y},
+				point{"a rect corner", x + atof(t, attrs["width"]), y + atof(t, attrs["height"])})
+
+		case "line":
+			out = append(out,
+				point{"a line end", atof(t, attrs["x1"]), atof(t, attrs["y1"])},
+				point{"a line end", atof(t, attrs["x2"]), atof(t, attrs["y2"])})
+
+		case "text":
+			out = append(out, point{"a label", atof(t, attrs["x"]), atof(t, attrs["y"])})
+
+		case "path":
+			// Absolute M and L only, which is all these diagrams use, so the
+			// numbers in d are x and y in turn.
+			d := number.FindAllString(attrs["d"], -1)
+			for i := 0; i+1 < len(d); i += 2 {
+				out = append(out, point{"a path point", atof(t, d[i]), atof(t, d[i+1])})
+			}
+		}
+	}
+	return out
+}
+
+func atof(t *testing.T, s string) float64 {
+	t.Helper()
+
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		t.Fatalf("%q is not a number", s)
+	}
+	return v
 }
