@@ -466,6 +466,6 @@ func TestContract(t *testing.T) {
 		if err != nil {
 			t.Fatalf("new: %v", err)
 		}
-		return set
+		return exportertest.Only(t, set)
 	})
 }

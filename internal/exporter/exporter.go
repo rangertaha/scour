@@ -262,6 +262,24 @@ func (s *Set) Close() error {
 	return joinAll(problems)
 }
 
+// Exporters lists the formats this set was built from, in the order declared.
+//
+// It exists so a format can be handed to its contract suite as itself. Building
+// one from a job document is the realistic way to make it, because that is the
+// path that decodes its block, but what comes back is a Set, and a Set in front
+// of a format answers three of the suite's five questions itself: its own Write
+// refuses after close, its own Close is idempotent, and its own filter keeps
+// another item's records away. Every wiring passed the Set, so the suite spent
+// its life exercising this file and never the six formats under it. See
+// [exportertest.Only].
+func (s *Set) Exporters() []Exporter {
+	out := make([]Exporter, 0, len(s.writers))
+	for _, writer := range s.writers {
+		out = append(out, writer.exporter)
+	}
+	return out
+}
+
 // Addresses lists what this set writes, which is what a run reports at the end.
 func (s *Set) Addresses() []string {
 	out := make([]string, 0, len(s.writers))

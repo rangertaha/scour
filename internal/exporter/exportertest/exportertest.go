@@ -42,17 +42,66 @@ import (
 )
 
 // Open builds an exporter for one test, in a directory of that test's own.
+//
+// It has to return the format itself. See [Only], and the guard in [Run] that
+// refuses anything else.
 type Open func(t *testing.T, dir string) exporter.Exporter
+
+// Only returns the one format a job document declared.
+//
+// Building through [exporter.New] is the right way to make a format, because it
+// is the path that decodes the format's own block, and getting that wrong is
+// what this suite is for. What it returns is a Set, and handing the Set back is
+// the mistake [Run] refuses: three of the five checks below would then be
+// answered by the Set and never reach the format.
+func Only(t *testing.T, set *exporter.Set) exporter.Exporter {
+	t.Helper()
+
+	built := set.Exporters()
+	if len(built) != 1 {
+		t.Fatalf("the contract suite wants one exporter to test, and the document declared %d", len(built))
+	}
+	return built[0]
+}
 
 // Run puts an exporter through the contract.
 func Run(t *testing.T, open Open) {
 	t.Helper()
 
+	open = itself(open)
+
 	t.Run("CloseWithNothingWritten", func(t *testing.T) { testCloseEmpty(t, open) })
 	t.Run("CloseIsIdempotent", func(t *testing.T) { testCloseTwice(t, open) })
 	t.Run("WriteAfterCloseIsRefused", func(t *testing.T) { testWriteAfterClose(t, open) })
 	t.Run("WriteWithNoRecordsIsFine", func(t *testing.T) { testWriteNothing(t, open) })
-	t.Run("AnotherItemsRecordIsNotWritten", func(t *testing.T) { testOtherItem(t, open) })
+	t.Run("AnotherItemsRecordIsNotAnError", func(t *testing.T) { testOtherItem(t, open) })
+}
+
+// itself refuses an [exporter.Set] where a format was asked for.
+//
+// # Why this guard exists
+//
+// Because every one of the five wirings passed a Set, and the suite passed, and
+// it was testing [exporter.Set] five times over. A Set satisfies
+// [exporter.Exporter], so nothing complained: its Write refuses after close, its
+// Close is idempotent, and its Write filters by item, which is precisely
+// CloseIsIdempotent, WriteAfterCloseIsRefused and AnotherItemsRecordIsNotAnError.
+// Deleting a format's own closed guard left this suite green.
+//
+// A comment saying "pass the format" would have been read by whoever wrote the
+// sixth wiring and by nobody else. This is checked, so the next one fails.
+func itself(open Open) Open {
+	return func(t *testing.T, dir string) exporter.Exporter {
+		t.Helper()
+
+		built := open(t, dir)
+		if set, ok := built.(*exporter.Set); ok {
+			t.Fatalf("the contract suite was handed an *exporter.Set of %d exporter(s), not a format.\n"+
+				"A Set answers this suite's questions itself and the format under it is never asked one.\n"+
+				"Wrap the call in exportertest.Only(t, set).", len(set.Exporters()))
+		}
+		return built
+	}
 }
 
 // testCloseEmpty: an export that received nothing still has to be finished.
@@ -118,11 +167,21 @@ func testWriteNothing(t *testing.T, open Open) {
 	}
 }
 
-// testOtherItem: a record for another item is ignored, not written.
+// testOtherItem: a record for another item is not an error.
 //
-// An exporter is named for one item and a run hands every exporter every
-// record, so this is the ordinary path and not an edge case. Writing another
-// item's record would put values under column names that mean something else.
+// # What this does and does not promise
+//
+// It used to be called "ignored, not written", and no format keeps that
+// promise: not one of the six looks at [record.Record.Item], so every one of
+// them writes whatever it is handed. The check never noticed because it only
+// asserts Write returns nil, and it was reading an [exporter.Set] at the time,
+// which does filter.
+//
+// Routing is the Set's job and belongs in one place rather than in six, so the
+// promise stays where it is and this suite states the weaker thing that is
+// actually true: a format handed a record it was not built for must not fail
+// the run over it. TestOneExporterPerItem in the exporter package is what holds
+// the filter itself, by asserting the foreign value never reaches the output.
 func testOtherItem(t *testing.T, open Open) {
 	e := open(t, t.TempDir())
 

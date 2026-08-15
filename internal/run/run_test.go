@@ -980,3 +980,49 @@ func (f *partialFrontier) Add(ctx context.Context, job string, reqs ...frontier.
 	}
 	return added, nil
 }
+
+// TestClosingACrawlTwiceIsSafeAndSaysTheSameThing.
+//
+// `scour run` closes explicitly so a failed flush is reported before the summary
+// claims what was written, and closes again from a deferred call covering the
+// paths that return earlier. The successful path therefore closes twice.
+//
+// That was justified at the call site by "every exporter's Close is idempotent",
+// which reasoned about one of the five things a run closes. The cache underneath
+// was not: the object-storage backend answered the second call with "Bucket has
+// been closed", on every completed crawl backed by S3 or GCS, into a deferred
+// call with nowhere to report it.
+//
+// So the guarantee belongs to [run.Run.Close] rather than to the five closers
+// under it, and this pins it there.
+//
+// # What this does not prove
+//
+// It passes with the sync.Once removed, and it is worth saying so rather than
+// leaving somebody to discover it. This wiring's closers are each idempotent
+// already: a local cache returns nil however often it is asked, and the
+// frontier and the entity graph both close a database/sql handle, which is
+// idempotent by contract. The one that failed was the object-storage cache, and
+// reaching it from here means standing up a bucket for a question about calling
+// a method twice.
+//
+// CloseIsIdempotent in [cachetest] is what catches that class, at the level
+// where it can actually fail, and it did fail there before the backend was
+// fixed. This is the regression guard for the run's own contract: that Close
+// may be called twice at all, which is what the deferred call in `scour run`
+// depends on.
+func TestClosingACrawlTwiceIsSafeAndSaysTheSameThing(t *testing.T) {
+	server, _ := site(t)
+
+	r, _ := crawl(t, document(t, server, `
+  exporter "jsonlines" "article" {}
+`), "")
+
+	first := r.Close()
+	if first != nil {
+		t.Fatalf("first close: %v", first)
+	}
+	if second := r.Close(); second != nil {
+		t.Errorf("second close reported %v, and the deferred call that makes it has nowhere to say so", second)
+	}
+}

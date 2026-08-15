@@ -187,9 +187,15 @@ func runCrawl(ctx context.Context, a *App, path, jobName, dir string, verbose, f
 	// pipeline reading the exit code treated the run as complete.
 	//
 	// Closed before the summary rather than checked after it, so that what the
-	// summary claims and what is on disk cannot disagree. Closing twice is
-	// safe: every exporter's Close is idempotent, so the deferred one stays as
-	// the net for the paths that return early.
+	// summary claims and what is on disk cannot disagree. The deferred Close
+	// above stays as the net for the paths that return early, so this one is
+	// the second call on the successful path.
+	//
+	// Closing twice is safe because [run.Run.Close] makes it safe, not because
+	// the things under it happen to be. This comment used to say "every
+	// exporter's Close is idempotent", which was true and covered one of the
+	// five closers: the cache was not, and an S3-backed crawl closed a bucket
+	// twice on every successful run.
 	if err := crawl.Close(); err != nil {
 		return Failedf("%v", err)
 	}

@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"sync"
 
 	gcblob "gocloud.dev/blob"
 	"gocloud.dev/gcerrors"
@@ -32,6 +33,12 @@ type Store struct {
 	// keeping a second handle to the unprefixed bucket and closing that instead
 	// is what leaked one bucket per job.
 	bucket *gcblob.Bucket
+
+	// closed makes Close idempotent. Guarded because a store is shared by the
+	// downloader and the spider, which are concurrent, and the contract's own
+	// Concurrent case drives them that way.
+	mu     sync.Mutex
+	closed bool
 }
 
 // Open returns a store over the bucket named by a gocloud URL, such as
@@ -190,7 +197,23 @@ func (s *Store) Keys(ctx context.Context) iter.Seq2[string, error] {
 // perfectly healthy store and left the driver open: a process opening one cache
 // per job leaked a bucket per job, and the store went on serving reads after
 // Close because the wrapper had never been told.
+// Closing twice is not an error. `scour run` closes its crawl explicitly, so a
+// failure to flush is reported before the summary says what was written, and
+// again from a deferred call covering the paths that return earlier. The
+// successful path therefore closes every store twice, and a deferred Close has
+// nowhere to report an error, so the second one was discarded in silence: this
+// returned "Bucket has been closed" on every completed crawl backed by S3 or
+// GCS. The local backend returns nil however often it is called, which is why
+// nothing showed up on a laptop.
 func (s *Store) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+
 	if err := s.bucket.Close(); err != nil {
 		return fmt.Errorf("cache/blob: close: %w", err)
 	}

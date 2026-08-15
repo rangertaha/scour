@@ -44,6 +44,51 @@ func Run(t *testing.T, open Open) {
 	t.Run("AFailedPutKeepsThePrevious", func(t *testing.T) { testFailedPutKeepsPrevious(t, open) })
 	t.Run("Keys", func(t *testing.T) { testKeys(t, open) })
 	t.Run("Concurrent", func(t *testing.T) { testConcurrent(t, open) })
+	t.Run("Close", func(t *testing.T) { testClose(t, open) })
+	t.Run("CloseIsIdempotent", func(t *testing.T) { testCloseTwice(t, open) })
+}
+
+// testClose: a store that was opened can be closed.
+//
+// # Why this was missing, and why that mattered
+//
+// Close was the one method of [cache.Store] this suite never called. It is also
+// the one with a regression already recorded against it: the object-storage
+// backend closed the underlying bucket rather than the prefixed wrapper in front
+// of it, which returned "Bucket has been closed" on a healthy store, leaked a
+// bucket per job in a process opening one cache per job, and went on serving
+// reads afterwards because the wrapper had never been told it was shut.
+//
+// That defect was caught by one backend's private tests, which is exactly the
+// arrangement this package exists to replace: a promise checked for one
+// implementation is a promise the others are free to break.
+func testClose(t *testing.T, open Open) {
+	if err := open(t).Close(); err != nil {
+		t.Errorf("closing a store: %v", err)
+	}
+}
+
+// testCloseTwice: Close is idempotent.
+//
+// Not hypothetical, and not tidiness. `scour run` closes its crawl explicitly so
+// that a failure to flush is reported before the summary claims what was
+// written, and it also closes it from a deferred call that covers the paths
+// returning earlier. The successful path therefore closes twice, and the second
+// error is discarded because a deferred Close has nowhere to report one.
+//
+// So a backend whose second Close fails does so silently, and the run says
+// nothing. A backend that does something worse than fail the second time, such
+// as releasing a handle another store has since been given, has nothing here to
+// stop it.
+func testCloseTwice(t *testing.T, open Open) {
+	s := open(t)
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("first close: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Errorf("second close: %v", err)
+	}
 }
 
 func testRoundTrip(t *testing.T, open Open) {

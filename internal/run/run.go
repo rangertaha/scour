@@ -222,6 +222,12 @@ type Run struct {
 	closeFetch func() error
 	closeRead  func() error
 
+	// shut makes Close idempotent, and shutErr is what the one real close
+	// reported, so a second caller is told the same thing rather than a
+	// cheerful nil. See [Run.Close].
+	shut    sync.Once
+	shutErr error
+
 	mu       sync.Mutex
 	records  []*record.Record
 	exported []*record.Record
@@ -780,7 +786,32 @@ func (r *Run) Stats() *Stats { return &r.stats }
 func (r *Run) Waiting(ctx context.Context) (int, error) { return r.sched.Waiting(ctx) }
 
 // Close releases every stage.
-func (r *Run) Close() error { return r.close() }
+// Close finishes everything the run built: the exporters, the entity graph, the
+// stages it opened and the scheduler.
+//
+// # Closing twice is safe, and that is this function's job rather than a
+// property of what it closes
+//
+// `scour run` closes explicitly before printing its summary, so a flush that
+// failed is reported rather than contradicted by a line claiming what was
+// written, and it also closes from a deferred call covering the paths that
+// return earlier. The successful path therefore closes twice.
+//
+// That was justified in a comment at the call site reading "closing twice is
+// safe: every exporter's Close is idempotent". True, and it reasoned about one
+// of the five things closed here. The cache underneath was not idempotent: the
+// object-storage backend returned "Bucket has been closed" on the second call,
+// on every completed crawl backed by S3 or GCS, into a deferred call with
+// nowhere to report it. The local backend returns nil however often it is
+// asked, which is why no laptop ever saw it.
+//
+// Auditing five closers and writing down the conclusion is how that happens
+// again the moment a sixth is added. So the guarantee lives here, once, and
+// what is closed no longer has to promise anything about being closed twice.
+func (r *Run) Close() error {
+	r.shut.Do(func() { r.shutErr = r.close() })
+	return r.shutErr
+}
 
 func (r *Run) close() error {
 	var problems []error
