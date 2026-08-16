@@ -3,7 +3,6 @@
 package engine_test
 
 import (
-	"html"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -94,7 +93,7 @@ const stageExporter = engine.Stage("exporter")
 func documentPaths(t *testing.T) []string {
 	t.Helper()
 
-	paths, err := filepath.Glob(filepath.Join(bookDir, "*.html"))
+	paths, err := filepath.Glob(filepath.Join(bookDir, "*.md"))
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
@@ -105,11 +104,9 @@ func documentPaths(t *testing.T) []string {
 	return paths
 }
 
-// hclBlock is a printed HCL example. It lived in notes_test.go, which went with
-// NOTES.md, and read a ```hcl fence; the book is HTML again, so the class is
-// what says a block is meant to parse. An untagged block is a console
-// transcript and belongs to no syntax.
-var hclBlock = regexp.MustCompile(`(?s)<pre><code class="hcl">(.*?)</code></pre>`)
+// hclBlock is a fenced HCL example. It lived in notes_test.go, which went with
+// NOTES.md.
+var hclBlock = regexp.MustCompile("(?s)```hcl\n(.*?)```")
 
 // TestBookEveryBuiltBlockHasASchema keeps the table above honest. A plugin or
 // an exporter this build ships and this file does not know about is a block
@@ -196,7 +193,7 @@ func examples(t *testing.T) []example {
 			// Positioned at the line the example starts on in the file, so a
 			// failure names somewhere somebody can go and look.
 			line := 1 + strings.Count(text[:at[2]], "\n")
-			fence := html.UnescapeString(text[at[2]:at[3]])
+			fence := text[at[2]:at[3]]
 
 			file, diags := hclsyntax.ParseConfig([]byte(fence), path, hcl.Pos{Line: line, Column: 1, Byte: at[2]})
 			if diags.HasErrors() {

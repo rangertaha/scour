@@ -26,7 +26,7 @@ import (
 
 func doc(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile("../../docs/cli.html")
+	b, err := os.ReadFile("../../docs/cli.md")
 	if err != nil {
 		t.Fatalf("read the cli chapter: %v", err)
 	}
@@ -47,9 +47,8 @@ func TestEveryCommandIsDocumented(t *testing.T) {
 	}
 }
 
-// builtRow matches a row of the "What exists today" table:
-// <tr><td><code>scour run</code></td><td>...</td></tr>
-var builtRow = regexp.MustCompile(`<tr><td><code>scour ([a-z]+)</code></td>`)
+// builtRow matches a row of the "What exists today" table: | `scour run` | ... |
+var builtRow = regexp.MustCompile("(?m)^\\|\\s*`scour ([a-z]+)`\\s*\\|")
 
 // TestWhatExistsTodayIsWhatExists holds that table to the binary, in both
 // directions.
@@ -69,7 +68,7 @@ func TestWhatExistsTodayIsWhatExists(t *testing.T) {
 		}
 	}
 
-	section := between(t, doc(t), "<h2>What exists today</h2>", true)
+	section := between(t, doc(t), "## What exists today", true)
 	claimed := map[string]bool{}
 	for _, row := range builtRow.FindAllStringSubmatch(section, -1) {
 		claimed[row[1]] = true
@@ -97,7 +96,7 @@ func TestEveryFlagIsDocumented(t *testing.T) {
 	a := &cli.App{Out: os.Stdout, Err: os.Stderr}
 
 	for _, cmd := range root(a).Commands {
-		section := between(t, src, `<h4 id="scour-`+cmd.Name+`"`, false)
+		section := between(t, src, "#### `scour "+cmd.Name, false)
 		if section == "" {
 			if len(flagNames(cmd)) > 0 {
 				t.Errorf("`scour %s` has flags and no section in the cli chapter", cmd.Name)
@@ -115,12 +114,8 @@ func TestEveryFlagIsDocumented(t *testing.T) {
 	}
 }
 
-// flagRow matches a documented flag:
-// <tr><td><code>--pages &lt;n&gt;</code></td><td>How many ...</td></tr>
-//
-// Only the first <code> in a row, so a flag named in the prose of an Effect
-// cell is not read as a flag this command takes.
-var flagRow = regexp.MustCompile(`<tr><td><code>(--[a-z-]+)`)
+// flagRow matches a documented flag: | `--pages <n>` | How many ... |
+var flagRow = regexp.MustCompile("(?m)^\\|\\s*`(--[a-z-]+)")
 
 // TestEveryDocumentedFlagExists is the other direction, and it is the one that
 // wastes somebody's afternoon.
@@ -138,7 +133,7 @@ func TestEveryDocumentedFlagExists(t *testing.T) {
 
 	checked := 0
 	for _, cmd := range root(a).Commands {
-		section := between(t, src, `<h4 id="scour-`+cmd.Name+`"`, false)
+		section := between(t, src, "#### `scour "+cmd.Name, false)
 		if section == "" {
 			continue
 		}
@@ -187,8 +182,7 @@ func flagNames(cmd *ucli.Command) []string {
 func TestExitCodesAreDocumented(t *testing.T) {
 	src := doc(t)
 	for _, want := range []string{
-		`<td class="num">0</td>`, `<td class="num">1</td>`,
-		`<td class="num">2</td>`, `<td class="num">3</td>`,
+		"| 0 |", "| 1 |", "| 2 |", "| 3 |",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("the cli chapter does not document exit code %s", want)
@@ -215,7 +209,7 @@ func between(t *testing.T, src, start string, toEnd bool) string {
 	if toEnd {
 		return rest
 	}
-	if j := strings.Index(rest, "<h"); j >= 0 {
+	if j := strings.Index(rest, "\n#"); j >= 0 {
 		return rest[:j]
 	}
 	return rest
