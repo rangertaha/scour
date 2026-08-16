@@ -1,6 +1,6 @@
 # A graph, not a list
 
-*Chapter eight of [the scour book](index.md).*
+*Chapter eight of [the scour book](README.md).*
 
 Every other stage is a chain, because a request has one path through it. The
 pipeline is not, because the work on an item is a dependency graph and
@@ -123,4 +123,4 @@ published as a measurement for whatever is listening now.
 
 ---
 
-[Back: Shapes, entities, measurements](items.md) · [Next: Local until it has to be shared](cli.md)
+[Back: Shapes, entities, measurements](07-items.md) · [Next: Local until it has to be shared](09-cli.md)

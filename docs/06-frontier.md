@@ -1,6 +1,6 @@
 # What to fetch next
 
-*Chapter six of [the scour book](index.md).*
+*Chapter six of [the scour book](README.md).*
 
 An exhaustive crawler can use a queue: it is going everywhere anyway and only
 the order changes. A focused crawler is choosing what not to fetch, and that
@@ -279,4 +279,4 @@ twice, because the version is the optimisation and not the guarantee.
 
 ---
 
-[Back: The cache is the corpus](cache.md) · [Next: Shapes, entities, measurements](items.md)
+[Back: The cache is the corpus](05-cache.md) · [Next: Shapes, entities, measurements](07-items.md)

@@ -1,6 +1,6 @@
 # Shapes, entities, measurements
 
-*Chapter seven of [the scour book](index.md).*
+*Chapter seven of [the scour book](README.md).*
 
 A job declares what it is looking for. One declaration has three lives: a
 shape a spider extracts against, a set of assertions about things in the
@@ -161,4 +161,4 @@ firehose, and what makes the latest value a fetch rather than a scan.
 
 ---
 
-[Back: What to fetch next](frontier.md) · [Next: A graph, not a list](pipeline.md)
+[Back: What to fetch next](06-frontier.md) · [Next: A graph, not a list](08-pipeline.md)

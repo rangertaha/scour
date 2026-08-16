@@ -1,6 +1,6 @@
 # One document, everything in it
 
-*Chapter two of [the scour book](index.md).*
+*Chapter two of [the scour book](README.md).*
 
 A job is an HCL document a client submits. It carries its own engine
 configuration, so nothing is inherited from whichever server picks it up, and
@@ -174,4 +174,4 @@ rather than a guess.
 
 ---
 
-[Back: Four stages and a bus](index.md) · [Next: Chains run both ways](chains.md)
+[Back: Four stages and a bus](README.md) · [Next: Chains run both ways](03-chains.md)

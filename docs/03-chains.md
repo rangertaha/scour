@@ -1,6 +1,6 @@
 # Chains run both ways
 
-*Chapter three of [the scour book](index.md).*
+*Chapter three of [the scour book](README.md).*
 
 A chain wraps its stage rather than hooking it, so every link sees the request
 on the way out and the response on the way back, in opposite orders. That is
@@ -152,4 +152,4 @@ says exists, and that is asked when a chain is built.
 
 ---
 
-[Back: One document, everything in it](job.md) · [Next: Fetching, politely](downloader.md)
+[Back: One document, everything in it](02-job.md) · [Next: Fetching, politely](04-downloader.md)

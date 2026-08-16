@@ -81,7 +81,7 @@ var (
 	fenced = regexp.MustCompile("(?s)```([a-z]*)\n(.*?)\n```")
 
 	// A markdown link to another chapter, which is the only kind that can rot.
-	chapterLink = regexp.MustCompile(`\]\((([a-z]+)\.md)\)`)
+	chapterLink = regexp.MustCompile(`\]\((([A-Za-z0-9-]+)\.md)\)`)
 
 	// A position and the plugin it belongs to, as the book's tables print them.
 	placement = regexp.MustCompile(`\|\s*(\d+)\s*\|\s*` + "`" + `([a-z]+)` + "`" + `\s*\|`)
@@ -407,7 +407,7 @@ var numberWords = map[string]int{
 func TestBookCountsTheStoresItLists(t *testing.T) {
 	pages := bookPages(t)
 
-	rows := len(storeRow.FindAllString(pages["storage.md"], -1))
+	rows := len(storeRow.FindAllString(pages["10-storage.md"], -1))
 	if rows == 0 {
 		t.Fatal("storage.md has no store rows, so this check is not checking anything")
 	}
@@ -453,15 +453,15 @@ func TestBookLinksGoSomewhere(t *testing.T) {
 func chapterOrder(t *testing.T, pages map[string]string) []string {
 	t.Helper()
 
-	contents, _, ok := strings.Cut(pages["index.md"], "\n---\n")
+	contents, _, ok := strings.Cut(pages["README.md"], "\n---\n")
 	if !ok {
-		contents = pages["index.md"]
+		contents = pages["README.md"]
 	}
 
 	var order []string
 	seen := map[string]bool{}
 	for _, m := range chapterLink.FindAllStringSubmatch(contents, -1) {
-		if m[1] == "index.md" || seen[m[1]] {
+		if m[1] == "README.md" || seen[m[1]] {
 			continue
 		}
 		seen[m[1]] = true
@@ -470,7 +470,7 @@ func chapterOrder(t *testing.T, pages map[string]string) []string {
 	if len(order) < 2 {
 		t.Fatal("the cover lists fewer than two chapters, so this check is not checking anything")
 	}
-	return append([]string{"index.md"}, order...)
+	return append([]string{"README.md"}, order...)
 }
 
 // TestEveryChapterIsReachable, so a chapter cannot be added and left orphaned,
@@ -495,7 +495,7 @@ func TestEveryChapterIsReachable(t *testing.T) {
 	}
 }
 
-var pagerRel = regexp.MustCompile(`\[(Back|Next): [^\]]+\]\(([a-z]+\.md)\)`)
+var pagerRel = regexp.MustCompile(`\[(Back|Next): [^\]]+\]\(([A-Za-z0-9-]+\.md)\)`)
 
 // TestThePagerChainIsWhole.
 //
@@ -606,9 +606,9 @@ var stageTable = map[engine.Stage]struct {
 	page string
 	at   int
 }{
-	engine.StageDownloader: {"chains.md", 0},
-	engine.StageSpider:     {"chains.md", 2},
-	engine.StageScheduler:  {"frontier.md", 0},
+	engine.StageDownloader: {"03-chains.md", 0},
+	engine.StageSpider:     {"03-chains.md", 2},
+	engine.StageScheduler:  {"06-frontier.md", 0},
 }
 
 // tableCells splits a Markdown table row into its trimmed cells, or returns nil
@@ -707,7 +707,7 @@ var kindRow = regexp.MustCompile("(?m)^\\|\\s*`([a-z]+)`\\s*\\|[^|]*\\|\\s*(Buil
 // it, so a check that read only one of them could not have noticed the other
 // going stale.
 func TestBookSaysWhichKindsAreBuilt(t *testing.T) {
-	page := bookPages(t)["pipeline.md"]
+	page := bookPages(t)["08-pipeline.md"]
 
 	built := map[string]bool{}
 	for _, kind := range pipeline.Registered() {
@@ -831,10 +831,10 @@ func TestBookStageListsMatchTheCode(t *testing.T) {
 	if engine.StagePipeline.ValidPlugin() {
 		t.Error("the code allows pipeline plugins, which the book says it does not")
 	}
-	if !strings.Contains(pages["pipeline.md"], "Not a plugin stage") {
+	if !strings.Contains(pages["08-pipeline.md"], "Not a plugin stage") {
 		t.Error("pipeline.md no longer says the pipeline is not a plugin stage")
 	}
-	if !strings.Contains(pages["pipeline.md"], "step <kind> <name>") {
+	if !strings.Contains(pages["08-pipeline.md"], "step <kind> <name>") {
 		t.Error("pipeline.md no longer documents the step spelling")
 	}
 
@@ -843,13 +843,44 @@ func TestBookStageListsMatchTheCode(t *testing.T) {
 	if engine.StageScheduler.ValidExternal() {
 		t.Error("the code allows an external scheduler, which the book says it does not")
 	}
-	if !strings.Contains(pages["index.md"], "one stage a job may not replace") {
+	if !strings.Contains(pages["README.md"], "one stage a job may not replace") {
 		t.Error("index.md no longer says the scheduler cannot be replaced")
 	}
 	if !engine.StageScheduler.ValidPlugin() {
 		t.Error("the code refuses scheduler plugins, which the book documents a table of")
 	}
-	if !strings.Contains(pages["frontier.md"], "Ordering is a plugin") {
+	if !strings.Contains(pages["06-frontier.md"], "Ordering is a plugin") {
 		t.Error("frontier.md no longer documents the scheduler's plugins")
+	}
+}
+
+// chapterCount is the cover's claim about how long the book is.
+var chapterCount = regexp.MustCompile(`in ([a-z]+) chapters`)
+
+// TestTheCoverCountsItsOwnChapters.
+//
+// The cover opens by saying how many chapters there are, in words, and a count
+// in words is the kind of claim that goes stale in silence: a chapter is added,
+// the sentence above the contents still says nine, and nothing anywhere
+// disagrees. It had already happened when this was written, the CLI chapter
+// having been folded in from the repository root while the cover went on saying
+// nine.
+//
+// The same shape as TestBookCountsTheStoresItLists, which exists because that
+// one had gone stale twice.
+func TestTheCoverCountsItsOwnChapters(t *testing.T) {
+	pages := bookPages(t)
+
+	m := chapterCount.FindStringSubmatch(pages["README.md"])
+	if m == nil {
+		t.Fatal("the cover no longer says how many chapters there are")
+	}
+
+	said, ok := numberWords[m[1]]
+	if !ok {
+		t.Fatalf("the cover says %q chapters, which is not a number this knows", m[1])
+	}
+	if said != len(pages) {
+		t.Errorf("the cover says %s chapters and docs/ holds %d", m[1], len(pages))
 	}
 }

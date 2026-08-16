@@ -1,6 +1,6 @@
 # Local until it has to be shared
 
-*Chapter nine of [the scour book](index.md).*
+*Chapter nine of [the scour book](README.md).*
 
 A crawler is a thing you argue with before you run it. So the commands that
 read a document need nothing running at all, and the line between those and
@@ -850,4 +850,4 @@ records either way.
 
 ---
 
-[Back: A graph, not a list](pipeline.md) · [Next: Where everything lives](storage.md)
+[Back: A graph, not a list](08-pipeline.md) · [Next: Where everything lives](10-storage.md)

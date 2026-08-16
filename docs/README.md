@@ -1,6 +1,6 @@
 # Four stages and a bus
 
-*A book about the engine, in nine chapters. Every claim in them is checked
+*A book about the engine, in ten chapters. Every claim in them is checked
 against the code by a test, so a chapter that drifts fails the build.*
 
 A crawler that ranks links by how likely they are to hold what you asked for.
@@ -80,25 +80,25 @@ per host and that settles it.
 
 ## Contents
 
-- [One document, everything in it](job.md)  
+- [One document, everything in it](02-job.md)  
   An HCL job carries its own engine, so nothing is inherited from whichever server picks it up.
-- [Chains run both ways](chains.md)  
+- [Chains run both ways](03-chains.md)  
   Middleware wraps a stage, so every link sees the request going out and the response coming back.
-- [Fetching, politely](downloader.md)  
+- [Fetching, politely](04-downloader.md)  
   One request, wrapped in what a job asked for, inside what a site asked for.
-- [The cache is the corpus](cache.md)  
+- [The cache is the corpus](05-cache.md)  
   Bodies are kept because understanding a page is cheap and fetching it is not.
-- [What to fetch next](frontier.md)  
+- [What to fetch next](06-frontier.md)  
   The queue is the crawler. Ordering it is most of what focused means.
-- [Shapes, entities, measurements](items.md)  
+- [Shapes, entities, measurements](07-items.md)  
   What is extracted, what it refers to, and what it becomes when it flows.
-- [A graph, not a list](pipeline.md)  
+- [A graph, not a list](08-pipeline.md)  
   Steps run when what they require has run, and exporters each write one item.
-- [Local until it has to be shared](cli.md)  
+- [Local until it has to be shared](09-cli.md)  
   Twelve commands, the loop they make, and the line between what runs here and what needs a cluster.
-- [Where everything lives](storage.md)  
+- [Where everything lives](10-storage.md)  
   Eleven stores, each with one owner and one reason to exist.
 
 ---
 
-[Next: One document, everything in it](job.md)
+[Next: One document, everything in it](02-job.md)

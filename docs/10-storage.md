@@ -1,6 +1,6 @@
 # Where everything lives
 
-*Chapter ten of [the scour book](index.md).*
+*Chapter ten of [the scour book](README.md).*
 
 Eleven kinds of thing get kept and they want different stores. The decisions
 were argued out one at a time; the map is the thing worth being able to read
@@ -144,4 +144,4 @@ distributed-systems problem here.
 
 ---
 
-[Back: Local until it has to be shared](cli.md)
+[Back: Local until it has to be shared](09-cli.md)

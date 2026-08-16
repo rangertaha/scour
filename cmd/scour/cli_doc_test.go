@@ -26,7 +26,7 @@ import (
 
 func doc(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile("../../docs/cli.md")
+	b, err := os.ReadFile("../../docs/09-cli.md")
 	if err != nil {
 		t.Fatalf("read the cli chapter: %v", err)
 	}

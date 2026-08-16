@@ -1,6 +1,6 @@
 # Fetching, politely
 
-*Chapter four of [the scour book](index.md).*
+*Chapter four of [the scour book](README.md).*
 
 The downloader is a core that does one HTTP request and a chain around it.
 What surrounds the chain is not configurable, because being wrong about it
@@ -117,7 +117,7 @@ per host rather than one for the request: a redirect chain reads the robots.txt
 of every host it passes through, and each of those sites asked for something.
 The scheduler is the one place that knows which of them it has already recorded,
 so that is where the list is deduplicated and handed to the frontier. What the
-frontier then does with it is [the next chapter but one](frontier.md).
+frontier then does with it is [the next chapter but one](06-frontier.md).
 
 ## Redirects
 
@@ -163,4 +163,4 @@ outcome for a URL outside the scope and not a sign anything went wrong.
 
 ---
 
-[Back: Chains run both ways](chains.md) · [Next: The cache is the corpus](cache.md)
+[Back: Chains run both ways](03-chains.md) · [Next: The cache is the corpus](05-cache.md)

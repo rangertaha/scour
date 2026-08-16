@@ -1,6 +1,6 @@
 # The cache is the corpus
 
-*Chapter five of [the scour book](index.md).*
+*Chapter five of [the scour book](README.md).*
 
 Fetching is the expensive, rate-limited, impolite part of crawling.
 Understanding a page is neither. Keeping the bodies is what lets extraction be
@@ -108,4 +108,4 @@ nowhere the job was written down.
 
 ---
 
-[Back: Fetching, politely](downloader.md) · [Next: What to fetch next](frontier.md)
+[Back: Fetching, politely](04-downloader.md) · [Next: What to fetch next](06-frontier.md)
