@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/rangertaha/scour/internal/registry/registrytest"
 	"io"
 	"iter"
 	"log/slog"
@@ -20,6 +19,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/rangertaha/scour/internal/registry/registrytest"
 
 	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/downloader"
@@ -839,7 +840,7 @@ job "news" {
 
 	// The document parses and validates with the calls unevaluated: nothing
 	// before the plugin is built has any business resolving them.
-	stored := string(src)
+	stored := src
 	for _, leaked := range []string{"PLACEHOLDER-ACCESS-KEY", "PLACEHOLDER-SECRET-KEY"} {
 		if strings.Contains(stored, leaked) {
 			t.Fatal("the fixture itself carries a value, which is not the case under test")

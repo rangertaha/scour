@@ -1,0 +1,62 @@
+# GoReleaser configuration. https://goreleaser.com
+# Validate locally with `make snapshot` (or `goreleaser check`).
+version: 2
+
+project_name: scour
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  # Only scour. cmd/mocksite is a website that behaves badly on purpose, built
+  # for the tests to crawl, and shipping it would be shipping a fixture.
+  - id: scour
+    main: ./cmd/scour
+    binary: scour
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+        -X github.com/rangertaha/scour/internal/version.Version={{ .Version }}
+        -X github.com/rangertaha/scour/internal/version.Commit={{ .ShortCommit }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    # No version segment: keeps releases/latest/download/... links stable
+    # across releases.
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    # Windows users expect zips.
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  draft: false
+  prerelease: auto

@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify formatting
+        run: |
+          out=$(gofmt -l $(find . -name '*.go'))
+          if [ -n "$out" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      # -timeout 30m, not the default. cmd/scour's interrupt test leaves a URL
+      # leased for run.Lease and the resumed run waits it out, which is 302s on
+      # its own; under -race the package runs past Go's 10-minute default and
+      # panics with a timeout that reads as a hang and is not.
+      - name: Test
+        run: go test -race -timeout 30m ./...
+
+      - name: Build
+        run: CGO_ENABLED=0 go build ./...
+
+  docs:
+    name: docs match the code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The book is checked against the source, and the command chapter against
+      # the binary, in both directions. Run on its own so a chapter that drifts
+      # says so plainly rather than inside a ten-minute suite.
+      - name: The book against the code
+        run: go test ./internal/engine/ -run 'Book|Cover|Readme|Chapter|Figure|Pager' -count=1
+
+      - name: The command chapter against the binary
+        run: go test ./cmd/scour/ -run 'Documented|Exists|Command|ExitCodes' -count=1
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2

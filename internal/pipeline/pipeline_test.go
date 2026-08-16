@@ -5,13 +5,14 @@ package pipeline_test
 import (
 	"context"
 	"errors"
-	"github.com/rangertaha/scour/internal/registry/registrytest"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/rangertaha/scour/internal/registry/registrytest"
 
 	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/pipeline"

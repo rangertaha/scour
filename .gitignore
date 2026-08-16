@@ -53,3 +53,6 @@ __pycache__/
 # Agent worktrees, which are checkouts of this repository
 .claude/
 PLAN.md
+
+# The documentation site MkDocs builds, published by .github/workflows/docs.yml
+site/

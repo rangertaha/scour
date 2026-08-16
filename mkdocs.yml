@@ -1,0 +1,64 @@
+site_name: scour
+site_description: A focused web crawler that ranks links by how likely they are to hold what you asked for.
+site_url: https://rangertaha.github.io/scour/
+repo_url: https://github.com/rangertaha/scour
+repo_name: rangertaha/scour
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.details
+
+plugins:
+  - search
+
+# README.md is the signpost GitHub renders when somebody opens docs/ in the
+# repository. MkDocs would treat it as a second index for the same directory
+# and refuse under --strict, so the site is built from index.md and the
+# signpost is left to GitHub.
+exclude_docs: |
+  README.md
+
+nav:
+  - Four stages and a bus: index.md
+  - One document, everything in it: job/index.md
+  - Chains run both ways: chains/index.md
+  - Fetching, politely: downloader/index.md
+  - The cache is the corpus: cache/index.md
+  - What to fetch next: frontier/index.md
+  - Shapes, entities, measurements: items/index.md
+  - A graph, not a list: pipeline/index.md
+  - Local until it has to be shared: cli/index.md
+  - Where everything lives: storage/index.md

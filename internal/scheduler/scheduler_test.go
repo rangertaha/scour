@@ -5,10 +5,11 @@ package scheduler_test
 import (
 	"context"
 	"errors"
-	"github.com/rangertaha/scour/internal/registry/registrytest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rangertaha/scour/internal/registry/registrytest"
 
 	"github.com/rangertaha/scour/internal/chain"
 	"github.com/rangertaha/scour/internal/engine"

@@ -4,6 +4,7 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"sync"
@@ -120,7 +121,7 @@ func (g *guard) check(ctx context.Context, rawURL string) (time.Duration, error)
 
 	rules, err := g.rules(ctx, parsed.Scheme+"://"+parsed.Host)
 	if err != nil {
-		return 0, fmt.Errorf("%s: %w: %v", rawURL, ErrNoRobots, err)
+		return 0, fmt.Errorf("%s: %w", rawURL, errors.Join(ErrNoRobots, err))
 	}
 	if !rules.Allowed(g.agent, parsed.RequestURI()) {
 		return 0, fmt.Errorf("%s: %w", rawURL, ErrDisallowed)

@@ -1,0 +1,56 @@
+# golangci-lint configuration (v2 schema).
+# Run locally with `make lint`; CI runs the same linters via golangci-lint-action.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # The default set (errcheck, govet, ineffassign, staticcheck, unused) stays
+  # enabled; these add high-signal, low-noise checks on top.
+  enable:
+    - bodyclose    # HTTP response bodies are always closed
+    - errorlint    # correct error wrapping/comparison (errors.Is/As, %w)
+    - misspell     # common spelling mistakes in comments and strings
+    - unconvert    # remove redundant type conversions
+
+  # Every exclusion below has a reason. A linter turned off without one is a
+  # linter somebody will turn off again for a worse reason.
+  exclusions:
+    rules:
+      # A deferred Close or Rollback has nowhere to report an error to: the
+      # function is already returning, and on the failure path the error that
+      # matters is the one being returned. Checking it means naming a variable
+      # nobody reads. Where a close CAN fail meaningfully it is not deferred,
+      # which is why run.Run.Close returns one and is checked by its caller.
+      - linters: [errcheck]
+        source: "^\\s*defer .*\\.(Close|Rollback)\\(\\)$"
+
+      # A test that cannot clean up has already failed or is about to, and the
+      # assertion is what should say so rather than the teardown.
+      - linters: [errcheck]
+        path: _test\.go
+
+      # QF* are refactor suggestions, not defects: an embedded field written
+      # out, a condition not run through De Morgan's law. They are a matter of
+      # which reads better at the call site, which is the author's to judge.
+      - linters: [staticcheck]
+        text: "^QF"
+
+      # cluster_test.go is a test about a node being asked for a stage nobody
+      # serves, and "downlaod" is the fixture: the typo IS the case. Spelling
+      # it correctly would delete the test.
+      - linters: [misspell]
+        path: cmd/scour/cluster_test\.go
+
+      # Two dependencies deprecated an API each: parquet-go's Writer and
+      # google.CredentialsFromJSON. Both still work and both want a migration
+      # that is its own piece of work, so they are recorded here rather than
+      # failing every build until somebody has time.
+      - linters: [staticcheck]
+        text: "^SA1019"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

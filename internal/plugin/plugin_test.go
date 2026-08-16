@@ -20,9 +20,8 @@ import (
 // The stage under test carries strings, because what a chain carries is the
 // stage's business and none of this package's.
 type (
-	wrapper  = chain.Wrapper[string, string]
-	handler  = chain.Handler[string, string]
-	registry = plugin.Registry[string, string]
+	wrapper = chain.Wrapper[string, string]
+	handler = chain.Handler[string, string]
 )
 
 func job(t *testing.T, blocks string) *engine.Job {

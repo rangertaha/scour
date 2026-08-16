@@ -4,11 +4,12 @@ package entities_test
 
 import (
 	"context"
-	"github.com/rangertaha/scour/internal/extract"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rangertaha/scour/internal/extract"
 
 	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/entity"

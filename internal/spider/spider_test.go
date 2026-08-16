@@ -4,10 +4,11 @@ package spider_test
 
 import (
 	"context"
-	"github.com/rangertaha/scour/internal/registry/registrytest"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/rangertaha/scour/internal/registry/registrytest"
 
 	"github.com/rangertaha/scour/internal/chain"
 	"github.com/rangertaha/scour/internal/downloader"

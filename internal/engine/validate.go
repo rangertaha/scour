@@ -227,7 +227,7 @@ func (i *Item) validate() []error {
 				continue
 			}
 			found = true
-			if Type(p.PropertyType()) != TypeDate {
+			if p.PropertyType() != TypeDate {
 				problems = append(problems, fmt.Errorf(
 					"item %q: time is %q, which is typed %s rather than date",
 					i.Name, i.Time, p.PropertyType()))
@@ -268,7 +268,7 @@ func validateRelations(relations []*Relation, where string) []error {
 		// what the graph records, with nothing in the document to show why.
 		for _, ref := range r.Topic {
 			if _, err := classify.ParseRef(ref); err != nil {
-				problems = append(problems, fmt.Errorf("%s: topic %v", path, err))
+				problems = append(problems, fmt.Errorf("%s: topic %w", path, err))
 			}
 		}
 
@@ -322,7 +322,7 @@ func validateProperties(props []*Property, where string) []error {
 		// group by. It is also how a time-series store is destroyed: every
 		// distinct tag value is another series.
 		if p.Tag {
-			switch Type(p.PropertyType()) {
+			switch p.PropertyType() {
 			case TypeObject, TypeList:
 				problems = append(problems, fmt.Errorf(
 					"%s: is a tag but typed %s, and a dimension has to be one value",

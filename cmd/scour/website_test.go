@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rangertaha/scour/internal/mocksite"
 )
@@ -35,31 +34,6 @@ func newWebsite(t *testing.T, opts mocksite.Options) *website {
 // host is the site's authority, which is what a job's `domains` wants.
 func (w *website) host() string { return strings.TrimPrefix(w.URL, "http://") }
 
-// crawl writes a job document pointed at the site, with whatever extra blocks
-// a test needs folded in.
-func (w *website) crawl(t *testing.T, extra string) string {
-	t.Helper()
-
-	return document(t, fmt.Sprintf(`
-job "news" {
-  domains = ["%s"]
-  start   = ["%s/"]
-
-  item "article" {
-    property "title" {
-      type     = str
-      required = true
-    }
-  }
-
-  scheduler {
-    rate = "1ms"
-  }
-%s
-}
-`, w.host(), w.URL, extra))
-}
-
 // asking reports what the site was asked for, for a failure message that says
 // what happened rather than leaving somebody to guess.
 func (w *website) asking() string {
@@ -69,6 +43,3 @@ func (w *website) asking() string {
 	}
 	return b.String()
 }
-
-// slowly is the option a timeout test wants and nothing else does.
-func slowly(d time.Duration) mocksite.Options { return mocksite.Options{Slow: d} }

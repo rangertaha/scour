@@ -6,11 +6,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/rangertaha/scour/internal/registry/registrytest"
 	"io"
 	"iter"
 	"strings"
 	"testing"
+
+	"github.com/rangertaha/scour/internal/registry/registrytest"
 
 	"github.com/rangertaha/scour/internal/cache"
 )
