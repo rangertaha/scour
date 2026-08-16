@@ -1,59 +1,20 @@
+---
+title: One document, everything in it
+description: An HCL job carries its own engine, so nothing is inherited from whichever server picks it up.
+---
+
 # One document, everything in it
 
-*Chapter two of [the scour book](README.md).*
+*Chapter two of [the scour book](../).*
 
 A job is an HCL document a client submits. It carries its own engine
 configuration, so nothing is inherited from whichever server picks it up, and
 a job resubmitted next month does what it did today.
 
-```mermaid
-flowchart TB
-  subgraph job["job news: scope, and everything below it"]
-    direction TB
-
-    subgraph item["item article: what to extract"]
-      IT["property title<br/>property author<br/>relation publisher"]
-    end
-
-    subgraph dl["downloader"]
-      direction LR
-      DA["robots = true<br/>timeout = 30s<br/>max_redirects = 10"]
-      DP("plugin cache { ... }")
-    end
-
-    subgraph sch["scheduler"]
-      direction LR
-      SA["policy = priority<br/>rate = 2s<br/>max_depth = 3"]
-      SP("plugin dupefilter {}")
-    end
-
-    subgraph pipe["pipeline"]
-      PP["step clean article<br/>step rank article"]
-    end
-
-    EX["exporter json article"]
-  end
-
-  item ~~~ dl
-  dl ~~~ sch
-  sch ~~~ pipe
-  pipe ~~~ EX
-  DA -.- DP
-  SA -.- SP
-```
-
-<details>
-<summary>What this diagram shows</summary>
-
-A job block holding an item block, three stage blocks and an exporter. Inside a
-stage block, attributes such as robots, timeout and rate are plain settings,
-and a nested plugin block is a separate thing that was added to it.
-
-</details>
-
-*Every block is optional except the item blocks and the start URLs. The
-division that matters is inside a stage: plain attributes, and nested plugin
-blocks.*
+<figure>
+<img src="{{ '/img/job.svg' | relative_url }}" alt="A job block holding an item block, three stage blocks and an exporter. Inside a stage block, attributes such as robots, timeout and rate are plain settings, and a nested plugin block is a separate thing that was added to it.">
+<figcaption>Every block is optional except the item blocks and the start URLs. The division that matters is inside a stage: plain attributes, and nested plugin blocks.</figcaption>
+</figure>
 
 ## Attributes and plugins
 
@@ -174,4 +135,4 @@ rather than a guess.
 
 ---
 
-[Back: Four stages and a bus](README.md) · [Next: Chains run both ways](03-chains.md)
+[Back: Four stages and a bus](../) · [Next: Chains run both ways](../chains/)

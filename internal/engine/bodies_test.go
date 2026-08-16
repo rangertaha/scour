@@ -93,11 +93,12 @@ const stageExporter = engine.Stage("exporter")
 func documentPaths(t *testing.T) []string {
 	t.Helper()
 
-	paths, err := filepath.Glob(filepath.Join(bookDir, "*.md"))
+	paths, err := filepath.Glob(filepath.Join(bookDir, "*/index.md"))
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
-	if len(paths) == 0 {
+	paths = append(paths, filepath.Join(bookDir, "index.md"))
+	if len(paths) < 2 {
 		t.Fatal("docs/ has no chapters, so these checks are not checking anything")
 	}
 	sort.Strings(paths)

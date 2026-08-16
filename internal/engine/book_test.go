@@ -57,13 +57,14 @@ const bookDir = "../../docs"
 func bookPages(t *testing.T) map[string]string {
 	t.Helper()
 
-	paths, err := filepath.Glob(filepath.Join(bookDir, "*.md"))
+	// The cover, and one directory per chapter. A chapter is a directory so
+	// that Pages serves it at /frontier/ and GitHub renders it when somebody
+	// opens the folder, which is the same reason the cover is index.md.
+	paths, err := filepath.Glob(filepath.Join(bookDir, "*/index.md"))
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
-	if len(paths) == 0 {
-		t.Fatal("docs/ has no chapters")
-	}
+	paths = append(paths, filepath.Join(bookDir, "index.md"))
 
 	pages := map[string]string{}
 	for _, path := range paths {
@@ -71,9 +72,38 @@ func bookPages(t *testing.T) map[string]string {
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		pages[filepath.Base(path)] = string(body)
+		_, prose := frontMatter(string(body))
+		pages[chapterOf(path)] = prose
+	}
+	if len(pages) < 2 {
+		t.Fatal("docs/ has no chapters")
 	}
 	return pages
+}
+
+// frontMatter splits a page's YAML header from its prose. Jekyll reads the
+// header for the title and description of every page; everything that checks
+// what a chapter says wants the prose under it.
+func frontMatter(page string) (head, prose string) {
+	if !strings.HasPrefix(page, "---\n") {
+		return "", page
+	}
+	rest := page[len("---\n"):]
+	end := strings.Index(rest, "\n---\n")
+	if end < 0 {
+		return "", page
+	}
+	return rest[:end], strings.TrimLeft(rest[end+len("\n---\n"):], "\n")
+}
+
+// chapterOf names a chapter by its directory, which is how the book links to
+// one: docs/frontier/index.md is "frontier", and the cover is "index".
+func chapterOf(path string) string {
+	dir := filepath.Base(filepath.Dir(path))
+	if dir == "docs" {
+		return "index"
+	}
+	return dir
 }
 
 var (
@@ -81,7 +111,7 @@ var (
 	fenced = regexp.MustCompile("(?s)```([a-z]*)\n(.*?)\n```")
 
 	// A markdown link to another chapter, which is the only kind that can rot.
-	chapterLink = regexp.MustCompile(`\]\((([A-Za-z0-9-]+)\.md)\)`)
+	chapterLink = regexp.MustCompile(`\]\((?:\.\./)?([a-z]+)/\)`)
 
 	// A position and the plugin it belongs to, as the book's tables print them.
 	placement = regexp.MustCompile(`\|\s*(\d+)\s*\|\s*` + "`" + `([a-z]+)` + "`" + `\s*\|`)
@@ -407,7 +437,7 @@ var numberWords = map[string]int{
 func TestBookCountsTheStoresItLists(t *testing.T) {
 	pages := bookPages(t)
 
-	rows := len(storeRow.FindAllString(pages["10-storage.md"], -1))
+	rows := len(storeRow.FindAllString(pages["storage"], -1))
 	if rows == 0 {
 		t.Fatal("storage.md has no store rows, so this check is not checking anything")
 	}
@@ -453,15 +483,15 @@ func TestBookLinksGoSomewhere(t *testing.T) {
 func chapterOrder(t *testing.T, pages map[string]string) []string {
 	t.Helper()
 
-	contents, _, ok := strings.Cut(pages["README.md"], "\n---\n")
+	contents, _, ok := strings.Cut(pages["index"], "\n---\n")
 	if !ok {
-		contents = pages["README.md"]
+		contents = pages["index"]
 	}
 
 	var order []string
 	seen := map[string]bool{}
 	for _, m := range chapterLink.FindAllStringSubmatch(contents, -1) {
-		if m[1] == "README.md" || seen[m[1]] {
+		if m[1] == "index" || seen[m[1]] {
 			continue
 		}
 		seen[m[1]] = true
@@ -470,7 +500,7 @@ func chapterOrder(t *testing.T, pages map[string]string) []string {
 	if len(order) < 2 {
 		t.Fatal("the cover lists fewer than two chapters, so this check is not checking anything")
 	}
-	return append([]string{"README.md"}, order...)
+	return append([]string{"index"}, order...)
 }
 
 // TestEveryChapterIsReachable, so a chapter cannot be added and left orphaned,
@@ -495,7 +525,19 @@ func TestEveryChapterIsReachable(t *testing.T) {
 	}
 }
 
-var pagerRel = regexp.MustCompile(`\[(Back|Next): [^\]]+\]\(([A-Za-z0-9-]+\.md)\)`)
+var pagerRel = regexp.MustCompile(`\[(Back|Next): [^\]]+\]\(([^)]+)\)`)
+
+// chapterAt resolves a link written from one chapter into the chapter it names.
+// The cover links down to a sibling directory, a chapter links up and across,
+// and both link back to the cover as "../", so the three shapes are "job/",
+// "../items/" and "../".
+func chapterAt(link string) string {
+	link = strings.TrimSuffix(strings.TrimPrefix(link, "../"), "/")
+	if link == "" {
+		return "index"
+	}
+	return link
+}
 
 // TestThePagerChainIsWhole.
 //
@@ -509,7 +551,7 @@ func TestThePagerChainIsWhole(t *testing.T) {
 	for i, name := range order {
 		links := map[string]string{}
 		for _, m := range pagerRel.FindAllStringSubmatch(pages[name], -1) {
-			links[m[1]] = m[2]
+			links[m[1]] = chapterAt(m[2])
 		}
 
 		want := map[string]string{}
@@ -561,40 +603,59 @@ func TestEveryChapterIsWholeAndAccessible(t *testing.T) {
 	}
 }
 
-// TestEveryDiagramIsADiagram.
-//
-// A mermaid block that does not begin with a diagram type renders as an error
-// box on GitHub, in the place where the picture should be. It is the one
-// failure that looks worse to a reader than having no diagram at all, and it
-// cannot be seen by reading the Markdown.
-func TestEveryDiagramIsADiagram(t *testing.T) {
-	kinds := []string{"flowchart", "graph", "sequenceDiagram", "erDiagram",
-		"classDiagram", "stateDiagram", "journey", "gantt", "pie"}
+// figure is a drawing as the book references one, with the text that stands in
+// for it.
+var figure = regexp.MustCompile(`<img src="\{\{ '/img/([a-z0-9-]+\.svg)' \| relative_url \}\}" alt="([^"]*)">`)
 
+// TestEveryFigureHasItsPicture.
+//
+// The diagrams are files now rather than fenced mermaid, referenced with <img>
+// rather than inlined, because GitHub's Markdown sanitiser strips inline <svg>
+// and a referenced file is not inline. That buys the pictures at the cost of a
+// new way to be wrong: a reference and a file are two things that can disagree,
+// and a missing one renders as a broken image rather than as nothing.
+//
+// Both directions. A reference with no file is a hole in the page, and a file
+// nothing references is a drawing nobody sees, which is how a diagram survives
+// the chapter it belonged to being rewritten.
+func TestEveryFigureHasItsPicture(t *testing.T) {
+	drawn := map[string]bool{}
+	paths, err := filepath.Glob(filepath.Join(bookDir, "img", "*.svg"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	for _, path := range paths {
+		drawn[filepath.Base(path)] = true
+	}
+	if len(drawn) == 0 {
+		t.Fatal("docs/img holds no drawings, so this check is not checking anything")
+	}
+
+	shown := map[string]bool{}
 	var checked int
 	for name, page := range bookPages(t) {
-		for i, drawing := range blocks(page, "mermaid") {
+		for _, m := range figure.FindAllStringSubmatch(page, -1) {
 			checked++
-			first, _, _ := strings.Cut(strings.TrimSpace(drawing), "\n")
+			shown[m[1]] = true
 
-			var ok bool
-			for _, kind := range kinds {
-				if strings.HasPrefix(first, kind) {
-					ok = true
-					break
-				}
+			if !drawn[m[1]] {
+				t.Errorf("%s shows img/%s, which is not there", name, m[1])
 			}
-			if !ok {
-				t.Errorf("%s: diagram %d starts with %q, which is not a mermaid diagram", name, i+1, first)
-			}
-			if len(strings.Split(strings.TrimSpace(drawing), "\n")) < 3 {
-				t.Errorf("%s: diagram %d has nothing in it", name, i+1)
+			// The picture carries the whole of what a diagram says, so a
+			// reader who cannot see it gets nothing without this.
+			if strings.TrimSpace(m[2]) == "" {
+				t.Errorf("%s shows img/%s with nothing said about it", name, m[1])
 			}
 		}
 	}
-
 	if checked == 0 {
-		t.Fatal("no diagrams were found, so this test proves nothing")
+		t.Fatal("no figures were found, so this check is not checking anything")
+	}
+
+	for name := range drawn {
+		if !shown[name] {
+			t.Errorf("img/%s is drawn and no chapter shows it", name)
+		}
 	}
 }
 
@@ -606,9 +667,9 @@ var stageTable = map[engine.Stage]struct {
 	page string
 	at   int
 }{
-	engine.StageDownloader: {"03-chains.md", 0},
-	engine.StageSpider:     {"03-chains.md", 2},
-	engine.StageScheduler:  {"06-frontier.md", 0},
+	engine.StageDownloader: {"chains", 0},
+	engine.StageSpider:     {"chains", 2},
+	engine.StageScheduler:  {"frontier", 0},
 }
 
 // tableCells splits a Markdown table row into its trimmed cells, or returns nil
@@ -707,7 +768,7 @@ var kindRow = regexp.MustCompile("(?m)^\\|\\s*`([a-z]+)`\\s*\\|[^|]*\\|\\s*(Buil
 // it, so a check that read only one of them could not have noticed the other
 // going stale.
 func TestBookSaysWhichKindsAreBuilt(t *testing.T) {
-	page := bookPages(t)["08-pipeline.md"]
+	page := bookPages(t)["pipeline"]
 
 	built := map[string]bool{}
 	for _, kind := range pipeline.Registered() {
@@ -831,10 +892,10 @@ func TestBookStageListsMatchTheCode(t *testing.T) {
 	if engine.StagePipeline.ValidPlugin() {
 		t.Error("the code allows pipeline plugins, which the book says it does not")
 	}
-	if !strings.Contains(pages["08-pipeline.md"], "Not a plugin stage") {
+	if !strings.Contains(pages["pipeline"], "Not a plugin stage") {
 		t.Error("pipeline.md no longer says the pipeline is not a plugin stage")
 	}
-	if !strings.Contains(pages["08-pipeline.md"], "step <kind> <name>") {
+	if !strings.Contains(pages["pipeline"], "step <kind> <name>") {
 		t.Error("pipeline.md no longer documents the step spelling")
 	}
 
@@ -843,13 +904,13 @@ func TestBookStageListsMatchTheCode(t *testing.T) {
 	if engine.StageScheduler.ValidExternal() {
 		t.Error("the code allows an external scheduler, which the book says it does not")
 	}
-	if !strings.Contains(pages["README.md"], "one stage a job may not replace") {
+	if !strings.Contains(pages["index"], "one stage a job may not replace") {
 		t.Error("index.md no longer says the scheduler cannot be replaced")
 	}
 	if !engine.StageScheduler.ValidPlugin() {
 		t.Error("the code refuses scheduler plugins, which the book documents a table of")
 	}
-	if !strings.Contains(pages["06-frontier.md"], "Ordering is a plugin") {
+	if !strings.Contains(pages["frontier"], "Ordering is a plugin") {
 		t.Error("frontier.md no longer documents the scheduler's plugins")
 	}
 }
@@ -871,7 +932,7 @@ var chapterCount = regexp.MustCompile(`in ([a-z]+) chapters`)
 func TestTheCoverCountsItsOwnChapters(t *testing.T) {
 	pages := bookPages(t)
 
-	m := chapterCount.FindStringSubmatch(pages["README.md"])
+	m := chapterCount.FindStringSubmatch(pages["index"])
 	if m == nil {
 		t.Fatal("the cover no longer says how many chapters there are")
 	}
@@ -882,5 +943,89 @@ func TestTheCoverCountsItsOwnChapters(t *testing.T) {
 	}
 	if said != len(pages) {
 		t.Errorf("the cover says %s chapters and docs/ holds %d", m[1], len(pages))
+	}
+}
+
+// bookLink is a link from the repository's README into the book.
+var bookLink = regexp.MustCompile(`\]\(docs/([a-z]+)/\)`)
+
+// TestTheReadmeLinksIntoTheBook.
+//
+// The README is the first page anybody sees and it is outside docs/, so nothing
+// that checks the book checks it. It names every chapter by filename, which is
+// the one thing about a chapter guaranteed to change: the chapters were
+// renamed once already, to put the folder in reading order, and every link to
+// them had to move at the same time.
+//
+// Both directions. A link that goes nowhere is a broken front page, and a
+// chapter the README leaves out is a chapter nobody arrives at.
+func TestTheReadmeLinksIntoTheBook(t *testing.T) {
+	src, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatalf("read the README: %v", err)
+	}
+
+	pages := bookPages(t)
+	linked := map[string]bool{}
+
+	for _, m := range bookLink.FindAllStringSubmatch(string(src), -1) {
+		linked[m[1]] = true
+		if _, ok := pages[m[1]]; !ok {
+			t.Errorf("the README links to docs/%s/, which is not a chapter", m[1])
+		}
+	}
+	if len(linked) == 0 {
+		t.Fatal("the README links to no chapter, so this check is not checking anything")
+	}
+
+	for name := range pages {
+		if name == "index" {
+			continue // the cover is linked as docs/ rather than by name
+		}
+		if !linked[name] {
+			t.Errorf("docs/%s/ is a chapter the README does not link to", name)
+		}
+	}
+}
+
+// TestEveryChapterHasItsFrontMatter.
+//
+// Jekyll reads the title and the description of every page from its YAML
+// header. Without one the page still builds, and it builds wrong: the browser
+// tab says "scour" for all ten chapters and the meta description falls back to
+// the site's, so search results and link previews describe the book rather than
+// the chapter. Nothing about the rendered page looks broken, which is what
+// makes it worth a check rather than a glance.
+func TestEveryChapterHasItsFrontMatter(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join(bookDir, "*/index.md"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	paths = append(paths, filepath.Join(bookDir, "index.md"))
+
+	var checked int
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		head, prose := frontMatter(string(body))
+		name := chapterOf(path)
+		checked++
+
+		for _, want := range []string{"title:", "description:"} {
+			if !strings.Contains(head, want) {
+				t.Errorf("%s has no %s in its front matter", name, want)
+			}
+		}
+		// The header is the site's; the prose still has to open with the
+		// chapter's own title for anybody reading it on GitHub.
+		if !strings.HasPrefix(prose, "# ") {
+			t.Errorf("%s does not open with its title", name)
+		}
+	}
+
+	if checked == 0 {
+		t.Fatal("no chapters were read, so this check is not checking anything")
 	}
 }

@@ -1,46 +1,20 @@
+---
+title: A graph, not a list
+description: Steps run when what they require has run, and exporters each write one item.
+---
+
 # A graph, not a list
 
-*Chapter eight of [the scour book](README.md).*
+*Chapter eight of [the scour book](../).*
 
 Every other stage is a chain, because a request has one path through it. The
 pipeline is not, because the work on an item is a dependency graph and
 pretending otherwise costs concurrency for nothing.
 
-```mermaid
-flowchart TB
-  subgraph w1["wave 1"]
-    C["clean.article"]
-  end
-  subgraph w2["wave 2, two at once"]
-    direction LR
-    V["validate.article"]
-    D["dedupe.article"]
-  end
-  subgraph w3["wave 3"]
-    R["rank.article"]
-  end
-  subgraph w4["wave 4"]
-    P["python.enrich"]
-  end
-
-  C --> V
-  C --> D
-  V --> R
-  D --> R
-  R --> P
-```
-
-<details>
-<summary>What this diagram shows</summary>
-
-Five pipeline steps arranged by dependency, in four waves. Clean runs first;
-validate and dedupe both require clean and run at the same time, which is the
-widest wave; rank requires both of them; a python step requires rank.
-
-</details>
-
-*The waves are computed, not written. Four of them here, two steps wide at
-the widest, and the width is what a run can actually do at the same time.*
+<figure>
+<img src="{{ '/img/pipeline.svg' | relative_url }}" alt="Five pipeline steps arranged by dependency, in four waves. Clean runs first; validate and dedupe both require clean and run at the same time, which is the widest wave; rank requires both of them; a python step requires rank.">
+<figcaption>The waves are computed, not written. Four of them here, two steps wide at the widest, and the width is what a run can actually do at the same time.</figcaption>
+</figure>
 
 ## Why not an order number
 
@@ -123,4 +97,4 @@ published as a measurement for whatever is listening now.
 
 ---
 
-[Back: Shapes, entities, measurements](07-items.md) · [Next: Local until it has to be shared](09-cli.md)
+[Back: Shapes, entities, measurements](../items/) · [Next: Local until it has to be shared](../cli/)

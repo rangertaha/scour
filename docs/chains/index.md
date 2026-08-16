@@ -1,50 +1,21 @@
+---
+title: Chains run both ways
+description: Middleware wraps a stage, so every link sees the request going out and the response coming back.
+---
+
 # Chains run both ways
 
-*Chapter three of [the scour book](README.md).*
+*Chapter three of [the scour book](../).*
 
 A chain wraps its stage rather than hooking it, so every link sees the request
 on the way out and the response on the way back, in opposite orders. That is
 what makes `order` mean something, and it is the part that is easy to get
 wrong.
 
-```mermaid
-flowchart TB
-  REQ["request"] --> A1
-
-  subgraph out["on the way out: low order first"]
-    direction LR
-    A1["offsite 500"] --> A2["retry 550"] --> A3["cache 900"]
-  end
-
-  A3 --> NET[("the network")]
-  NET --> B3
-
-  subgraph back["on the way back: high order first"]
-    direction LR
-    B3["cache 900"] --> B2["retry 550"] --> B1["offsite 500"]
-  end
-
-  B1 --> RESP["response, to the spider"]
-
-  A3 -. "a hit returns here, and the network is never reached" .-> B3
-  A1 -. "ErrDrop: nothing further out is called" .-> DROP["dropped"]
-```
-
-<details>
-<summary>What this diagram shows</summary>
-
-The same three links, twice. On the way out a request passes offsite at 500,
-retry at 550 and cache at 900, in that order, and reaches the network. On the
-way back the response passes the same three in reverse. A cache hit returns
-from 900 without the network being reached, so the links outside it still see a
-response and the ones inside it never ran. A drop at offsite ends the request
-there.
-
-</details>
-
-*The same three links, seen twice. On the way out they run low to high; on
-the way back, high to low. A cache hit returns without calling the rest, so
-the links outside it still see a response and the links inside it never ran.*
+<figure>
+<img src="{{ '/img/chains.svg' | relative_url }}" alt="The same three links, twice. On the way out a request passes offsite at 500, retry at 550 and cache at 900, in that order, and reaches the network. On the way back the response passes the same three in reverse. A cache hit returns from 900 without the network being reached, so the links outside it still see a response and the ones inside it never ran. A drop at offsite ends the request there.">
+<figcaption>The same three links, seen twice. On the way out they run low to high; on the way back, high to low. A cache hit returns without calling the rest, so the links outside it still see a response and the links inside it never ran.</figcaption>
+</figure>
 
 The numbers are Scrapy's, because copying a known-good ordering is cheaper
 than rediscovering it, and the reasoning transfers with them. `cache` at 900
@@ -89,29 +60,10 @@ The job document can say a job wants a plugin called `cache` at 900. The chain
 machinery can run an ordered set of middleware. Neither of them can answer
 whether `cache` is a thing that exists.
 
-```mermaid
-flowchart TB
-  DOC["the job document<br/>cache at 900, retry at 550, gadget"]
-  REG[["what this node compiled in<br/>cache, retry, offsite, depth, topic"]]
-
-  DOC --> SEAM{"internal/plugin"}
-  REG --> SEAM
-
-  SEAM -- "every name resolves" --> CHAIN["an ordered chain, which owns<br/>whatever its plugins opened"]
-  SEAM -- "gadget is not implemented here" --> NO["the whole chain is refused,<br/>naming every missing plugin at once<br/>and what this node does have"]
-```
-
-<details>
-<summary>What this diagram shows</summary>
-
-Plugin names from the job document are resolved against a registry of what
-this node has compiled in. Names that resolve become ordered links wrapping
-the core; a name nothing implements refuses the whole chain.
-
-</details>
-
-*The seam. It is the first place a job naming a plugin nothing implements is
-refused, and it refuses the whole chain rather than running a partial one.*
+<figure>
+<img src="{{ '/img/chains-2.svg' | relative_url }}" alt="Plugin names from the job document are resolved against a registry of what this node has compiled in. Names that resolve become ordered links wrapping the core; a name nothing implements refuses the whole chain.">
+<figcaption>The seam. It is the first place a job naming a plugin nothing implements is refused, and it refuses the whole chain rather than running a partial one.</figcaption>
+</figure>
 
 Every missing name is reported at once, along with what the node does have. A
 job loading six plugins on a node with four of them should be told which two,
@@ -152,4 +104,4 @@ says exists, and that is asked when a chain is built.
 
 ---
 
-[Back: One document, everything in it](02-job.md) · [Next: Fetching, politely](04-downloader.md)
+[Back: One document, everything in it](../job/) · [Next: Fetching, politely](../downloader/)

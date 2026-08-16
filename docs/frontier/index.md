@@ -1,42 +1,20 @@
+---
+title: What to fetch next
+description: The queue is the crawler. Ordering it is most of what focused means.
+---
+
 # What to fetch next
 
-*Chapter six of [the scour book](README.md).*
+*Chapter six of [the scour book](../).*
 
 An exhaustive crawler can use a queue: it is going everywhere anyway and only
 the order changes. A focused crawler is choosing what not to fetch, and that
 choice is the frontier.
 
-```mermaid
-erDiagram
-  urls {
-    text hash PK "the normalised URL, so rediscovering one is an upsert"
-    text job "partitioned by job"
-    text status "waiting, and there is deliberately no leased"
-    real score "what the ordering policy sorts by"
-    int depth
-    int ready_at "a lease is a row that is not ready yet"
-  }
-  hosts {
-    text host PK "shared across jobs, because politeness is"
-    int next_at "the earliest this host may be touched again"
-    int delay "what this host asked for in its own robots.txt"
-  }
-  urls }o--|| hosts : "the lease takes the best ready row whose host is not cooling"
-```
-
-<details>
-<summary>What this diagram shows</summary>
-
-Two tables. The urls table is per job and holds waiting URLs with a score, a
-depth and the time each becomes ready again. The hosts table is shared across
-jobs and holds, per host, the earliest time it may next be touched and the
-delay it asked for. A lease joins them, taking the highest-scoring ready URL
-whose host is not cooling.
-
-</details>
-
-*Two tables in one SQLite database. The urls table is partitioned by job; the
-hosts table deliberately is not, because politeness cannot be.*
+<figure>
+<img src="{{ '/img/frontier.svg' | relative_url }}" alt="Two tables. The urls table is per job and holds waiting URLs with a score, a depth and the time each becomes ready again. The hosts table is shared across jobs and holds, per host, the earliest time it may next be touched and the delay it asked for. A lease joins them, taking the highest-scoring ready URL whose host is not cooling.">
+<figcaption>Two tables in one SQLite database. The urls table is partitioned by job; the hosts table deliberately is not, because politeness cannot be.</figcaption>
+</figure>
 
 `next_at` and `delay` are kept apart rather than folded together because they
 are different facts: the first is when this host may be touched again, the
@@ -279,4 +257,4 @@ twice, because the version is the optimisation and not the guarantee.
 
 ---
 
-[Back: The cache is the corpus](05-cache.md) · [Next: Shapes, entities, measurements](07-items.md)
+[Back: The cache is the corpus](../cache/) · [Next: Shapes, entities, measurements](../items/)

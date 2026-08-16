@@ -1,38 +1,20 @@
+---
+title: Shapes, entities, measurements
+description: What is extracted, what it refers to, and what it becomes when it flows.
+---
+
 # Shapes, entities, measurements
 
-*Chapter seven of [the scour book](README.md).*
+*Chapter seven of [the scour book](../).*
 
 A job declares what it is looking for. One declaration has three lives: a
 shape a spider extracts against, a set of assertions about things in the
 world, and a measurement when it flows.
 
-```mermaid
-flowchart TB
-  ITEM["item price<br/>of = company, time = observed<br/>property value, property observed"]
-
-  ITEM --> REC["a record<br/>named properties, some nested,<br/>as somebody asked for them"]
-  ITEM --> ENT["assertions<br/>this page said this company<br/>has this price, at this time"]
-  ITEM --> MEAS["a measurement<br/>name, tags, fields, time"]
-
-  REC --> F["json, csv, sqlite"]
-  ENT --> G[("the entity graph")]
-  MEAS --> S["nats, and the archive"]
-
-  MEAS -. "tags are of and the relations, because an entity reference is<br/>bounded by definition; fields are everything else" .-> S
-```
-
-<details>
-<summary>What this diagram shows</summary>
-
-One item declaration becomes three things: a record with named properties,
-edges to entities in a shared store, and a measurement whose tags are the
-entity references and whose fields are the remaining properties.
-
-</details>
-
-*One model, three renderings. Nothing in a document says "this is an event";
-what makes it one is that the properties split cleanly into things you group
-by and things you measure.*
+<figure>
+<img src="{{ '/img/items.svg' | relative_url }}" alt="One item declaration becomes three things: a record with named properties, edges to entities in a shared store, and a measurement whose tags are the entity references and whose fields are the remaining properties.">
+<figcaption>One model, three renderings. Nothing in a document says "this is an event"; what makes it one is that the properties split cleanly into things you group by and things you measure.</figcaption>
+</figure>
 
 ## Properties, and what a type buys
 
@@ -161,4 +143,4 @@ firehose, and what makes the latest value a fetch rather than a scan.
 
 ---
 
-[Back: What to fetch next](06-frontier.md) · [Next: A graph, not a list](08-pipeline.md)
+[Back: What to fetch next](../frontier/) · [Next: A graph, not a list](../pipeline/)

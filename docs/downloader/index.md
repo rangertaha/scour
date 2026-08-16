@@ -1,42 +1,20 @@
+---
+title: Fetching, politely
+description: One request, wrapped in what a job asked for, inside what a site asked for.
+---
+
 # Fetching, politely
 
-*Chapter four of [the scour book](README.md).*
+*Chapter four of [the scour book](../).*
 
 The downloader is a core that does one HTTP request and a chain around it.
 What surrounds the chain is not configurable, because being wrong about it
 harms somebody else.
 
-```mermaid
-flowchart TB
-  REQ["request"] --> RED
-
-  subgraph RED["max_redirects: an attribute, and it wraps everything"]
-    direction TB
-    subgraph ROB["robots: an attribute, outside the chain"]
-      direction TB
-      subgraph CH["the chain: offsite 500, retry 550, cache 900"]
-        FETCH["one request, one response"]
-      end
-    end
-  end
-
-  FETCH --> NET[("the network")]
-  ROB -. "disallowed: dropped before the chain is entered" .-> DROP["dropped"]
-  RED -. "a 3xx is a new URL, so the next hop starts again from the outside,<br/>against its own host's robots.txt, and is cached under its own key" .-> REQ
-```
-
-<details>
-<summary>What this diagram shows</summary>
-
-A request passes through the redirect follower, then the robots check, then
-the plugin chain, then the fetch. A disallowed URL is dropped at the robots
-check before the chain is entered. A redirect sends the next hop back to the
-outside, so it passes through the robots check for its own host.
-
-</details>
-
-*What wraps what. The chain is a job's business. The two things outside it
-are not, and that is the whole reason they are drawn outside.*
+<figure>
+<img src="{{ '/img/downloader.svg' | relative_url }}" alt="A request passes through the redirect follower, then the robots check, then the plugin chain, then the fetch. A disallowed URL is dropped at the robots check before the chain is entered. A redirect sends the next hop back to the outside, so it passes through the robots check for its own host.">
+<figcaption>What wraps what. The chain is a job's business. The two things outside it are not, and that is the whole reason they are drawn outside.</figcaption>
+</figure>
 
 ## The core
 
@@ -117,7 +95,7 @@ per host rather than one for the request: a redirect chain reads the robots.txt
 of every host it passes through, and each of those sites asked for something.
 The scheduler is the one place that knows which of them it has already recorded,
 so that is where the list is deduplicated and handed to the frontier. What the
-frontier then does with it is [the next chapter but one](06-frontier.md).
+frontier then does with it is [the next chapter but one](../frontier/).
 
 ## Redirects
 
@@ -163,4 +141,4 @@ outcome for a URL outside the scope and not a sign anything went wrong.
 
 ---
 
-[Back: Chains run both ways](03-chains.md) · [Next: The cache is the corpus](05-cache.md)
+[Back: Chains run both ways](../chains/) · [Next: The cache is the corpus](../cache/)

@@ -1,39 +1,20 @@
+---
+title: Local until it has to be shared
+description: Twelve commands, the loop they make, and the line between what runs here and what needs a cluster.
+---
+
 # Local until it has to be shared
 
-*Chapter nine of [the scour book](README.md).*
+*Chapter nine of [the scour book](../).*
 
 A crawler is a thing you argue with before you run it. So the commands that
 read a document need nothing running at all, and the line between those and
 the rest is the first thing worth knowing about the command line.
 
-```mermaid
-flowchart TB
-  subgraph CLUSTER["needs a cluster: a broker, and whatever it is keeping for you"]
-    direction TB
-    subgraph DIR["needs a directory here: the cache, and a frontier of its own"]
-      direction TB
-      subgraph DOC["needs nothing but the document"]
-        L["init · validate · show · spec · defaults<br/><br/>offline, in CI, on a plane"]
-      end
-      M["try · run · train · topic"]
-    end
-    O["serve · service · secret"]
-  end
-```
-
-<details>
-<summary>What this diagram shows</summary>
-
-Three nested rings of commands. The innermost holds init, validate, show, spec
-and defaults, which need nothing but the document. Around it, try, run, train
-and topic, which need a directory on this machine for the cache and the
-frontier. Around those, serve, service and secret, which need a cluster. A
-command in an outer ring needs everything in the rings inside it.
-
-</details>
-
-*What has to exist before a command can work. The innermost ring is the one
-you are in while a job is still being written, which is most of the time.*
+<figure>
+<img src="{{ '/img/cli.svg' | relative_url }}" alt="Three nested rings of commands. The innermost holds init, validate, show, spec and defaults, which need nothing but the document. Around it, try, run, train and topic, which need a directory on this machine for the cache and the frontier. Around those, serve, service and secret, which need a cluster. A command in an outer ring needs everything in the rings inside it.">
+<figcaption>What has to exist before a command can work. The innermost ring is the one you are in while a job is still being written, which is most of the time.</figcaption>
+</figure>
 
 ## The loop
 
@@ -850,4 +831,4 @@ records either way.
 
 ---
 
-[Back: A graph, not a list](08-pipeline.md) · [Next: Where everything lives](10-storage.md)
+[Back: A graph, not a list](../pipeline/) · [Next: Where everything lives](../storage/)

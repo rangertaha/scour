@@ -1,38 +1,21 @@
+---
+title: The cache is the corpus
+description: Bodies are kept because understanding a page is cheap and fetching it is not.
+---
+
 # The cache is the corpus
 
-*Chapter five of [the scour book](README.md).*
+*Chapter five of [the scour book](../).*
 
 Fetching is the expensive, rate-limited, impolite part of crawling.
 Understanding a page is neither. Keeping the bodies is what lets extraction be
 re-run, and re-run again after a change to how it works, without asking a site
 for the same page twice.
 
-```mermaid
-flowchart TB
-  URL["https://example.com/story"] --> KEY["one key, from the normalised URL"]
-
-  KEY --> BODY[("key<br/>the bytes as the server sent them")]
-  KEY --> META[("key + .meta<br/>status, final URL, headers, when")]
-
-  BODY --> HIT{"a hit needs both"}
-  META --> HIT
-  HIT --> TEXT["text, decoded now,<br/>using the headers beside the body"]
-
-  META -. "written second and read first, so a half-written entry<br/>is a clean miss rather than a body nobody can decode" .-> HIT
-```
-
-<details>
-<summary>What this diagram shows</summary>
-
-A URL is hashed to a key. The key holds the body exactly as the server sent
-it, and the same key with a dot-meta suffix holds the status, final URL,
-headers and fetch time. Reading back requires both; decoding uses the headers
-from the sidecar.
-
-</details>
-
-*One page, two keys. The body is kept exactly as it arrived; everything
-needed to read it back correctly is kept beside it.*
+<figure>
+<img src="{{ '/img/cache.svg' | relative_url }}" alt="A URL is hashed to a key. The key holds the body exactly as the server sent it, and the same key with a dot-meta suffix holds the status, final URL, headers and fetch time. Reading back requires both; decoding uses the headers from the sidecar.">
+<figcaption>One page, two keys. The body is kept exactly as it arrived; everything needed to read it back correctly is kept beside it.</figcaption>
+</figure>
 
 ## What is stored, and why in two keys
 
@@ -108,4 +91,4 @@ nowhere the job was written down.
 
 ---
 
-[Back: Fetching, politely](04-downloader.md) · [Next: What to fetch next](06-frontier.md)
+[Back: Fetching, politely](../downloader/) · [Next: What to fetch next](../frontier/)
