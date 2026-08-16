@@ -5,7 +5,7 @@ description: Bodies are kept because understanding a page is cheap and fetching 
 
 # The cache is the corpus
 
-*Chapter five of [the scour book](../).*
+*Chapter five of [the scour book](../index.md).*
 
 Fetching is the expensive, rate-limited, impolite part of crawling.
 Understanding a page is neither. Keeping the bodies is what lets extraction be
@@ -13,7 +13,7 @@ re-run, and re-run again after a change to how it works, without asking a site
 for the same page twice.
 
 <figure>
-<img src="{{ '/img/cache.svg' | relative_url }}" alt="A URL is hashed to a key. The key holds the body exactly as the server sent it, and the same key with a dot-meta suffix holds the status, final URL, headers and fetch time. Reading back requires both; decoding uses the headers from the sidecar.">
+<img src="../img/cache.svg" alt="A URL is hashed to a key. The key holds the body exactly as the server sent it, and the same key with a dot-meta suffix holds the status, final URL, headers and fetch time. Reading back requires both; decoding uses the headers from the sidecar.">
 <figcaption>One page, two keys. The body is kept exactly as it arrived; everything needed to read it back correctly is kept beside it.</figcaption>
 </figure>
 
@@ -91,4 +91,4 @@ nowhere the job was written down.
 
 ---
 
-[Back: Fetching, politely](../downloader/) · [Next: What to fetch next](../frontier/)
+[Back: Fetching, politely](../downloader/index.md) · [Next: What to fetch next](../frontier/index.md)

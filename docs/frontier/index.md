@@ -5,14 +5,14 @@ description: The queue is the crawler. Ordering it is most of what focused means
 
 # What to fetch next
 
-*Chapter six of [the scour book](../).*
+*Chapter six of [the scour book](../index.md).*
 
 An exhaustive crawler can use a queue: it is going everywhere anyway and only
 the order changes. A focused crawler is choosing what not to fetch, and that
 choice is the frontier.
 
 <figure>
-<img src="{{ '/img/frontier.svg' | relative_url }}" alt="Two tables. The urls table is per job and holds waiting URLs with a score, a depth and the time each becomes ready again. The hosts table is shared across jobs and holds, per host, the earliest time it may next be touched and the delay it asked for. A lease joins them, taking the highest-scoring ready URL whose host is not cooling.">
+<img src="../img/frontier.svg" alt="Two tables. The urls table is per job and holds waiting URLs with a score, a depth and the time each becomes ready again. The hosts table is shared across jobs and holds, per host, the earliest time it may next be touched and the delay it asked for. A lease joins them, taking the highest-scoring ready URL whose host is not cooling.">
 <figcaption>Two tables in one SQLite database. The urls table is partitioned by job; the hosts table deliberately is not, because politeness cannot be.</figcaption>
 </figure>
 
@@ -257,4 +257,4 @@ twice, because the version is the optimisation and not the guarantee.
 
 ---
 
-[Back: The cache is the corpus](../cache/) · [Next: Shapes, entities, measurements](../items/)
+[Back: The cache is the corpus](../cache/index.md) · [Next: Shapes, entities, measurements](../items/index.md)

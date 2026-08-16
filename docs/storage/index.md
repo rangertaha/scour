@@ -5,14 +5,14 @@ description: Eleven stores, each with one owner and one reason to exist.
 
 # Where everything lives
 
-*Chapter ten of [the scour book](../).*
+*Chapter ten of [the scour book](../index.md).*
 
 Eleven kinds of thing get kept and they want different stores. The decisions
 were argued out one at a time; the map is the thing worth being able to read
 at once.
 
 <figure>
-<img src="{{ '/img/storage.svg' | relative_url }}" alt="The four stages above the stores they touch. The scheduler holds the frontier in SQLite and the pipeline holds records in SQLite, and they share no file. The downloader and the spider touch no database at all, only the shared cache. The entity graph and the event log sit behind one process, `scour service`, because two stages need them and a file cannot have two owners. Jobs, run state, secrets and nodes live in NATS key-value buckets, which is the one store every node already has.">
+<img src="../img/storage.svg" alt="The four stages above the stores they touch. The scheduler holds the frontier in SQLite and the pipeline holds records in SQLite, and they share no file. The downloader and the spider touch no database at all, only the shared cache. The entity graph and the event log sit behind one process, `scour service`, because two stages need them and a file cannot have two owners. Jobs, run state, secrets and nodes live in NATS key-value buckets, which is the one store every node already has.">
 <figcaption>The two stages that touch a database touch different ones, and they share no file. The two in the middle touch none: a fetching node needs the network and the cache, and a parsing node needs the cache and the spec.</figcaption>
 </figure>
 
@@ -117,4 +117,4 @@ distributed-systems problem here.
 
 ---
 
-[Back: Local until it has to be shared](../cli/)
+[Back: Local until it has to be shared](../cli/index.md)

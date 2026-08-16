@@ -5,7 +5,7 @@ description: Middleware wraps a stage, so every link sees the request going out 
 
 # Chains run both ways
 
-*Chapter three of [the scour book](../).*
+*Chapter three of [the scour book](../index.md).*
 
 A chain wraps its stage rather than hooking it, so every link sees the request
 on the way out and the response on the way back, in opposite orders. That is
@@ -13,7 +13,7 @@ what makes `order` mean something, and it is the part that is easy to get
 wrong.
 
 <figure>
-<img src="{{ '/img/chains.svg' | relative_url }}" alt="The same three links, twice. On the way out a request passes offsite at 500, retry at 550 and cache at 900, in that order, and reaches the network. On the way back the response passes the same three in reverse. A cache hit returns from 900 without the network being reached, so the links outside it still see a response and the ones inside it never ran. A drop at offsite ends the request there.">
+<img src="../img/chains.svg" alt="The same three links, twice. On the way out a request passes offsite at 500, retry at 550 and cache at 900, in that order, and reaches the network. On the way back the response passes the same three in reverse. A cache hit returns from 900 without the network being reached, so the links outside it still see a response and the ones inside it never ran. A drop at offsite ends the request there.">
 <figcaption>The same three links, seen twice. On the way out they run low to high; on the way back, high to low. A cache hit returns without calling the rest, so the links outside it still see a response and the links inside it never ran.</figcaption>
 </figure>
 
@@ -61,7 +61,7 @@ machinery can run an ordered set of middleware. Neither of them can answer
 whether `cache` is a thing that exists.
 
 <figure>
-<img src="{{ '/img/chains-2.svg' | relative_url }}" alt="Plugin names from the job document are resolved against a registry of what this node has compiled in. Names that resolve become ordered links wrapping the core; a name nothing implements refuses the whole chain.">
+<img src="../img/chains-2.svg" alt="Plugin names from the job document are resolved against a registry of what this node has compiled in. Names that resolve become ordered links wrapping the core; a name nothing implements refuses the whole chain.">
 <figcaption>The seam. It is the first place a job naming a plugin nothing implements is refused, and it refuses the whole chain rather than running a partial one.</figcaption>
 </figure>
 
@@ -104,4 +104,4 @@ says exists, and that is asked when a chain is built.
 
 ---
 
-[Back: One document, everything in it](../job/) · [Next: Fetching, politely](../downloader/)
+[Back: One document, everything in it](../job/index.md) · [Next: Fetching, politely](../downloader/index.md)

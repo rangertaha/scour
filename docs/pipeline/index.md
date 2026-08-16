@@ -5,14 +5,14 @@ description: Steps run when what they require has run, and exporters each write 
 
 # A graph, not a list
 
-*Chapter eight of [the scour book](../).*
+*Chapter eight of [the scour book](../index.md).*
 
 Every other stage is a chain, because a request has one path through it. The
 pipeline is not, because the work on an item is a dependency graph and
 pretending otherwise costs concurrency for nothing.
 
 <figure>
-<img src="{{ '/img/pipeline.svg' | relative_url }}" alt="Five pipeline steps arranged by dependency, in four waves. Clean runs first; validate and dedupe both require clean and run at the same time, which is the widest wave; rank requires both of them; a python step requires rank.">
+<img src="../img/pipeline.svg" alt="Five pipeline steps arranged by dependency, in four waves. Clean runs first; validate and dedupe both require clean and run at the same time, which is the widest wave; rank requires both of them; a python step requires rank.">
 <figcaption>The waves are computed, not written. Four of them here, two steps wide at the widest, and the width is what a run can actually do at the same time.</figcaption>
 </figure>
 
@@ -97,4 +97,4 @@ published as a measurement for whatever is listening now.
 
 ---
 
-[Back: Shapes, entities, measurements](../items/) · [Next: Local until it has to be shared](../cli/)
+[Back: Shapes, entities, measurements](../items/index.md) · [Next: Local until it has to be shared](../cli/index.md)

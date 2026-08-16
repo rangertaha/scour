@@ -111,7 +111,7 @@ var (
 	fenced = regexp.MustCompile("(?s)```([a-z]*)\n(.*?)\n```")
 
 	// A markdown link to another chapter, which is the only kind that can rot.
-	chapterLink = regexp.MustCompile(`\]\((?:\.\./)?([a-z]+)/\)`)
+	chapterLink = regexp.MustCompile(`\]\((?:\.\./)?([a-z]+)/index\.md\)`)
 
 	// A position and the plugin it belongs to, as the book's tables print them.
 	placement = regexp.MustCompile(`\|\s*(\d+)\s*\|\s*` + "`" + `([a-z]+)` + "`" + `\s*\|`)
@@ -528,11 +528,17 @@ func TestEveryChapterIsReachable(t *testing.T) {
 var pagerRel = regexp.MustCompile(`\[(Back|Next): [^\]]+\]\(([^)]+)\)`)
 
 // chapterAt resolves a link written from one chapter into the chapter it names.
-// The cover links down to a sibling directory, a chapter links up and across,
-// and both link back to the cover as "../", so the three shapes are "job/",
-// "../items/" and "../".
+//
+// Links carry the index.md rather than stopping at the directory, which reads
+// the same on GitHub and lets MkDocs resolve them: written as "../frontier/"
+// the site builds with nineteen "unrecognized relative link" notices and
+// validates none of them, so a chapter renamed out from under a link would go
+// unnoticed by the build. The three shapes are "job/index.md",
+// "../items/index.md" and "../index.md".
 func chapterAt(link string) string {
-	link = strings.TrimSuffix(strings.TrimPrefix(link, "../"), "/")
+	link = strings.TrimPrefix(link, "../")
+	link = strings.TrimSuffix(link, "index.md")
+	link = strings.TrimSuffix(link, "/")
 	if link == "" {
 		return "index"
 	}
@@ -605,7 +611,7 @@ func TestEveryChapterIsWholeAndAccessible(t *testing.T) {
 
 // figure is a drawing as the book references one, with the text that stands in
 // for it.
-var figure = regexp.MustCompile(`<img src="\{\{ '/img/([a-z0-9-]+\.svg)' \| relative_url \}\}" alt="([^"]*)">`)
+var figure = regexp.MustCompile(`<img src="(?:\.\./)?img/([a-z0-9-]+\.svg)" alt="([^"]*)">`)
 
 // TestEveryFigureHasItsPicture.
 //
@@ -646,6 +652,16 @@ func TestEveryFigureHasItsPicture(t *testing.T) {
 			if strings.TrimSpace(m[2]) == "" {
 				t.Errorf("%s shows img/%s with nothing said about it", name, m[1])
 			}
+		}
+
+		// A path Jekyll resolves and GitHub does not is a picture that renders
+		// on the site and is broken in the repository. These were written as
+		// {{ '/img/x.svg' | relative_url }}, which is Liquid: Pages processes
+		// it, github.com serves it verbatim, and every diagram in the book came
+		// out as a broken image for anybody reading it where it lives. A plain
+		// relative path resolves in both.
+		if strings.Contains(page, `src="{{`) {
+			t.Errorf("%s builds an image path with Liquid, which only Pages resolves", name)
 		}
 	}
 	if checked == 0 {

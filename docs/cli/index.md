@@ -5,14 +5,14 @@ description: Twelve commands, the loop they make, and the line between what runs
 
 # Local until it has to be shared
 
-*Chapter nine of [the scour book](../).*
+*Chapter nine of [the scour book](../index.md).*
 
 A crawler is a thing you argue with before you run it. So the commands that
 read a document need nothing running at all, and the line between those and
 the rest is the first thing worth knowing about the command line.
 
 <figure>
-<img src="{{ '/img/cli.svg' | relative_url }}" alt="Three nested rings of commands. The innermost holds init, validate, show, spec and defaults, which need nothing but the document. Around it, try, run, train and topic, which need a directory on this machine for the cache and the frontier. Around those, serve, service and secret, which need a cluster. A command in an outer ring needs everything in the rings inside it.">
+<img src="../img/cli.svg" alt="Three nested rings of commands. The innermost holds init, validate, show, spec and defaults, which need nothing but the document. Around it, try, run, train and topic, which need a directory on this machine for the cache and the frontier. Around those, serve, service and secret, which need a cluster. A command in an outer ring needs everything in the rings inside it.">
 <figcaption>What has to exist before a command can work. The innermost ring is the one you are in while a job is still being written, which is most of the time.</figcaption>
 </figure>
 
@@ -831,4 +831,4 @@ records either way.
 
 ---
 
-[Back: A graph, not a list](../pipeline/) · [Next: Where everything lives](../storage/)
+[Back: A graph, not a list](../pipeline/index.md) · [Next: Where everything lives](../storage/index.md)

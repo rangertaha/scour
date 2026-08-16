@@ -5,14 +5,14 @@ description: One request, wrapped in what a job asked for, inside what a site as
 
 # Fetching, politely
 
-*Chapter four of [the scour book](../).*
+*Chapter four of [the scour book](../index.md).*
 
 The downloader is a core that does one HTTP request and a chain around it.
 What surrounds the chain is not configurable, because being wrong about it
 harms somebody else.
 
 <figure>
-<img src="{{ '/img/downloader.svg' | relative_url }}" alt="A request passes through the redirect follower, then the robots check, then the plugin chain, then the fetch. A disallowed URL is dropped at the robots check before the chain is entered. A redirect sends the next hop back to the outside, so it passes through the robots check for its own host.">
+<img src="../img/downloader.svg" alt="A request passes through the redirect follower, then the robots check, then the plugin chain, then the fetch. A disallowed URL is dropped at the robots check before the chain is entered. A redirect sends the next hop back to the outside, so it passes through the robots check for its own host.">
 <figcaption>What wraps what. The chain is a job's business. The two things outside it are not, and that is the whole reason they are drawn outside.</figcaption>
 </figure>
 
@@ -95,7 +95,7 @@ per host rather than one for the request: a redirect chain reads the robots.txt
 of every host it passes through, and each of those sites asked for something.
 The scheduler is the one place that knows which of them it has already recorded,
 so that is where the list is deduplicated and handed to the frontier. What the
-frontier then does with it is [the next chapter but one](../frontier/).
+frontier then does with it is [the next chapter but one](../frontier/index.md).
 
 ## Redirects
 
@@ -141,4 +141,4 @@ outcome for a URL outside the scope and not a sign anything went wrong.
 
 ---
 
-[Back: Chains run both ways](../chains/) · [Next: The cache is the corpus](../cache/)
+[Back: Chains run both ways](../chains/index.md) · [Next: The cache is the corpus](../cache/index.md)

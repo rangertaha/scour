@@ -5,14 +5,14 @@ description: What is extracted, what it refers to, and what it becomes when it f
 
 # Shapes, entities, measurements
 
-*Chapter seven of [the scour book](../).*
+*Chapter seven of [the scour book](../index.md).*
 
 A job declares what it is looking for. One declaration has three lives: a
 shape a spider extracts against, a set of assertions about things in the
 world, and a measurement when it flows.
 
 <figure>
-<img src="{{ '/img/items.svg' | relative_url }}" alt="One item declaration becomes three things: a record with named properties, edges to entities in a shared store, and a measurement whose tags are the entity references and whose fields are the remaining properties.">
+<img src="../img/items.svg" alt="One item declaration becomes three things: a record with named properties, edges to entities in a shared store, and a measurement whose tags are the entity references and whose fields are the remaining properties.">
 <figcaption>One model, three renderings. Nothing in a document says "this is an event"; what makes it one is that the properties split cleanly into things you group by and things you measure.</figcaption>
 </figure>
 
@@ -143,4 +143,4 @@ firehose, and what makes the latest value a fetch rather than a scan.
 
 ---
 
-[Back: What to fetch next](../frontier/) · [Next: A graph, not a list](../pipeline/)
+[Back: What to fetch next](../frontier/index.md) · [Next: A graph, not a list](../pipeline/index.md)

@@ -5,14 +5,14 @@ description: An HCL job carries its own engine, so nothing is inherited from whi
 
 # One document, everything in it
 
-*Chapter two of [the scour book](../).*
+*Chapter two of [the scour book](../index.md).*
 
 A job is an HCL document a client submits. It carries its own engine
 configuration, so nothing is inherited from whichever server picks it up, and
 a job resubmitted next month does what it did today.
 
 <figure>
-<img src="{{ '/img/job.svg' | relative_url }}" alt="A job block holding an item block, three stage blocks and an exporter. Inside a stage block, attributes such as robots, timeout and rate are plain settings, and a nested plugin block is a separate thing that was added to it.">
+<img src="../img/job.svg" alt="A job block holding an item block, three stage blocks and an exporter. Inside a stage block, attributes such as robots, timeout and rate are plain settings, and a nested plugin block is a separate thing that was added to it.">
 <figcaption>Every block is optional except the item blocks and the start URLs. The division that matters is inside a stage: plain attributes, and nested plugin blocks.</figcaption>
 </figure>
 
@@ -135,4 +135,4 @@ rather than a guess.
 
 ---
 
-[Back: Four stages and a bus](../) · [Next: Chains run both ways](../chains/)
+[Back: Four stages and a bus](../index.md) · [Next: Chains run both ways](../chains/index.md)

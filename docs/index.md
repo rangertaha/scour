@@ -14,7 +14,7 @@ talking over NATS rather than objects calling each other, and that a job
 brings its own engine with it.
 
 <figure>
-<img src="{{ '/img/index.svg' | relative_url }}" alt="Requests flow from the scheduler to the downloader to the spider to the pipeline and out to exporters, with new requests looping from the spider back to the scheduler. Between the downloader and the spider only a cache key crosses; the body itself goes down into the shared cache and back up.">
+<img src="img/index.svg" alt="Requests flow from the scheduler to the downloader to the spider to the pipeline and out to exporters, with new requests looping from the spider back to the scheduler. Between the downloader and the spider only a cache key crosses; the body itself goes down into the shared cache and back up.">
 <figcaption>The whole engine. What travels between the downloader and the spider is a status and a cache key, never a body: the body goes down into the shared cache and back up, which is why two things read one, and why decoding is a function both call rather than a link in either chain. Only one arrow points backwards, and it is the one that makes a focused crawl focused.</figcaption>
 </figure>
 
@@ -64,25 +64,25 @@ per host and that settles it.
 
 ## Contents
 
-- [One document, everything in it](job/)  
+- [One document, everything in it](job/index.md)  
   An HCL job carries its own engine, so nothing is inherited from whichever server picks it up.
-- [Chains run both ways](chains/)  
+- [Chains run both ways](chains/index.md)  
   Middleware wraps a stage, so every link sees the request going out and the response coming back.
-- [Fetching, politely](downloader/)  
+- [Fetching, politely](downloader/index.md)  
   One request, wrapped in what a job asked for, inside what a site asked for.
-- [The cache is the corpus](cache/)  
+- [The cache is the corpus](cache/index.md)  
   Bodies are kept because understanding a page is cheap and fetching it is not.
-- [What to fetch next](frontier/)  
+- [What to fetch next](frontier/index.md)  
   The queue is the crawler. Ordering it is most of what focused means.
-- [Shapes, entities, measurements](items/)  
+- [Shapes, entities, measurements](items/index.md)  
   What is extracted, what it refers to, and what it becomes when it flows.
-- [A graph, not a list](pipeline/)  
+- [A graph, not a list](pipeline/index.md)  
   Steps run when what they require has run, and exporters each write one item.
-- [Local until it has to be shared](cli/)  
+- [Local until it has to be shared](cli/index.md)  
   Twelve commands, the loop they make, and the line between what runs here and what needs a cluster.
-- [Where everything lives](storage/)  
+- [Where everything lives](storage/index.md)  
   Eleven stores, each with one owner and one reason to exist.
 
 ---
 
-[Next: One document, everything in it](job/)
+[Next: One document, everything in it](job/index.md)
