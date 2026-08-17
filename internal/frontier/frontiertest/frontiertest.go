@@ -15,6 +15,7 @@ package frontiertest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -162,7 +163,7 @@ func testEmpty(t *testing.T, open Open) {
 	f := open(t, frontier.Config{})
 
 	_, err := f.Lease(context.Background(), job, Origin, time.Minute)
-	if err != frontier.ErrEmpty {
+	if !errors.Is(err, frontier.ErrEmpty) {
 		t.Fatalf("err = %v, want ErrEmpty", err)
 	}
 	if n, err := f.Len(context.Background(), job); err != nil || n != 0 {
@@ -747,7 +748,7 @@ func benchLease(b *testing.B, open Open, size int) {
 	for i := 0; i < b.N; i++ {
 		now = now.Add(time.Millisecond)
 		req, err := f.Lease(ctx, job, now, time.Minute)
-		if err == frontier.ErrEmpty {
+		if errors.Is(err, frontier.ErrEmpty) {
 			b.StopTimer()
 			fill(b, f, size, 200)
 			now = now.Add(time.Hour)
@@ -815,7 +816,7 @@ func benchPolicy(b *testing.B, open Open, policy string) {
 	for i := 0; i < b.N; i++ {
 		now = now.Add(time.Millisecond)
 		req, err := f.Lease(ctx, job, now, time.Minute)
-		if err == frontier.ErrEmpty {
+		if errors.Is(err, frontier.ErrEmpty) {
 			b.StopTimer()
 			fill(b, f, 10_000, 100)
 			b.StartTimer()
@@ -842,7 +843,7 @@ func benchHosts(b *testing.B, open Open) {
 	for i := 0; i < b.N; i++ {
 		now = now.Add(10 * time.Millisecond)
 		req, err := f.Lease(ctx, job, now, time.Minute)
-		if err == frontier.ErrEmpty {
+		if errors.Is(err, frontier.ErrEmpty) {
 			now = now.Add(time.Minute)
 			continue
 		}

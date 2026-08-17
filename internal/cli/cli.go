@@ -60,18 +60,18 @@ func New() *App {
 
 // Printf writes to the command's output.
 func (a *App) Printf(format string, args ...any) {
-	fmt.Fprintf(a.Out, format, args...)
+	_, _ = fmt.Fprintf(a.Out, format, args...)
 }
 
 // Println writes a line to the command's output.
 func (a *App) Println(args ...any) {
-	fmt.Fprintln(a.Out, args...)
+	_, _ = fmt.Fprintln(a.Out, args...)
 }
 
 // Warnf writes to the command's error stream, for things that are worth saying
 // but are not why the command failed.
 func (a *App) Warnf(format string, args ...any) {
-	fmt.Fprintf(a.Err, format, args...)
+	_, _ = fmt.Fprintf(a.Err, format, args...)
 }
 
 // Error is a failure with an exit code attached.
@@ -232,7 +232,7 @@ func Run(ctx context.Context, a *App, root *ucli.Command, args []string) int {
 	// commands print their own detail because they have more of it: the
 	// document, the line, the list of problems.
 	if msg := err.Error(); msg != "" && msg != "refused" {
-		fmt.Fprintf(a.Err, "scour: %s\n", msg)
+		_, _ = fmt.Fprintf(a.Err, "scour: %s\n", msg)
 	}
 	return CodeOf(err)
 }

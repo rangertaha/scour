@@ -123,7 +123,7 @@ func Open(cfg frontier.Config) (*Frontier, error) {
 	db.SetMaxOpenConns(1)
 
 	if err := schema(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 

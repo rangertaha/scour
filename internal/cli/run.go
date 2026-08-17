@@ -138,10 +138,10 @@ func runCrawl(ctx context.Context, a *App, path, jobName, dir string, verbose, f
 			return Failedf("%v", err)
 		}
 		if err := queue.Remove(ctx, job.Name); err != nil {
-			queue.Close()
+			_ = queue.Close()
 			return Failedf("%v", err)
 		}
-		queue.Close()
+		_ = queue.Close()
 	}
 
 	seeded, err := crawl.Seed(ctx)

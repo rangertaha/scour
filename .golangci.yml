@@ -37,11 +37,23 @@ linters:
       - linters: [staticcheck]
         text: "^QF"
 
-      # cluster_test.go is a test about a node being asked for a stage nobody
-      # serves, and "downlaod" is the fixture: the typo IS the case. Spelling
-      # it correctly would delete the test.
+      # "downlaod" is a fixture, not a mistake. A node asked for a stage nobody
+      # serves is refused at the door, and the likeliest way to ask for one is
+      # to typo it; the test uses that spelling and node.go's comment quotes it.
+      # Spelling it correctly would delete the case.
       - linters: [misspell]
-        path: cmd/scour/cluster_test\.go
+        text: "downlaod"
+
+      # SA5011 in the shared suites. staticcheck models testing.T.Fatal as
+      # ending the test and testing.TB.Fatal as not, and a suite that runs
+      # against several implementations takes a TB. So every
+      # `if x == nil { t.Fatal(...) }` followed by using x reads as a possible
+      # nil dereference, and annotating the deref just moves the report onto
+      # the guard. The guards are real and the code below them is unreachable
+      # when nil.
+      - linters: [staticcheck]
+        text: "SA5011"
+        path: (frontiertest|extract)/
 
       # Two dependencies deprecated an API each: parquet-go's Writer and
       # google.CredentialsFromJSON. Both still work and both want a migration

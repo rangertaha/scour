@@ -73,8 +73,8 @@ func Replace(path string, data []byte, perm fs.FileMode) error {
 	// behind turns a full disk into a directory nobody can clean up by hand,
 	// because the names are random.
 	fail := func(err error) error {
-		temporary.Close()
-		os.Remove(name)
+		_ = temporary.Close()
+		_ = os.Remove(name)
 		return fmt.Errorf("safefile: %s: %w", path, err)
 	}
 
@@ -89,11 +89,11 @@ func Replace(path string, data []byte, perm fs.FileMode) error {
 	}
 	if err := temporary.Close(); err != nil {
 		temporary = nil
-		os.Remove(name)
+		_ = os.Remove(name)
 		return fmt.Errorf("safefile: %s: %w", path, err)
 	}
 	if err := os.Rename(name, path); err != nil {
-		os.Remove(name)
+		_ = os.Remove(name)
 		return fmt.Errorf("safefile: %s: %w", path, err)
 	}
 	return nil

@@ -155,7 +155,7 @@ func newJSON(_ context.Context, cfg exporter.Config) (exporter.Exporter, error) 
 		return nil, err
 	}
 	if _, err := io.WriteString(out, "[\n"); err != nil {
-		out.Close()
+		_ = out.Close()
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return &array{out: out, path: path}, nil
@@ -198,7 +198,7 @@ func (a *array) Close() error {
 	a.closed = true
 
 	if _, err := io.WriteString(a.out, "\n]\n"); err != nil {
-		a.out.Close()
+		_ = a.out.Close()
 		return fmt.Errorf("%s: %w", a.path, err)
 	}
 	return a.out.Close()
@@ -245,12 +245,12 @@ func newCSV(_ context.Context, cfg exporter.Config) (exporter.Exporter, error) {
 	// what makes "no rows" different from "wrong file". The json exporter
 	// already writes its opening bracket here for the same reason.
 	if err := t.writer.Write(t.columns); err != nil {
-		out.Close()
+		_ = out.Close()
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	t.writer.Flush()
 	if err := t.writer.Error(); err != nil {
-		out.Close()
+		_ = out.Close()
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return t, nil
@@ -290,7 +290,7 @@ func (t *table) Close() error {
 
 	t.writer.Flush()
 	if err := t.writer.Error(); err != nil {
-		t.out.Close()
+		_ = t.out.Close()
 		return fmt.Errorf("%s: %w", t.path, err)
 	}
 	return t.out.Close()

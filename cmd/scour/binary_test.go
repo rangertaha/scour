@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -109,7 +110,8 @@ func scour(t *testing.T, dir string, args ...string) outcome {
 
 	err := cmd.Run()
 	code := 0
-	if exit, ok := err.(*exec.ExitError); ok {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
 		code = exit.ExitCode()
 	} else if err != nil {
 		t.Fatalf("running scour %v: %v", args, err)

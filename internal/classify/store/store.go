@@ -147,7 +147,7 @@ func (s *Store) write(kind string, cfg classify.Config, flags int) error {
 	}
 
 	if _, err := file.Write(body); err != nil {
-		file.Close()
+		_ = file.Close()
 		return fmt.Errorf("classify: %w", err)
 	}
 	if err := file.Close(); err != nil {

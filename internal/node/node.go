@@ -235,7 +235,10 @@ func (n *Node) Watch(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer stop()
+	// stop returns an error nothing can act on here: the watch is being torn
+	// down because this function is returning, and the error that matters is
+	// the one it returns.
+	defer func() { _ = stop() }()
 
 	for {
 		select {

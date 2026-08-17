@@ -120,7 +120,7 @@ func (s *Site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // these share.
 func page(w http.ResponseWriter, title, body string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<html><head><meta property="og:title" content=%q></head><body>%s</body></html>`, title, body)
+	_, _ = fmt.Fprintf(w, `<html><head><meta property="og:title" content=%q></head><body>%s</body></html>`, title, body)
 }
 
 func (s *Site) route(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +129,7 @@ func (s *Site) route(w http.ResponseWriter, r *http.Request) {
 	// What the site permits, read before anything else on the host.
 	case path == "/robots.txt":
 		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprint(w, s.opts.Robots)
+		_, _ = fmt.Fprint(w, s.opts.Robots)
 
 	// The index links to one of everything, so a crawl started here discovers
 	// the whole shape without a test having to seed each URL by hand.
@@ -156,27 +156,27 @@ func (s *Site) route(w http.ResponseWriter, r *http.Request) {
 
 	case path == "/article/jsonld":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<html><head><script type="application/ld+json">
+		_, _ = fmt.Fprint(w, `<html><head><script type="application/ld+json">
 		  {"@context":"https://schema.org","@type":"NewsArticle","headline":"A JSON-LD story"}
 		</script></head><body><article>Words.</article></body></html>`)
 
 	case path == "/article/microdata":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<html><body><div itemscope itemtype="https://schema.org/NewsArticle">
+		_, _ = fmt.Fprint(w, `<html><body><div itemscope itemtype="https://schema.org/NewsArticle">
 		  <h1 itemprop="headline">A microdata story</h1></div></body></html>`)
 
 	// Markup nobody would write on purpose and every crawler meets: unclosed
 	// tags, a stray close, an unquoted attribute.
 	case path == "/article/messy":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<html><head><meta property=og:title content="A messy story">
+		_, _ = fmt.Fprint(w, `<html><head><meta property=og:title content="A messy story">
 		  <body><div><p>Words.</div></span><article>More.`)
 
 	// An encoding declared in the header and nowhere else, which is the case
 	// that turns into mojibake the moment a cache loses the headers.
 	case path == "/article/cyrillic":
 		w.Header().Set("Content-Type", "text/html; charset=windows-1251")
-		w.Write(append([]byte(`<html><head><meta property="og:title" content="`),
+		_, _ = w.Write(append([]byte(`<html><head><meta property="og:title" content="`),
 			append([]byte{0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2}, // Привет
 				[]byte(`"></head><body><article>Words.</article></body></html>`)...)...))
 
@@ -218,20 +218,22 @@ func (s *Site) route(w http.ResponseWriter, r *http.Request) {
 	// A ladder, for the depth budget.
 	case strings.HasPrefix(path, "/deep/"):
 		var n int
-		fmt.Sscanf(path, "/deep/%d", &n)
+		// A path that does not parse leaves n at zero, which is the right answer
+		// for a ladder: /deep/ with nothing after it is the top of it.
+		_, _ = fmt.Sscanf(path, "/deep/%d", &n)
 		page(w, fmt.Sprintf("Depth %d", n), fmt.Sprintf(`<a href="/deep/%d">deeper</a>`, n+1))
 
 	// Not a page at all.
 	case path == "/not-html":
 		w.Header().Set("Content-Type", "application/pdf")
-		fmt.Fprint(w, "%PDF-1.4 not really")
+		_, _ = fmt.Fprint(w, "%PDF-1.4 not really")
 
 	// Larger than any sane body limit.
 	case path == "/big":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<html><head><meta property="og:title" content="Enormous"></head><body>`)
-		fmt.Fprint(w, strings.Repeat("padding ", 200_000))
-		fmt.Fprint(w, `</body></html>`)
+		_, _ = fmt.Fprint(w, `<html><head><meta property="og:title" content="Enormous"></head><body>`)
+		_, _ = fmt.Fprint(w, strings.Repeat("padding ", 200_000))
+		_, _ = fmt.Fprint(w, `</body></html>`)
 
 	case path == "/slow":
 		time.Sleep(s.opts.Slow)

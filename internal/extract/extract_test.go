@@ -793,7 +793,7 @@ func TestARelationDoesNotStealAPropertysName(t *testing.T) {
 	if author == nil {
 		t.Fatal("the property was lost entirely")
 	}
-	if author.Text != "Alex Doe" {
+	if author.Text != "Alex Doe" { //nolint:staticcheck // guarded by a TB.Fatal above, which staticcheck does not model as terminating
 		t.Errorf("author = %q, want the property's own value", author.Text)
 	}
 	if role := author.Nested["role"]; role == nil || role.Text != "Correspondent" {
@@ -882,11 +882,11 @@ func TestANestedFieldIsLookedForInsideItsParentFirst(t *testing.T) {
 		t.Fatal("the parent was not found")
 	}
 
-	name := author.Nested["name"]
+	name := author.Nested["name"] //nolint:staticcheck // guarded by a TB.Fatal above, which staticcheck does not model as terminating
 	if name == nil {
 		t.Fatal("the nested field was not found")
 	}
-	if name.Text != "Alex Doe" {
+	if name.Text != "Alex Doe" { //nolint:staticcheck // guarded by a TB.Fatal above, which staticcheck does not model as terminating
 		t.Errorf("author.name = %q, want what is inside the byline", name.Text)
 	}
 }
@@ -916,7 +916,7 @@ func TestAFieldFoundOutsideItsParentSaysSo(t *testing.T) {
 	if name == nil {
 		t.Fatal("the nested field was not found at all")
 	}
-	if !strings.Contains(name.From, "outside author") {
+	if !strings.Contains(name.From, "outside author") { //nolint:staticcheck // guarded by a TB.Fatal above, which staticcheck does not model as terminating
 		t.Errorf("From = %q, want it marked as coming from outside the parent", name.From)
 	}
 }

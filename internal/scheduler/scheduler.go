@@ -163,7 +163,7 @@ func New(ctx context.Context, job *engine.Job, opts Options, open func(frontier.
 	built, err := plugin.Build(ctx, reg, job, engine.StageScheduler, opts.Eval)
 	if err != nil {
 		if own {
-			queue.Close()
+			_ = queue.Close()
 		}
 		return nil, err
 	}

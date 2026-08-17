@@ -152,7 +152,7 @@ func Open(dir string) (Store, error) {
 	db.SetMaxOpenConns(1)
 
 	if err := schema(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return &log{db: db, sql: storage.SQLite{}}, nil

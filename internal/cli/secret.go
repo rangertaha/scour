@@ -171,10 +171,10 @@ func secrets(ctx context.Context, join, keyFile string) (*secret.Store, func(), 
 
 	store, err := secret.Open(ctx, conn, key)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, Failedf("%v", err)
 	}
-	return store, func() { conn.Close() }, nil
+	return store, func() { _ = conn.Close() }, nil
 }
 
 // Resolver opens the cluster's secret store, if this node can.
@@ -198,10 +198,10 @@ func Resolver(ctx context.Context, join, keyFile string) (*hcl.EvalContext, func
 
 	store, err := secret.Open(ctx, conn, key)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, func() {}, false
 	}
-	return secret.Eval(ctx, store), func() { conn.Close() }, true
+	return secret.Eval(ctx, store), func() { _ = conn.Close() }, true
 }
 
 // server is where a client points: the flag, then the environment, then the

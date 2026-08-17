@@ -196,7 +196,7 @@ func New(ctx context.Context, job *engine.Job, out map[string]io.WriteCloser) (*
 	}
 
 	if len(missing) > 0 || len(failed) > 0 {
-		set.Close()
+		_ = set.Close()
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("job %q: nothing writes %s. This build writes %s",

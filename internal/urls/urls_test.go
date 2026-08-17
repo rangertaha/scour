@@ -183,8 +183,13 @@ func TestResolveRefusesWhatCannotBeFetched(t *testing.T) {
 func TestHashIsStableAndShort(t *testing.T) {
 	const u = "https://example.com/a"
 
-	if urls.Hash(u) != urls.Hash(u) {
-		t.Error("the same URL hashed to two things")
+	// Pinned rather than compared with itself. Hash(u) != Hash(u) is false
+	// whatever Hash does, so the assertion it looked like was never made: a
+	// hash is stable if it is the same in the next process and the next
+	// release, and only a written-down value says that.
+	const want = "2dce0a4c50441bfccfa9caf4b58c3cba"
+	if got := urls.Hash(u); got != want {
+		t.Errorf("Hash(%q) = %q, want %q. A frontier keyed by this cannot be resumed if it moves", u, got, want)
 	}
 	if urls.Hash(u) == urls.Hash(u+"b") {
 		t.Error("two URLs hashed to one thing")

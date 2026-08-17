@@ -160,7 +160,17 @@ func serve[Req, Res any](c *Conn, subject, queue string, wait time.Duration, han
 			// failure mode a request/reply service must not have.
 			out = []byte(`{"error":"bus: ` + subject + `: the reply could not be encoded"}`)
 		}
-		msg.Respond(out)
+		// Deliberately dropped, and it is the one ignored error here worth
+		// explaining. The lines above encode an error reply precisely so a
+		// caller is never left waiting, so failing to send it is the same
+		// failure arriving by another route.
+		//
+		// There is nothing to do about it from inside a handler: the send fails
+		// when the connection is already gone, there is no error path out of a
+		// nats.MsgHandler, and this function has no logger. The caller's own
+		// timeout is the backstop. Giving the service a logger so this could be
+		// reported is worth doing and is not a lint fix.
+		_ = msg.Respond(out)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bus: serve %s: %w", subject, err)
@@ -230,11 +240,11 @@ func (s *Service) ready(c *Conn) error {
 		// register, answering them from a store the caller believed it had
 		// abandoned. serving's own comment promised this and it was not
 		// happening.
-		s.Close()
+		_ = s.Close()
 		return s.err
 	}
 	if err := c.Flush(); err != nil {
-		s.Close()
+		_ = s.Close()
 		return fmt.Errorf("bus: %w", err)
 	}
 	return nil

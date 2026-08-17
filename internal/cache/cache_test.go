@@ -216,8 +216,11 @@ func TestAConfigDoesNotPrintItsCredentials(t *testing.T) {
 	}
 
 	for name, printed := range map[string]string{
-		"%v":                fmt.Sprintf("%v", cfg),
-		"%s":                fmt.Sprintf("%s", cfg),
+		"%v": fmt.Sprintf("%v", cfg),
+		// staticcheck says to call String() here. The point of this case is
+		// the %s path through fmt, which is what a careless log line uses;
+		// String() is the case on the line below.
+		"%s":                fmt.Sprintf("%s", cfg), //nolint:staticcheck // the verb is the test
 		"%+v":               fmt.Sprintf("%+v", cfg),
 		"%#v":               fmt.Sprintf("%#v", cfg),
 		"String":            cfg.String(),

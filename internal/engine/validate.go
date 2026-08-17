@@ -213,9 +213,7 @@ func (i *Item) validate() []error {
 		problems = append(problems, fmt.Errorf("item %q: no properties, so there is nothing to look for", i.Name))
 	}
 
-	for _, err := range validateProperties(i.Properties, "item "+i.Name) {
-		problems = append(problems, err)
-	}
+	problems = append(problems, validateProperties(i.Properties, "item "+i.Name)...)
 	problems = append(problems, validateRelations(i.Relations, "item "+i.Name)...)
 
 	// The time has to be a date this item actually extracts, or the event

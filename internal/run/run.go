@@ -317,7 +317,7 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Run, error) {
 	// their pages were being fetched somewhere they were not. Refused by name,
 	// which is what the whole engine does with a job it cannot honour.
 	if err := external(job); err != nil && opts.Fetch == nil && opts.Read == nil {
-		r.sched.Close()
+		_ = r.sched.Close()
 		return nil, err
 	}
 
@@ -326,7 +326,7 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Run, error) {
 	} else {
 		local, err := downloader.New(ctx, job, downloader.Options{Eval: opts.Eval})
 		if err != nil {
-			r.sched.Close()
+			_ = r.sched.Close()
 			return nil, err
 		}
 		r.fetch, r.closeFetch = local, local.Close
@@ -337,19 +337,19 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Run, error) {
 	} else {
 		local, err := spider.New(ctx, job, spider.Options{Eval: opts.Eval, Canon: r.canon})
 		if err != nil {
-			r.close()
+			_ = r.close()
 			return nil, err
 		}
 		r.read, r.closeRead = local, local.Close
 	}
 
 	if r.graph, err = pipeline.New(ctx, job); err != nil {
-		r.close()
+		_ = r.close()
 		return nil, err
 	}
 
 	if r.write, err = exporter.New(ctx, job, nil); err != nil {
-		r.close()
+		_ = r.close()
 		return nil, err
 	}
 	return r, nil

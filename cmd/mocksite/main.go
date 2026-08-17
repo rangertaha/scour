@@ -59,7 +59,7 @@ func main() {
 	go func() {
 		<-stop
 		fmt.Printf("\nmocksite served %d requests\n", site.Total())
-		server.Close()
+		_ = server.Close()
 	}()
 
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {

@@ -1004,7 +1004,13 @@ job "j" {
 	if shape(false).Fingerprint() == shape(true).Fingerprint() {
 		t.Error("a changed property did not change the fingerprint")
 	}
-	if shape(false).Fingerprint() != shape(false).Fingerprint() {
+	// Built twice on purpose: the fingerprint is derived from a shape held in
+	// maps, and a map's order reaching the output is a defect this repository
+	// has had more than once. Two separate constructions is the whole test, so
+	// they are named rather than written as one expression, which reads as
+	// comparing a value with itself and is what a linter sees.
+	first, second := shape(false).Fingerprint(), shape(false).Fingerprint()
+	if first != second {
 		t.Error("the same shape produced two fingerprints")
 	}
 }

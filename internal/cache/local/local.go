@@ -114,21 +114,21 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader) error {
 	// From here every failure removes the temporary file, so a failed write
 	// does not accumulate.
 	if _, err := io.Copy(tmp, r); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("cache/local: write %q: %w", key, err)
 	}
 	if err := tmp.Chmod(filePerm); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("cache/local: set permissions on %q: %w", key, err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("cache/local: close %q: %w", key, err)
 	}
 	if err := os.Rename(tmpName, final); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("cache/local: commit %q: %w", key, err)
 	}
 	return nil

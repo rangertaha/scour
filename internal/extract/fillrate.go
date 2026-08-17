@@ -286,14 +286,14 @@ func ratio(part, whole int) float64 {
 func (r *Report) String() string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "fill rates over %d pages\n", r.Pages)
+	_, _ = fmt.Fprintf(&b, "fill rates over %d pages\n", r.Pages)
 
 	for _, item := range r.Items {
-		fmt.Fprintf(&b, "\nitem %q: on %d pages (%s), complete on %d, %d required properties missing\n\n",
+		_, _ = fmt.Fprintf(&b, "\nitem %q: on %d pages (%s), complete on %d, %d required properties missing\n\n",
 			item.Name, item.Found, percent(item.Rate()), item.Complete, item.Missing)
 
 		w := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-		fmt.Fprintf(w, "  property\tfound\trate\t%s\tempty\tmissing\n", strings.Join(hows, "\t"))
+		_, _ = fmt.Fprintf(w, "  property\tfound\trate\t%s\tempty\tmissing\n", strings.Join(hows, "\t"))
 
 		for _, prop := range item.Properties {
 			name := prop.Name
@@ -301,16 +301,16 @@ func (r *Report) String() string {
 				name += "*"
 			}
 
-			fmt.Fprintf(w, "  %s\t%d\t%s", name, prop.Found, percent(prop.Rate()))
+			_, _ = fmt.Fprintf(w, "  %s\t%d\t%s", name, prop.Found, percent(prop.Rate()))
 			for _, how := range hows {
-				fmt.Fprintf(w, "\t%d", prop.By[how])
+				_, _ = fmt.Fprintf(w, "\t%d", prop.By[how])
 			}
-			fmt.Fprintf(w, "\t%d\t%d\n", prop.Empty, prop.Missing)
+			_, _ = fmt.Fprintf(w, "\t%d\t%d\n", prop.Empty, prop.Missing)
 		}
-		w.Flush()
+		_ = w.Flush()
 	}
 
-	fmt.Fprintf(&b, "\noverall %s. * is a required property.\n", percent(r.Overall()))
+	_, _ = fmt.Fprintf(&b, "\noverall %s. * is a required property.\n", percent(r.Overall()))
 	return b.String()
 }
 

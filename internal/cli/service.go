@@ -127,7 +127,7 @@ func runService(ctx context.Context, a *App, path, join string) error {
 	var stop []func() error
 	defer func() {
 		for i := len(stop) - 1; i >= 0; i-- {
-			stop[i]()
+			_ = stop[i]()
 		}
 	}()
 

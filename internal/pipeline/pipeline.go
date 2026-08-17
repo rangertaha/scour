@@ -159,7 +159,7 @@ func New(ctx context.Context, job *engine.Job) (*Pipeline, error) {
 	// its write-ahead files for the life of the process — which is the file
 	// lock a second run cannot take, named in Close's own documentation.
 	if len(missing) > 0 || len(failed) > 0 {
-		p.Close()
+		_ = p.Close()
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("job %q: no pipeline step of kind %s. This build has %s",

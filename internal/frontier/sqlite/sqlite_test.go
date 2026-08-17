@@ -5,6 +5,7 @@ package sqlite_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -159,7 +160,7 @@ func TestItSurvivesARestart(t *testing.T) {
 	if got.URL != "https://a.example/2" {
 		t.Errorf("leased %s, want the only request that was neither done nor held", got.URL)
 	}
-	if _, err := second.Lease(ctx, "news", now.Add(3*time.Second), time.Minute); err != frontier.ErrEmpty {
+	if _, err := second.Lease(ctx, "news", now.Add(3*time.Second), time.Minute); !errors.Is(err, frontier.ErrEmpty) {
 		t.Error("something was handed out that was already done or already leased")
 	}
 
@@ -214,7 +215,7 @@ func TestHostsAreSharedAcrossJobs(t *testing.T) {
 
 	// The second job wants the same host a moment later. It has to wait, or
 	// two jobs on one site would each get their own allowance.
-	if _, err := f.Lease(ctx, "two", now.Add(time.Second), time.Minute); err != frontier.ErrEmpty {
+	if _, err := f.Lease(ctx, "two", now.Add(time.Second), time.Minute); !errors.Is(err, frontier.ErrEmpty) {
 		t.Errorf("the second job was handed the host anyway: %v", err)
 	}
 	if _, err := f.Lease(ctx, "two", now.Add(11*time.Second), time.Minute); err != nil {
@@ -262,7 +263,7 @@ func TestRemoveDropsAJobAndLeavesTheHosts(t *testing.T) {
 	if hosts != 1 {
 		t.Errorf("hosts = %d; dropping a job forgot that a site was being paced", hosts)
 	}
-	if _, err := f.Lease(ctx, "two", now.Add(time.Second), time.Minute); err != frontier.ErrEmpty {
+	if _, err := f.Lease(ctx, "two", now.Add(time.Second), time.Minute); !errors.Is(err, frontier.ErrEmpty) {
 		t.Error("the surviving job was handed a host that is still cooling")
 	}
 }
@@ -400,7 +401,7 @@ func TestAnEmptyLeaseDoesNotReadTheFrontier(t *testing.T) {
 		const runs = 200
 		start := time.Now()
 		for range runs {
-			if _, err := f.Lease(ctx, "news", now, time.Minute); err != frontier.ErrEmpty {
+			if _, err := f.Lease(ctx, "news", now, time.Minute); !errors.Is(err, frontier.ErrEmpty) {
 				t.Fatalf("size %d: leased something while the only host was cooling: %v", size, err)
 			}
 		}

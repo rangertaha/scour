@@ -141,7 +141,7 @@ func open(ctx context.Context, cfg exporter.Config) (exporter.Exporter, error) {
 	t.insert = insert(t.item, t.columns)
 
 	if err := t.schema(ctx); err != nil {
-		f.release()
+		_ = f.release()
 		return nil, err
 	}
 	return t, nil
