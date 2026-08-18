@@ -48,17 +48,17 @@ producing the same records either way. A laptop is a complete deployment.
 is checked against the code by a test, so a chapter that drifts fails the build
 rather than misleading somebody quietly.
 
-| | |
-| --- | --- |
-| [One document, everything in it](docs/job/) | An HCL job carries its own engine |
-| [Chains run both ways](docs/chains/) | Middleware wraps a stage, both directions |
-| [Fetching, politely](docs/downloader/) | One request, inside what a site asked for |
-| [The cache is the corpus](docs/cache/) | Bodies are kept because fetching is the expensive part |
-| [What to fetch next](docs/frontier/) | The queue is the crawler |
-| [Shapes, entities, measurements](docs/items/) | What is extracted, and what it refers to |
-| [A graph, not a list](docs/pipeline/) | Steps run when what they require has run |
-| [Local until it has to be shared](docs/cli/) | Twelve commands, and what each one needs |
-| [Where everything lives](docs/storage/) | Eleven stores, each with one owner |
+| | Chapter | |
+| --- | --- | --- |
+| **Start** | [One document, everything in it](docs/job/index.md) | An HCL job carries its own engine |
+| **Fetching** | [Chains run both ways](docs/chains/index.md) | Middleware wraps a stage, both directions |
+| | [Fetching, politely](docs/downloader/index.md) | One request, inside what a site asked for |
+| | [The cache is the corpus](docs/cache/index.md) | Bodies are kept because fetching is the expensive part |
+| **Choosing** | [What to fetch next](docs/frontier/index.md) | The queue is the crawler |
+| **Extracting** | [Shapes, entities, measurements](docs/items/index.md) | What is extracted, and what it refers to |
+| | [A graph, not a list](docs/pipeline/index.md) | Steps run when what they require has run |
+| **Running it** | [Local until it has to be shared](docs/cli/index.md) | Twelve commands, and what each one needs |
+| | [Where everything lives](docs/storage/index.md) | Eleven stores, each with one owner |
 
 ## Building it
 

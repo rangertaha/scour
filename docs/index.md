@@ -64,20 +64,37 @@ per host and that settles it.
 
 ## Contents
 
+The book runs in one direction: what a job is, how a request is made, what
+comes back, and what is done with it. Each part is a stage of that.
+
+**Start**
+
 - [One document, everything in it](job/index.md)  
   An HCL job carries its own engine, so nothing is inherited from whichever server picks it up.
+
+**Fetching** · one request, wrapped in what a job asked for, inside what a site asked for
+
 - [Chains run both ways](chains/index.md)  
   Middleware wraps a stage, so every link sees the request going out and the response coming back.
 - [Fetching, politely](downloader/index.md)  
-  One request, wrapped in what a job asked for, inside what a site asked for.
+  The core fetch, robots.txt, and redirects that re-enter from the outside.
 - [The cache is the corpus](cache/index.md)  
   Bodies are kept because understanding a page is cheap and fetching it is not.
+
+**Choosing what to fetch** · the one decision that makes a crawl focused
+
 - [What to fetch next](frontier/index.md)  
   The queue is the crawler. Ordering it is most of what focused means.
+
+**Extracting** · what a page turns into
+
 - [Shapes, entities, measurements](items/index.md)  
   What is extracted, what it refers to, and what it becomes when it flows.
 - [A graph, not a list](pipeline/index.md)  
   Steps run when what they require has run, and exporters each write one item.
+
+**Running it**
+
 - [Local until it has to be shared](cli/index.md)  
   Twelve commands, the loop they make, and the line between what runs here and what needs a cluster.
 - [Where everything lives](storage/index.md)  

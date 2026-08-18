@@ -963,7 +963,7 @@ func TestTheCoverCountsItsOwnChapters(t *testing.T) {
 }
 
 // bookLink is a link from the repository's README into the book.
-var bookLink = regexp.MustCompile(`\]\(docs/([a-z]+)/\)`)
+var bookLink = regexp.MustCompile(`\]\(docs/([a-z]+)/index\.md\)`)
 
 // TestTheReadmeLinksIntoTheBook.
 //

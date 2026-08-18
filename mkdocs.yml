@@ -52,13 +52,18 @@ exclude_docs: |
   README.md
 
 nav:
-  - Four stages and a bus: index.md
-  - One document, everything in it: job/index.md
-  - Chains run both ways: chains/index.md
-  - Fetching, politely: downloader/index.md
-  - The cache is the corpus: cache/index.md
-  - What to fetch next: frontier/index.md
-  - Shapes, entities, measurements: items/index.md
-  - A graph, not a list: pipeline/index.md
-  - Local until it has to be shared: cli/index.md
-  - Where everything lives: storage/index.md
+  - Start:
+      - Four stages and a bus: index.md
+      - One document, everything in it: job/index.md
+  - Fetching:
+      - Chains run both ways: chains/index.md
+      - Fetching, politely: downloader/index.md
+      - The cache is the corpus: cache/index.md
+  - Choosing what to fetch:
+      - What to fetch next: frontier/index.md
+  - Extracting:
+      - Shapes, entities, measurements: items/index.md
+      - A graph, not a list: pipeline/index.md
+  - Running it:
+      - Local until it has to be shared: cli/index.md
+      - Where everything lives: storage/index.md
