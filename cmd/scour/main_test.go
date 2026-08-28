@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	ucli "github.com/urfave/cli/v3"
+
 	"github.com/rangertaha/scour/internal/cli"
 	"github.com/rangertaha/scour/internal/engine"
 )
@@ -261,6 +263,54 @@ job "products" {
 	}
 	if _, _, code := run(t, "job", "show", "--file", path, "absent"); code != cli.ExitUsage {
 		t.Errorf("naming a job that is not there exited %d", code)
+	}
+}
+
+// TestEveryParentCommandRefusesAnUnknownSubcommand.
+//
+// Walked over the tree rather than written per command, because the defect was
+// that each parent answered differently and nobody noticed. A command with
+// subcommands and no Action gets one from the library that prints "No help
+// topic for 'strat'" and calls os.Exit(3) from inside itself, bypassing the
+// exit-code contract entirely; `job` and `cluster` had that. `secret` had one
+// that showed help and returned nil, so a mistyped subcommand exited 0 and
+// reported success for a command that did nothing. `topic` and the root were
+// right.
+//
+// A mistyped subcommand is a wrong command line, which is exit 2. A script that
+// retries on 3 and gives up on 2 retried the typo forever.
+func TestEveryParentCommandRefusesAnUnknownSubcommand(t *testing.T) {
+	a := &cli.App{Out: os.Stdout, Err: os.Stderr}
+
+	var checked int
+	var walk func(path []string, cmd *ucli.Command)
+	walk = func(path []string, cmd *ucli.Command) {
+		for _, sub := range cmd.Commands {
+			if sub.Hidden {
+				continue
+			}
+			walk(append(append([]string(nil), path...), sub.Name), sub)
+		}
+		if len(cmd.Commands) == 0 {
+			return
+		}
+		checked++
+
+		t.Run(strings.Join(append([]string{"scour"}, path...), " "), func(t *testing.T) {
+			// A subcommand nobody has: mistyped, or from a newer version.
+			_, stderr, code := run(t, append(append([]string(nil), path...), "nosuchthing")...)
+			if code != cli.ExitUsage {
+				t.Errorf("exit %d, want %d for an unknown subcommand: %s", code, cli.ExitUsage, stderr)
+			}
+			if !strings.Contains(stderr, "nosuchthing") {
+				t.Errorf("the error does not name what was typed: %s", stderr)
+			}
+		})
+	}
+	walk(nil, root(a))
+
+	if checked == 0 {
+		t.Fatal("no command with subcommands was found, so this check is not checking anything")
 	}
 }
 

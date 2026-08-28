@@ -23,10 +23,21 @@ import (
 
 var origin = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 
-func job(t *testing.T, blocks string) *engine.Job {
+// unvalidated parses a job without accepting it, for the tests that are about
+// what a later stage refuses.
+func unvalidated(t *testing.T, blocks string) *engine.Job {
 	t.Helper()
 
-	src := `
+	doc, err := engine.Parse([]byte(jobSource(blocks)), "job.hcl")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	return doc.Jobs[0]
+}
+
+// jobSource is the document both helpers parse, so they cannot drift.
+func jobSource(blocks string) string {
+	return `
 job "news" {
   start = ["https://example.com/"]
 
@@ -38,7 +49,12 @@ job "news" {
 ` + blocks + `
 }
 `
-	doc, err := engine.Parse([]byte(src), "job.hcl")
+}
+
+func job(t *testing.T, blocks string) *engine.Job {
+	t.Helper()
+
+	doc, err := engine.Parse([]byte(jobSource(blocks)), "job.hcl")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -410,8 +426,14 @@ func TestASchedulerNeedsAJobAndAFrontier(t *testing.T) {
 }
 
 // TestABadScopeIsRefusedWhenBuilt, rather than matching nothing all run.
+//
+// The document is deliberately not validated first. [engine.Document.Validate]
+// now refuses this too, which is where an operator meets it, and that is the
+// better place: a cluster stores a submitted job long before anything builds a
+// scheduler for it. What this holds is the second line, for a job that reached
+// the scheduler by some other route.
 func TestABadScopeIsRefusedWhenBuilt(t *testing.T) {
-	j := job(t, `
+	j := unvalidated(t, `
   excluded = ["[unclosed"]
 `)
 	_, err := scheduler.New(context.Background(), j, scheduler.Options{Dir: t.TempDir()},

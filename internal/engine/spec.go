@@ -109,7 +109,15 @@ func writeItem(b *strings.Builder, item *Item, depth int) {
 	pad := strings.Repeat("  ", depth)
 
 	fmt.Fprintf(b, "%sitem %q {\n", pad, item.Name)
-	writeAttr(b, depth+1, "type", item.Type)
+
+	// The resolved type, never the raw field. A spec is what a spider in
+	// another language is handed, and it is the whole of what that spider
+	// gets: a property that relied on a default came out with no type at all,
+	// so the reader had to know scour's defaulting rules to make sense of a
+	// document whose point is that it does not need them. An object property
+	// was the worst of it, since its type is inferred from having children and
+	// nothing in the spec said so.
+	writeAttr(b, depth+1, "type", string(item.ItemType()))
 	writeAttr(b, depth+1, "of", item.Of)
 	writeAttr(b, depth+1, "time", item.Time)
 	writeAttr(b, depth+1, "description", item.Description)
@@ -128,7 +136,7 @@ func writeProperty(b *strings.Builder, p *Property, depth int) {
 	pad := strings.Repeat("  ", depth)
 
 	fmt.Fprintf(b, "%sproperty %q {\n", pad, p.Name)
-	writeAttr(b, depth+1, "type", p.Type)
+	writeAttr(b, depth+1, "type", string(p.PropertyType()))
 	writeAttr(b, depth+1, "entity", p.Entity)
 	writeAttr(b, depth+1, "description", p.Description)
 	if p.Required {

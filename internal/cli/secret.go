@@ -141,9 +141,10 @@ func Secret(a *App) *ucli.Command {
 				},
 			},
 		},
-		Action: func(_ context.Context, cmd *ucli.Command) error {
-			return ucli.ShowSubcommandHelp(cmd)
-		},
+		// No Action: [Parent] installs the one every command with subcommands
+		// shares. This had one that showed help and returned nil, so
+		// `scour secret lst` printed help and exited 0 for a command that did
+		// nothing.
 	}
 }
 

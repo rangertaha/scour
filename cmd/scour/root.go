@@ -53,7 +53,9 @@ func root(a *cli.App) *ucli.Command {
 		`COMMANDS:{{template "visibleCommandCategoryTemplate" .}}`,
 		1)
 
-	return &ucli.Command{
+	// Every command with subcommands answers an unknown one the same way. See
+	// [cli.Parent] for what the three different answers used to be.
+	return cli.Parent(a, &ucli.Command{
 		Name:  "scour",
 		Usage: "A focused web crawler that ranks links by how likely they are to hold what you want",
 		Description: "A job document says what to crawl, what to pull out of it, and how each\n" +
@@ -95,5 +97,5 @@ func root(a *cli.App) *ucli.Command {
 			}
 			return ucli.ShowAppHelp(cmd)
 		},
-	}
+	})
 }

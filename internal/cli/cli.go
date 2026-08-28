@@ -211,6 +211,46 @@ func OneJob(doc *engine.Document, name string) (*engine.Job, error) {
 	}
 }
 
+// Parent installs the same answer to an unknown subcommand on every command
+// that has subcommands, however deep.
+//
+// # Why this is applied to the tree rather than written on each command
+//
+// Because it is exactly the kind of rule that gets forgotten. A command with
+// subcommands and no Action of its own gets one from the library, which prints
+// "No help topic for 'strat'" and calls os.Exit(3) from inside itself: the exit
+// code never passes through [CodeOf], and a mistyped subcommand comes back as
+// "scour could not do this" rather than "your command line was wrong". A script
+// that retries on 3 and gives up on 2 retries a typo forever.
+//
+// `job` and `cluster` had that. `secret` had an Action that showed help and
+// returned nil, so `scour secret lst` printed help and exited 0, reporting
+// success for a command that did nothing. `topic` and the root were right. Four
+// commands, three answers.
+//
+// So the tree gets it, and a parent command added later cannot be the fourth
+// spelling. A command that has its own Action keeps it.
+func Parent(a *App, cmd *ucli.Command) *ucli.Command {
+	for _, sub := range cmd.Commands {
+		Parent(a, sub)
+	}
+	if len(cmd.Commands) == 0 || cmd.Action != nil {
+		return cmd
+	}
+
+	name := cmd.FullName()
+	cmd.Action = func(_ context.Context, called *ucli.Command) error {
+		if typed := called.Args().First(); typed != "" {
+			return Usagef("unknown %s command %q. Run `scour %s --help` for what there is",
+				name, typed, name)
+		}
+		// Called with nothing after it, which is somebody asking what is
+		// there. That is not an error.
+		return ucli.ShowSubcommandHelp(called)
+	}
+	return cmd
+}
+
 // Run executes the command tree and returns the process's exit code.
 //
 // Separate from main so a test can run the whole command line, arguments and

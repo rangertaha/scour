@@ -334,9 +334,21 @@ func exporterFingerprints(exporters []*Exporter) map[string]string {
 }
 
 // fingerprint reduces an item to a string that changes when its shape does.
+//
+// Resolved values, never what the document happened to write. A shape is what
+// the extractor will do, and the extractor reads [Item.ItemType] and
+// [Property.PropertyType], so `property "title" {}` and
+// `property "title" { type = str }` are one shape written two ways.
+//
+// Fingerprinting the raw fields made the second look like a schema change:
+// `Diff` reported `item.article: schema -> changed`, `EffectReextract` made it
+// costly, and the default mutation policy refused the resubmission of a
+// document that would extract precisely the same records. Somebody writing a
+// default out to be explicit, which is a thing people do to documents, could
+// not resubmit their job.
 func (i *Item) fingerprint() string {
 	var b strings.Builder
-	b.WriteString(i.Type)
+	b.WriteString(string(i.ItemType()))
 	b.WriteByte('|')
 	b.WriteString(i.Of)
 	b.WriteByte('|')
@@ -372,7 +384,7 @@ func writeProperties(b *strings.Builder, props []*Property) {
 		// not read as a schema change and force a re-extraction of records
 		// that are still correct.
 		fmt.Fprintf(b, "(%s:%s:%s:%t:%t:%s:%s:%s:%s:%s",
-			p.Name, p.Type, p.Entity, p.Required, p.Tag,
+			p.Name, p.PropertyType(), p.Entity, p.Required, p.Tag,
 			strings.Join(p.Aliases, ","),
 			strings.Join(p.Regexes, ","),
 			strings.Join(p.Transforms, ","),

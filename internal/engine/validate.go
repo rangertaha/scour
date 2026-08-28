@@ -152,9 +152,20 @@ func (j *Job) validateStartIsInScope() []error {
 
 	bounds, err := scope.New(j.Domains, j.Included, j.Excluded)
 	if err != nil {
-		// The scope is unusable for its own reasons, which is a problem the
-		// scheduler reports when it builds one. Saying it twice helps nobody.
-		return nil
+		// Reported here, and this used to be deliberately silent on the
+		// grounds that the scheduler says it when it builds one. That was true
+		// when the only way to run a job was `scour crawl`, where validating
+		// and running are the same command a second apart.
+		//
+		// A cluster broke the assumption. `scour job create` validates and
+		// stores; the scheduler is not built until somebody runs
+		// `scour job start`, which may be days later and somewhere else. So an
+		// `included = ["*/products[0-9]*"]` was accepted, stored, and listed as
+		// a healthy job that had simply never been started, and the reason it
+		// could not start was a round trip away.
+		// Unprefixed: the caller adds the job's name to everything this
+		// returns, and saying it twice reads as two problems.
+		return []error{err}
 	}
 
 	var refused []string

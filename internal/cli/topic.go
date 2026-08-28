@@ -121,12 +121,9 @@ func Topic(a *App) *ucli.Command {
 				}),
 			},
 		},
-		Action: func(_ context.Context, cmd *ucli.Command) error {
-			if name := cmd.Args().First(); name != "" {
-				return Usagef("unknown topic command %q", name)
-			}
-			return ucli.ShowSubcommandHelp(cmd)
-		},
+		// No Action: [Parent] installs the one every command with subcommands
+		// shares. This had its own correct copy of it, which is how the other
+		// three ended up with three different answers.
 	}
 }
 
@@ -163,7 +160,12 @@ func showTopic(ctx context.Context, a *App, dir, ref string) error {
 	}
 	parsed, err := classify.ParseRef(ref)
 	if err != nil {
-		return Invalidf("%v", err)
+		// The argument was mistyped and no document is involved, so this is a
+		// usage error. Reported as a refusal it said "the content was wrong"
+		// about a command line, and `scour topic show climate` and `scour topic
+		// show` with nothing at all came back as two different classes of
+		// failure for one mistake.
+		return Usagef("%v", err)
 	}
 
 	topics, err := topicStore(dir)
@@ -206,7 +208,12 @@ func removeTopic(a *App, dir, ref string) error {
 	}
 	parsed, err := classify.ParseRef(ref)
 	if err != nil {
-		return Invalidf("%v", err)
+		// The argument was mistyped and no document is involved, so this is a
+		// usage error. Reported as a refusal it said "the content was wrong"
+		// about a command line, and `scour topic show climate` and `scour topic
+		// show` with nothing at all came back as two different classes of
+		// failure for one mistake.
+		return Usagef("%v", err)
 	}
 
 	topics, err := topicStore(dir)
