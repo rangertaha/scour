@@ -222,6 +222,10 @@ type Run struct {
 	closeFetch func() error
 	closeRead  func() error
 
+	// drain stops the loop taking new requests without cancelling the ones it
+	// is holding. See [Run.Drain].
+	drain atomic.Bool
+
 	// shut makes Close idempotent, and shutErr is what the one real close
 	// reported, so a second caller is told the same thing rather than a
 	// cheerful nil. See [Run.Close].
@@ -371,6 +375,28 @@ func (r *Run) Seed(ctx context.Context) (int, error) {
 	return added, err
 }
 
+// Drain stops the loop taking new work and lets what is in flight finish.
+//
+// # Why this is not cancelling the context
+//
+// Because cancelling aborts the fetch a worker is halfway through, and an
+// aborted fetch reports nothing: [Run.one] returns without telling the
+// frontier anything, deliberately, so that an interrupted URL is not charged
+// an attempt. The lease then has to expire before anybody can have that URL
+// again, which is [Lease], five minutes.
+//
+// That is the right trade for ctrl-c, where the next run is minutes or days
+// away. It is the wrong one for a crawl that is being paused and resumed on
+// purpose: every URL in flight stays leased, so a resume finds nothing due,
+// sits until the leases expire, and reports itself as running the whole time.
+//
+// Draining costs the length of one fetch and leaves the frontier with nothing
+// held, so resuming carries on immediately. Cancelling is still there and is
+// still right for a process that is going away.
+//
+// [Run.Do] returns [Stopped] after a drain, because somebody asked it to stop.
+func (r *Run) Drain() { r.drain.Store(true) }
+
 // Do crawls until there is nothing left to do, or the budget runs out.
 func (r *Run) Do(ctx context.Context) (Ending, error) {
 	workers := r.job.Scheduler.Parallelism()
@@ -453,6 +479,13 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 
 			for {
 				if ctx.Err() != nil {
+					ending.Store(Stopped)
+					return
+				}
+				// Asked to stop, with what is in flight already finished: this
+				// worker's own r.one returned before the loop came back here.
+				// See [Run.Drain].
+				if r.drain.Load() {
 					ending.Store(Stopped)
 					return
 				}

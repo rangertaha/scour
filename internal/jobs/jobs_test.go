@@ -297,6 +297,93 @@ func TestPauseKeepsTheFrontierAndResumeCarriesOn(t *testing.T) {
 	waitFor(t, manager, "news", bus.PhaseDone, bus.PhaseFailed)
 }
 
+// TestPausingMidCrawlLeavesNothingLeased.
+//
+// The regression that the small-site test above only caught by luck. Pausing
+// used to cancel the crawl's context, which aborts the fetches in flight, and
+// an aborted fetch tells the frontier nothing on purpose so that an interrupted
+// URL is not charged an attempt. Its lease then had to expire before anybody
+// could have that URL again: five minutes, during which a resumed job reported
+// itself running and did nothing at all.
+//
+// So the site here is slow enough that a pause is guaranteed to land while
+// pages are in flight, and the assertion is that resuming finishes long inside
+// [run.Lease]. Held to well under it, because a test that allowed five minutes
+// would pass on the broken behaviour.
+func TestPausingMidCrawlLeavesNothingLeased(t *testing.T) {
+	manager, _ := cluster(t)
+	ctx := context.Background()
+
+	// Every page below the index takes a moment, so workers are still holding
+	// leases when the pause arrives.
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+		if r.URL.Path == "/" {
+			for i := range 12 {
+				fmt.Fprintf(w, `<a href="/p%d">p%d</a>`, i, i)
+			}
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+		fmt.Fprintf(w,
+			`<html><head><meta property="og:title" content="Page %s"></head><body></body></html>`,
+			strings.TrimPrefix(r.URL.Path, "/"))
+	}))
+	t.Cleanup(slow.Close)
+
+	if _, err := manager.Create(ctx, document(slow, "news")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := manager.Start(ctx, "news", false); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Long enough that the index has been read and its links queued and leased,
+	// short enough that the crawl is nowhere near done.
+	time.Sleep(200 * time.Millisecond)
+
+	paused, err := manager.Pause(ctx, "news")
+	if err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if paused.State.Phase != bus.PhasePaused {
+		t.Fatalf("pausing left it %s", paused.State.Phase)
+	}
+
+	// What the fix is actually about: the frontier is holding nothing, so the
+	// work that was in flight is due again now rather than in five minutes.
+	stats, err := manager.Stats(ctx, "news")
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if stats.Waiting == 0 {
+		t.Skip("the crawl finished before the pause landed, so there is nothing to resume")
+	}
+
+	if _, err := manager.Resume(ctx, "news"); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+
+	started := time.Now()
+	waitFor(t, manager, "news", bus.PhaseDone, bus.PhaseFailed)
+	if took := time.Since(started); took > 30*time.Second {
+		t.Errorf("resuming took %s, which means it waited out leases the pause should have released", took)
+	}
+
+	after, err := manager.Stats(ctx, "news")
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if after.Waiting != 0 {
+		t.Errorf("%d URLs are still waiting after the crawl finished", after.Waiting)
+	}
+}
+
 // TestResumeRefusesAJobThatIsNotPaused.
 func TestResumeRefusesAJobThatIsNotPaused(t *testing.T) {
 	manager, _ := cluster(t)

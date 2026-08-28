@@ -34,6 +34,13 @@
 // frontier that survives a restart makes one unnecessary: stopping and starting
 // again is resuming. What pause adds over stop is the recorded intention, which
 // is what makes `resume` mean "carry on" rather than "start over".
+//
+// Both drain rather than cancel. Cancelling aborts the fetches in flight, and
+// an aborted fetch tells the frontier nothing on purpose so that an interrupted
+// URL is not charged an attempt; its lease then has to expire before anybody
+// can have it again. That is right for ctrl-c and wrong here, because a job
+// paused and resumed a second later would find nothing due for five minutes
+// while reporting itself as running. See [run.Run.Drain].
 package jobs
 
 import (
@@ -639,10 +646,18 @@ func (m *Manager) halt(ctx context.Context, name string, intent bus.Phase) (bus.
 		return bus.JobStatus{}, fmt.Errorf("jobs: %q is not running", name)
 	}
 	d.intent = intent
-	cancel, done := d.cancel, d.done
+	crawl, done := d.crawl, d.done
 	m.mu.Unlock()
 
-	cancel()
+	// Drained rather than cancelled, which is the difference between a pause
+	// somebody can resume from and one that looks like a hung job.
+	//
+	// Cancelling aborts the fetches in flight, and an aborted fetch reports
+	// nothing to the frontier on purpose, so its URL stays leased for [run.Lease]
+	// and a resume finds nothing due for five minutes while reporting itself as
+	// running. Draining lets those pages finish and be recorded, so the frontier
+	// is left holding nothing. See [run.Run.Drain].
+	crawl.Drain()
 
 	// Waited for rather than merely requested. A caller told a job had stopped
 	// while its exporters were still flushing would be told something that is
