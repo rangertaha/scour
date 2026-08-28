@@ -118,13 +118,45 @@ const Shutdown = 30 * time.Second
 // A function rather than an expression at the one call site, so a test can
 // assert the bound this computes rather than recomputing it and agreeing with
 // itself.
-func StallFor(rate, fetch time.Duration) time.Duration {
-	return Stall + rate + fetch
+func StallFor(rate, fetch time.Duration, redirects int) time.Duration {
+	// Built on [Hold] rather than on `fetch`, so the two bounds cannot drift
+	// apart. They answer the same question from opposite sides: a hold is how
+	// long one unit of work may take, and the stall bound is how long the loop
+	// waits before deciding no work is happening. The second must outlast the
+	// first or a worker legitimately busy is declared stalled by a worker that
+	// is merely waiting.
+	//
+	// They did drift, in the commit that taught Hold about redirect chains and
+	// left this reading a bare timeout: with `timeout = "10m"` the hold became
+	// 111 minutes and this stayed at 16, so a worker three hops into a slow
+	// chain had the run killed out from under it, reporting Stalled and
+	// blaming the store for zero refused writes. The test that guards the
+	// relationship passed throughout, because it compared against Hold with
+	// the redirects hard-coded to zero.
+	return Stall + rate + Hold(fetch, redirects)
 }
 
 // Idle is how long the loop waits when the frontier has nothing due but is not
 // empty, which is what politeness looks like from here.
 const Idle = 50 * time.Millisecond
+
+// MaxPatience is the most a site's own `Crawl-delay` may widen the stall bound.
+//
+// The delay itself is honoured in full: that is the frontier's business and a
+// site is entitled to ask for a day between requests. What is capped is how
+// much of it this watchdog will wait through before deciding nothing is
+// happening at all.
+//
+// Uncapped, one host disabled the watchdog for the whole run and for every
+// other host in it. robots.txt is parsed with ParseFloat and anything from zero
+// up is accepted, so `Crawl-delay: 86400` bought twenty-four hours of patience
+// and `Crawl-delay: 1e8` bought three years: a crawl whose frontier had started
+// refusing writes, which is the one condition this exists to break, would
+// re-fetch the same pages until the process was killed by hand.
+//
+// An hour, because a crawl that has genuinely made no progress in an hour is
+// worth stopping and looking at whatever the politeness situation.
+const MaxPatience = time.Hour
 
 // Stall is how long a run waits with nothing progressing before it gives up.
 //
@@ -490,7 +522,7 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 
 	stall := r.opts.Stall
 	if stall <= 0 {
-		stall = StallFor(rate, fetch)
+		stall = StallFor(rate, fetch, r.job.Downloader.Redirects())
 	}
 
 	for range workers {
@@ -769,7 +801,17 @@ func (r *Run) done(ctx context.Context, req *scheduler.Request) {
 // interface every frontier implements, so it is tracked rather than smuggled in
 // here.
 func (r *Run) patience(stall time.Duration) time.Duration {
-	return stall + time.Duration(r.asked.Load())
+	return Patience(stall, time.Duration(r.asked.Load()))
+}
+
+// Patience is a stall bound widened by the longest delay a site asked for.
+//
+// A function rather than an expression inside the loop, for the reason
+// [StallFor] is one: a test can assert the bound this computes rather than
+// recomputing it and agreeing with itself. Waiting out the real one is not an
+// option here, which is the whole point of the cap.
+func Patience(stall, asked time.Duration) time.Duration {
+	return stall + min(max(asked, 0), MaxPatience)
 }
 
 func (r *Run) pace(ctx context.Context, resp *downloader.Response) {

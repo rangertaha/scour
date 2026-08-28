@@ -51,7 +51,7 @@ func (a *App) showJob(j *engine.Job) {
 
 	a.Printf("\nitems\n")
 	for _, item := range j.Items {
-		a.Printf("  %s (%s)\n", item.Name, item.Type)
+		a.Printf("  %s (%s)\n", item.Name, item.ItemType())
 		showProperties(a, item.Properties, "    ")
 	}
 
@@ -118,7 +118,7 @@ func showProperties(a *App, props []*engine.Property, indent string) {
 		if len(p.Transforms) > 0 {
 			extra = " [" + strings.Join(p.Transforms, " ") + "]"
 		}
-		a.Printf("%s%s: %s%s%s\n", indent, p.Name, p.Type, required, extra)
+		a.Printf("%s%s: %s%s%s\n", indent, p.Name, p.PropertyType(), required, extra)
 		showProperties(a, p.Properties, indent+"  ")
 	}
 }

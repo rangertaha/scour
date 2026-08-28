@@ -460,13 +460,32 @@ func (i *Item) ItemType() Type {
 
 // PropertyType is this property's type, defaulted.
 //
-// A property with children is an object whether it said so or not, which is the
-// one place a default is inferred from shape rather than fixed. Validation has
-// already refused the case where the document says otherwise, so this cannot
-// quietly disagree with what was written.
+// Two defaults are inferred from shape rather than fixed, and the order matters.
+// Validation has already refused the cases where the document says otherwise,
+// so neither can quietly disagree with what was written.
+//
+// A property naming an entity kind is an entity reference. It said so: `entity`
+// is not a modifier on some other type, it is what the property is. Without
+// this, `property "author" { entity = "person" }` resolved as a string,
+// validated cleanly, and then behaved as one everywhere - the entities step
+// skipped it and the record filed it as an ordinary field. The operator wrote
+// down which kind of thing it referred to and nothing ever resolved it, silently.
+// Validation's message for the neighbouring case says exactly what goes wrong,
+// "so nothing would resolve it", and this variant did it while saying nothing.
+//
+// Entity is checked before children, because an entity reference may have them
+// and the book documents that case: a reference is a name that refers to
+// something, and its children describe the thing referred to rather than the
+// item, which is how `author.role` is the person's role. Deciding "object" from
+// the children would take that away from the one shape it was added for.
+//
+// A property with children is otherwise an object whether it said so or not.
 func (p *Property) PropertyType() Type {
 	if p.Type != "" {
 		return Type(p.Type)
+	}
+	if p.Entity != "" {
+		return TypeEntity
 	}
 	if len(p.Properties) > 0 {
 		return TypeObject

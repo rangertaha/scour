@@ -227,6 +227,57 @@ func TestCreateRefusesANameAlreadyTaken(t *testing.T) {
 	}
 }
 
+// TestOnlyOneCreateWinsWhenTheyRace.
+//
+// Create read the store to see whether the name was free and wrote if it was,
+// which is two operations with a gap between them. Eight simultaneous creates
+// of one name all found nothing, all wrote, and the last silently replaced the
+// rest.
+//
+// The read is also what sends an operator to Update, and Update is what reviews
+// a change against a job that is already running, so a create landing in that
+// gap replaced a running job's document with no review at all. Update has
+// always used compare-and-swap for this reason; Create now lets the store
+// decide too.
+func TestOnlyOneCreateWinsWhenTheyRace(t *testing.T) {
+	manager, _ := cluster(t)
+	ctx := context.Background()
+	server := site(t)
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		won     int
+		refused int
+	)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := manager.Create(ctx, document(server, "news"))
+
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case err == nil:
+				won++
+			case strings.Contains(err.Error(), "already exists"):
+				refused++
+			default:
+				t.Errorf("create failed for another reason: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if won != 1 {
+		t.Errorf("%d of 8 racing creates won, want exactly 1: the rest overwrote a job that existed", won)
+	}
+	if refused != 7 {
+		t.Errorf("%d were refused as already existing, want 7", refused)
+	}
+}
+
 // TestUpdateRefusesAJobThatIsNotThere is the other half.
 //
 // The two commands exist to be different: one refuses a name that is taken and

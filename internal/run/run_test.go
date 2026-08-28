@@ -943,8 +943,13 @@ func TestASlowFetchIsNotAStall(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stall := run.StallFor(rate, fetch)
-	hold := run.Hold(fetch, 0)
+	// The job's own redirect allowance, not zero. Hard-coding it here is what
+	// let the two bounds drift: this test is the one thing holding them in the
+	// right order, and it was comparing against a hold no run ever uses.
+	redirects := j.Downloader.Redirects()
+
+	stall := run.StallFor(rate, fetch, redirects)
+	hold := run.Hold(fetch, redirects)
 
 	if stall <= hold {
 		t.Errorf("stall %s does not outlast a hold of %s, so a worker waiting on one fetch declares a stall",
@@ -1133,5 +1138,46 @@ func TestTheHoldCoversAWholeRedirectChain(t *testing.T) {
 	// A job that follows no redirects is not charged for them.
 	if got, want := run.Hold(fetch, 0), run.Lease; got != want {
 		t.Errorf("with no redirects the hold is %s, want the floor of %s", got, want)
+	}
+}
+
+// TestOneRudeSiteCannotSwitchOffTheWatchdog.
+//
+// The stall bound is widened by the longest Crawl-delay a site has asked for,
+// so that a polite crawl is not mistaken for a hung one. That number comes
+// straight off robots.txt, which is parsed with ParseFloat and accepts anything
+// from zero up, and it was applied uncapped and to every host in the run.
+//
+// So `Crawl-delay: 86400` bought a day of patience and `Crawl-delay: 1e8`
+// bought three years, for a crawl that may meanwhile have stopped being able to
+// write to its frontier at all - which is the one condition the watchdog exists
+// to break. The delay is still honoured in full by the frontier; what is capped
+// is how long this waits through before deciding nothing is happening.
+func TestOneRudeSiteCannotSwitchOffTheWatchdog(t *testing.T) {
+	const stall = 6 * time.Minute
+
+	for name, asked := range map[string]time.Duration{
+		"a day":       24 * time.Hour,
+		"three years": 3 * 365 * 24 * time.Hour,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := run.Patience(stall, asked); got > stall+run.MaxPatience {
+				t.Errorf("a site asking for %s widened the bound to %s, so the watchdog "+
+					"is off for the life of the process", asked, got)
+			}
+		})
+	}
+
+	// And a delay inside the cap is still waited through in full, which is the
+	// reason any of this is added to the bound.
+	if got, want := run.Patience(stall, 10*time.Minute), stall+10*time.Minute; got != want {
+		t.Errorf("a ten-minute delay widened the bound to %s, want %s", got, want)
+	}
+
+	// A negative delay cannot narrow it. Nothing should produce one, and a
+	// bound that could be shortened by a site is a worse failure than one that
+	// could be lengthened.
+	if got := run.Patience(stall, -time.Hour); got < stall {
+		t.Errorf("a negative delay narrowed the bound to %s", got)
 	}
 }

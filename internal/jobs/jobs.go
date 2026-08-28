@@ -324,14 +324,18 @@ func (m *Manager) Create(ctx context.Context, document []byte) (bus.JobStatus, e
 		return bus.JobStatus{}, err
 	}
 
-	if _, _, err := m.jobs.Get(ctx, job.Name); err == nil {
-		return bus.JobStatus{}, fmt.Errorf(
-			"jobs: %q already exists. Change it with update, or delete it first", job.Name)
-	} else if !errors.Is(err, bus.ErrNoJob) {
-		return bus.JobStatus{}, err
-	}
-
-	if _, err := m.jobs.Put(ctx, job.Name, document); err != nil {
+	// The store refuses a name already taken, rather than this reading first
+	// and writing after. That gap is where a second client got the same answer:
+	// eight simultaneous creates of one name all found nothing, all wrote, and
+	// the last silently replaced the rest. The read is also what sends an
+	// operator to Update, which is what reviews a change against a running job,
+	// so a create landing in the gap replaced a running job's document with no
+	// review at all.
+	if _, err := m.jobs.Create(ctx, job.Name, document); err != nil {
+		if errors.Is(err, bus.ErrJobExists) {
+			return bus.JobStatus{}, fmt.Errorf(
+				"jobs: %q already exists. Change it with update, or delete it first", job.Name)
+		}
 		return bus.JobStatus{}, err
 	}
 	if err := m.states.Put(ctx, job.Name, bus.JobState{
@@ -530,10 +534,23 @@ func (m *Manager) begin(ctx context.Context, name string, fresh, seed bool) (bus
 	//
 	// The control service answers each request on its own goroutine, so two
 	// `scour job start` at the same moment is all it took.
+	// Counted before it is published, and that ordering is load-bearing. The
+	// wait group is what Close waits on, and the driver goes into the map here
+	// while the goroutine that increments it only starts after a round trip to
+	// the cluster below. A Close landing in that window found the driver,
+	// cancelled it, and then waited on a counter still at zero: it returned
+	// saying every crawl had stopped, its caller carried on down the shutdown
+	// list closing the shared cache and the bus, and drive then started and
+	// flushed its exporters into a closed bucket.
+	//
+	// Every path out of here from this point either starts drive or calls Done.
+	m.wg.Add(1)
+
 	m.mu.Lock()
 	switch {
 	case m.closed:
 		m.mu.Unlock()
+		m.wg.Done()
 		cancel()
 		_ = crawl.Close()
 		return bus.JobStatus{}, errors.New("jobs: the manager is closing")
@@ -543,6 +560,7 @@ func (m *Manager) begin(ctx context.Context, name string, fresh, seed bool) (bus
 		// built is closed rather than left running, which is the whole point:
 		// the loser must not be a second crawl nobody can stop.
 		m.mu.Unlock()
+		m.wg.Done()
 		cancel()
 		_ = crawl.Close()
 		return bus.JobStatus{}, fmt.Errorf("jobs: %q is already running", name)
@@ -571,12 +589,12 @@ func (m *Manager) begin(ctx context.Context, name string, fresh, seed bool) (bus
 		// started could not be stopped.
 		close(d.done)
 
+		m.wg.Done()
 		cancel()
 		_ = crawl.Close()
 		return bus.JobStatus{}, err
 	}
 
-	m.wg.Add(1)
 	go m.drive(work, d)
 
 	m.log.InfoContext(ctx, "job started", "job", name, "revision", revision, "seeded", seed)

@@ -325,7 +325,9 @@ func (i *Item) Tags() []string {
 		out = append(out, r.Name)
 	}
 	for _, p := range i.Properties {
-		if p.Tag || Type(p.Type) == TypeEntity {
+		// The resolved type, so a property that names an entity kind without
+		// writing `type = entity` is a dimension like any other reference.
+		if p.Tag || p.PropertyType() == TypeEntity {
 			out = append(out, flattened(p.Name, p)...)
 		}
 	}
@@ -337,7 +339,7 @@ func (i *Item) Tags() []string {
 func (i *Item) Fields() []string {
 	var out []string
 	for _, p := range i.Properties {
-		if !p.Tag && Type(p.Type) != TypeEntity {
+		if !p.Tag && p.PropertyType() != TypeEntity {
 			out = append(out, flattened(p.Name, p)...)
 		}
 	}

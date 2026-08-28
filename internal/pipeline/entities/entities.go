@@ -173,7 +173,11 @@ func (s *step) assert(ctx context.Context, r *record.Record) error {
 		// a field of that property rather than an edge of the item, and giving
 		// it one would put a dotted name into a vocabulary the whole graph
 		// shares.
-		if engine.Type(p.Type) != engine.TypeEntity {
+		// The resolved type. Reading the raw field meant a property that named
+		// an entity kind without also writing `type = entity` was skipped here,
+		// so the operator said what the value referred to and nothing resolved
+		// it.
+		if p.PropertyType() != engine.TypeEntity {
 			continue
 		}
 		name := strings.TrimSpace(r.Values[p.Name])

@@ -77,6 +77,36 @@ func (j *Jobs) Put(ctx context.Context, name string, document []byte) (uint64, e
 	return revision, nil
 }
 
+// ErrJobExists reports a name somebody has already taken.
+var ErrJobExists = errors.New("bus: a job of that name already exists")
+
+// Create stores a job only if the name is free.
+//
+// The store decides, not the caller. Reading first and writing after is two
+// operations with a gap in the middle, and the gap is where a second client
+// gets the same answer: eight simultaneous creates of one name all found
+// nothing, all wrote, and the last silently replaced the rest. Worse, the read
+// is what routes an operator to Update, and Update is what reviews a change
+// against a job that is already running - so a create landing in that gap
+// replaced a running job's document with no review at all.
+//
+// [Jobs.Update] has always used compare-and-swap for exactly this reason. This
+// is the same argument for the other half of the pair.
+func (j *Jobs) Create(ctx context.Context, name string, document []byte) (uint64, error) {
+	if err := checkName(name); err != nil {
+		return 0, err
+	}
+
+	revision, err := j.kv.Create(ctx, name, document)
+	switch {
+	case errors.Is(err, jetstream.ErrKeyExists):
+		return 0, fmt.Errorf("%w: %q", ErrJobExists, name)
+	case err != nil:
+		return 0, fmt.Errorf("bus: create job %q: %w", name, err)
+	}
+	return revision, nil
+}
+
 // Update stores a job only if it has not changed since the revision given.
 //
 // Compare and swap rather than a plain write, because two clients submitting
