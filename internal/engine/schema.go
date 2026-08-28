@@ -543,12 +543,25 @@ const ReservedTopic = "topic"
 // Address is how one exporter is named in an error.
 func (e *Exporter) Address() string { return e.Format + "." + e.Item }
 
-// Parse reads a document.
+// Parse reads a document that is not a file.
 //
 // Nothing is validated beyond what HCL itself can tell: that is
 // [Document.Validate], and it is separate because reading a file and accepting
 // a submission are different decisions.
+//
+// This is the form a stored job is read with, so `lines()` has nothing to
+// resolve against and is refused by name. See [ParseIn], and [linesFunction]
+// for why refusing beats guessing.
 func Parse(src []byte, filename string) (*Document, error) {
+	return ParseIn(src, filename, "")
+}
+
+// ParseIn reads a document that came from a file in dir.
+//
+// The directory is what `lines("seeds.txt")` resolves against, so it is the
+// directory of the document rather than anybody's working directory: a job and
+// the lists beside it move together.
+func ParseIn(src []byte, filename, dir string) (*Document, error) {
 	parser := hclparse.NewParser()
 
 	parsed, diags := parser.ParseHCL(src, filename)
@@ -557,7 +570,7 @@ func Parse(src []byte, filename string) (*Document, error) {
 	}
 
 	var doc Document
-	if diags := gohcl.DecodeBody(parsed.Body, evalContext(), &doc); diags.HasErrors() {
+	if diags := gohcl.DecodeBody(parsed.Body, evalContext(dir), &doc); diags.HasErrors() {
 		return nil, diagError(diags)
 	}
 

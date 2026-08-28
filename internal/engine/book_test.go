@@ -147,7 +147,7 @@ func TestBookHCLIsReal(t *testing.T) {
 			checked++
 
 			t.Run(fmt.Sprintf("%s/%d", name, i), func(t *testing.T) {
-				doc, err := engine.Parse([]byte(src), name)
+				doc, err := parseExample(t, []byte(src), name)
 				if err != nil {
 					t.Fatalf("does not parse:\n%v\n\n%s", err, src)
 				}
@@ -1044,4 +1044,51 @@ func TestEveryChapterHasItsFrontMatter(t *testing.T) {
 	if checked == 0 {
 		t.Fatal("no chapters were read, so this check is not checking anything")
 	}
+}
+
+// The list files the book's examples read.
+//
+// `domains = lines("domains.txt")` is a document that only means something
+// beside the file it names, so an example using it has to be parsed somewhere
+// that file exists. These are that somewhere, and keeping them here rather than
+// inventing content per filename is what makes the check strict: a chapter that
+// reads a list file this map does not know about fails, with the name it used,
+// instead of being quietly skipped.
+var bookLists = map[string]string{
+	"domains.txt":  "example.com\n",
+	"seeds.txt":    "https://example.com/\n",
+	"included.txt": "/topic/\n",
+	"excluded.txt": "/admin\n",
+}
+
+// readsLines finds the list files an example names.
+var readsLines = regexp.MustCompile(`lines\("([^"]+)"\)`)
+
+// parseExample parses one of the book's job documents.
+//
+// A document that reads no files is parsed as a stored job is, with no
+// directory, which is the stricter of the two and what most examples are. One
+// that does read files is given a directory holding them, because that is what
+// it means: the example is the authoring form, and the entries are expanded
+// into the document before it is submitted.
+func parseExample(t *testing.T, src []byte, name string) (*engine.Document, error) {
+	t.Helper()
+
+	named := readsLines.FindAllStringSubmatch(string(src), -1)
+	if len(named) == 0 {
+		return engine.Parse(src, name)
+	}
+
+	dir := t.TempDir()
+	for _, m := range named {
+		body, known := bookLists[m[1]]
+		if !known {
+			t.Fatalf("%s reads a list from %q, and the book's fixtures have no such file. "+
+				"Add it to bookLists, or use one of the names already there", name, m[1])
+		}
+		if err := os.WriteFile(filepath.Join(dir, m[1]), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return engine.ParseIn(src, name, dir)
 }

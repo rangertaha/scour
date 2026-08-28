@@ -78,11 +78,11 @@ func ParseTopics(src []byte, filename string) (*Topics, error) {
 	}
 
 	var doc Topics
-	if diags := gohcl.DecodeBody(parsed.Body, evalContext(), &doc); diags.HasErrors() {
+	if diags := gohcl.DecodeBody(parsed.Body, evalContext(""), &doc); diags.HasErrors() {
 		// The mistake worth naming, for the reason ParseService gives: both are
 		// HCL, both are .hcl, and both live beside each other.
 		var job Document
-		if d := gohcl.DecodeBody(parsed.Body, evalContext(), &job); !d.HasErrors() && len(job.Jobs) > 0 {
+		if d := gohcl.DecodeBody(parsed.Body, evalContext(""), &job); !d.HasErrors() && len(job.Jobs) > 0 {
 			return nil, fmt.Errorf(
 				"%s is a job document, and a labels document is a different thing: "+
 					"it holds `topic` blocks saying which pages are and are not a subject", filename)

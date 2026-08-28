@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	ucli "github.com/urfave/cli/v3"
@@ -149,7 +150,9 @@ func Load(path string) (*engine.Document, error) {
 		return nil, Failedf("%v", err)
 	}
 
-	doc, err := engine.Parse(src, path)
+	// Parsed in the document's own directory, so `lines("seeds.txt")` means the
+	// file beside the job rather than one beside whoever ran the command.
+	doc, err := engine.ParseIn(src, path, filepath.Dir(path))
 	if err != nil {
 		return nil, Invalidf("%v", err)
 	}

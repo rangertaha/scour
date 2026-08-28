@@ -7,6 +7,7 @@ import (
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/function"
 )
 
 // The vocabulary a document may use as bare words.
@@ -116,7 +117,12 @@ func selfObject() cty.Value {
 }
 
 // evalContext predeclares the vocabulary, so bare words resolve.
-func evalContext() *hcl.EvalContext {
+//
+// The directory is what `lines()` resolves a path against, and an empty one
+// means the document did not come from a file: the call is then refused by
+// name rather than resolved against whatever the working directory happens to
+// be. See [linesFunction].
+func evalContext(dir string) *hcl.EvalContext {
 	vars := make(map[string]cty.Value, len(Types)+len(Transforms))
 
 	for _, t := range Types {
@@ -128,7 +134,12 @@ func evalContext() *hcl.EvalContext {
 
 	vars["self"] = selfObject()
 
-	return &hcl.EvalContext{Variables: vars}
+	return &hcl.EvalContext{
+		Variables: vars,
+		Functions: map[string]function.Function{
+			linesFunc: linesFunction(dir),
+		},
+	}
 }
 
 // Valid reports whether a type is one scour knows.

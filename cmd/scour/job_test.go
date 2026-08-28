@@ -156,6 +156,74 @@ func until(t *testing.T, dir, address, name string, phases ...string) string {
 	return last
 }
 
+// TestAJobThatReadsItsListsFromFilesIsStoredWithThem.
+//
+// The lists a document reads from files beside it are resolved before it is
+// submitted, and this is why: nothing in the cluster can see the author's
+// files. A stored job that still said lines("domains.txt") would be one every
+// node failed to parse, and a job whose meaning depended on which machine held
+// it is the one thing the document format exists to prevent.
+//
+// The proof is `job show`, which reads the document back out of the cluster and
+// resolves it: the entries have to be there, and the filename must not.
+func TestAJobThatReadsItsListsFromFilesIsStoredWithThem(t *testing.T) {
+	site := pages(t)
+	dir, address := cluster(t)
+
+	host := strings.TrimPrefix(site.URL, "http://")
+	for name, body := range map[string]string{
+		"domains.txt": "# the site we cover\n" + host + "\n",
+		"seeds.txt":   site.URL + "/\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	path := filepath.Join(dir, "news.hcl")
+	if err := os.WriteFile(path, []byte(`
+job "news" {
+  domains = lines("domains.txt")
+  start   = lines("seeds.txt")
+
+  item "article" {
+    property "title" {
+      type     = str
+      required = true
+    }
+  }
+}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := scour(t, dir, "job", "create", "--join", address, path); got.code != 0 {
+		t.Fatalf("create: exit %d\n%s%s", got.code, got.stdout, got.stderr)
+	}
+
+	// Read back from the cluster, which parses the stored document with no
+	// directory and no access to the files above.
+	shown := scour(t, dir, "job", "show", "--join", address, "news")
+	if shown.code != 0 {
+		t.Fatalf("show: exit %d\n%s%s", shown.code, shown.stdout, shown.stderr)
+	}
+	if !strings.Contains(shown.stdout, host) {
+		t.Errorf("the stored job does not carry the domain it read from a file:\n%s", shown.stdout)
+	}
+	if strings.Contains(shown.stdout, "domains.txt") {
+		t.Errorf("the stored job still refers to a file the cluster cannot see:\n%s", shown.stdout)
+	}
+
+	// And it runs, which is the whole point of storing the entries rather than
+	// the reference: the node parses this document too.
+	if got := scour(t, dir, "job", "start", "--join", address, "news"); got.code != 0 {
+		t.Fatalf("start: exit %d\n%s%s", got.code, got.stdout, got.stderr)
+	}
+	if status := until(t, dir, address, "news", "done", "failed"); strings.Contains(status, "failed") {
+		t.Fatalf("the crawl failed:\n%s", status)
+	}
+}
+
 // TestCreateRefusesTwiceAndUpdateRefusesWhatIsNotThere.
 //
 // The exit codes are the point. A refusal is the cluster answering, which is

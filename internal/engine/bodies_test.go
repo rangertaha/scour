@@ -285,7 +285,7 @@ func TestBookAndCliDocumentTypesAreReal(t *testing.T) {
 		switch kind {
 		case "job":
 			var doc *engine.Document
-			if doc, err = engine.Parse(ex.src, ex.path); err == nil {
+			if doc, err = parseExample(t, ex.src, ex.path); err == nil {
 				err = doc.Validate()
 			}
 		case "service":

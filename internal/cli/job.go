@@ -6,12 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/bus"
+	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/train"
 )
 
@@ -393,6 +395,15 @@ func submit(ctx context.Context, a *App, join, path string, update bool) error {
 	document, err := os.ReadFile(path)
 	if err != nil {
 		return Failedf("%v", err)
+	}
+
+	// The lists a document reads from files beside it are resolved here, before
+	// it goes anywhere. What the cluster stores has to carry everything the
+	// crawl needs: nothing on the far side can see the author's files, and a
+	// job whose meaning depended on which machine held it would be the one
+	// thing the document format exists to prevent. See [engine.ExpandFiles].
+	if document, err = engine.ExpandFiles(document, path, filepath.Dir(path)); err != nil {
+		return Invalidf("%v", err)
 	}
 	if _, err := AcceptBytes(document, path); err != nil {
 		return err

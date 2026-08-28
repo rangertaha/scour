@@ -198,7 +198,7 @@ func ParseSpec(src []byte, filename string) (*Spec, error) {
 	}
 
 	var spec Spec
-	if diags := gohcl.DecodeBody(parsed.Body, evalContext(), &spec); diags.HasErrors() {
+	if diags := gohcl.DecodeBody(parsed.Body, evalContext(""), &spec); diags.HasErrors() {
 		return nil, diagError(diags)
 	}
 	return &spec, nil

@@ -193,14 +193,14 @@ func ParseService(src []byte, filename string) (*Service, error) {
 	}
 
 	var doc Service
-	if diags := gohcl.DecodeBody(parsed.Body, evalContext(), &doc); diags.HasErrors() {
+	if diags := gohcl.DecodeBody(parsed.Body, evalContext(""), &doc); diags.HasErrors() {
 		// A job document read as a service one is the mistake worth naming,
 		// because the two are both HCL, both called .hcl, and both live in the
 		// same directory. HCL's own answer is "Blocks of type job are not
 		// expected here", which is true and tells somebody holding the wrong
 		// file nothing about which file they wanted.
 		var job Document
-		if d := gohcl.DecodeBody(parsed.Body, evalContext(), &job); !d.HasErrors() && len(job.Jobs) > 0 {
+		if d := gohcl.DecodeBody(parsed.Body, evalContext(""), &job); !d.HasErrors() && len(job.Jobs) > 0 {
 			return nil, fmt.Errorf(
 				"%s is a job document, and a service document is a different thing: "+
 					"it holds an `entity` or an `event` block saying where a store lives. "+
