@@ -165,8 +165,33 @@ func runCrawl(ctx context.Context, a *App, path, jobName, dir string, verbose, f
 	}
 	a.Warnf("crawling %s: %d seeded, %d queued\n", job.Name, seeded, waiting)
 
+	// An interrupt drains rather than cancels: the pages in flight finish and
+	// are recorded, so the URLs they hold are released instead of staying
+	// leased until the hold expires.
+	//
+	// That hold is minutes, and it is sized for the worst a fetch can cost, so
+	// leaving it to expire is what made "stopped and resumable" resumable only
+	// in principle: the next run took everything else, then sat waiting for
+	// URLs nobody was working on. Pausing a job on a cluster already worked
+	// this way; ctrl-c here did not, which is the same fix in one place and not
+	// the other.
+	//
+	// The process still dies on a second interrupt, which main leaves to the
+	// runtime: somebody pressing it twice means now.
+	work, settled := context.WithCancel(context.WithoutCancel(ctx))
+	defer settled()
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			crawl.Drain()
+		case <-work.Done():
+		}
+	}()
+
 	started := time.Now()
-	ending, err := crawl.Do(ctx)
+	ending, err := crawl.Do(work)
+	settled()
 	elapsed := time.Since(started)
 	if err != nil {
 		return Failedf("%v", err)

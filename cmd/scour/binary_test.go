@@ -337,6 +337,23 @@ job "news" {
 	if served.Load() <= before {
 		t.Error("the second run fetched nothing, so the interrupt lost the queue")
 	}
+
+	// And it ran the site dry rather than giving up waiting.
+	//
+	// This is what "resumable" has to mean. An interrupt used to abandon the
+	// pages in flight without reporting them, so their URLs stayed leased for
+	// the length of a hold - minutes, sized for the worst a fetch can cost -
+	// and the next run took everything else and then sat waiting for URLs
+	// nobody was working on, ending stalled or not at all. The interrupt now
+	// drains, so what was in flight finishes, is recorded, and is there to be
+	// taken immediately.
+	resumed := again.stdout + again.stderr
+	if strings.Contains(resumed, "stalled") {
+		t.Errorf("the resumed crawl gave up waiting for URLs the interrupted one left leased:\n%s", resumed)
+	}
+	if !strings.Contains(resumed, "finished") {
+		t.Errorf("the resumed crawl did not run the site dry:\n%s", resumed)
+	}
 }
 
 // TestVersionIsPrintedByTheBuiltBinary, which is the only build that has one.

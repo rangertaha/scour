@@ -206,6 +206,21 @@ func (c *Conn) NewDownloader(job string, bodies cache.Store, wait time.Duration)
 	return &Downloader{conn: c, job: job, bodies: bodies, wait: wait}
 }
 
+// Worst is the longest one fetch through this client can take.
+//
+// Its own wait, because that is what bounds it: whatever the stage on the other
+// machine costs, this gives up at the timeout the job set with
+// `external_timeout`. The crawl loop asks a stage this to size the lease it
+// takes, and a client that could not answer left the loop computing a bound
+// from the job document instead - which does not know how the far side's chain
+// was assembled.
+func (d *Downloader) Worst() time.Duration {
+	if d.wait > 0 {
+		return d.wait
+	}
+	return Timeout
+}
+
 // Handle implements [downloader.Handler].
 func (d *Downloader) Handle(ctx context.Context, req *downloader.Request) (*downloader.Response, error) {
 	payload, err := json.Marshal(fetchRequest{

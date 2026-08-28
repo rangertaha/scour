@@ -732,3 +732,61 @@ func register(t *testing.T, name string, m downloader.Middleware) {
 // TestMain fails the package if a test left a name in the global table. See
 // [registrytest].
 func TestMain(m *testing.M) { registrytest.Main(m, downloader.Registered) }
+
+// TestTheStageSaysHowLongOneFetchCanTake.
+//
+// The crawl loop sizes a lease from this, and it used to compute the number
+// itself from the job document. That was wrong twice, and each time it was
+// found by a lease expiring under a worker still fetching: the URL came due, a
+// second worker took it, and both hit the same host at once while the first
+// one's report was discarded by the attempt fence, silently.
+//
+// The second attempt was still wrong when it landed, because a redirect hop
+// re-enters this chain from the top and the robots guard follows redirects of
+// its own, so one hop can pay for a robots.txt fetch and its own hops before
+// the page is touched. Nothing in the document says that; it is a property of
+// how the chain is assembled, which is why the chain is what answers.
+func TestTheStageSaysHowLongOneFetchCanTake(t *testing.T) {
+	const timeout = 30 * time.Second
+
+	for name, tc := range map[string]struct {
+		blocks string
+		least  time.Duration
+	}{
+		// One page fetch, with nothing wrapping it.
+		"no robots, no redirects": {
+			blocks: "robots = false\n    max_redirects = 0",
+			least:  timeout,
+		},
+		// The guard loads robots.txt, following redirects of its own.
+		"robots, no redirects": {
+			blocks: "robots = true\n    max_redirects = 0",
+			least:  2 * timeout,
+		},
+		// Every hop re-enters from the top, robots and all, which is the term
+		// a formula over the job document could never have known about.
+		"robots and redirects": {
+			blocks: "robots = true\n    max_redirects = 10",
+			least:  11 * 2 * timeout,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stage, err := downloader.New(context.Background(), job(t, `
+  downloader {
+    timeout = "30s"
+    `+tc.blocks+`
+  }
+`), downloader.Options{})
+			if err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			defer stage.Close()
+
+			if got := stage.Worst(); got < tc.least {
+				t.Errorf("the stage says one fetch takes at most %s, and it can take %s: "+
+					"a lease sized from this expires while a worker is still fetching",
+					got, tc.least)
+			}
+		})
+	}
+}

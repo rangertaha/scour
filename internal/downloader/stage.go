@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/hashicorp/hcl/v2"
 
@@ -26,7 +27,35 @@ type Stage struct {
 	job     string
 	handler Handler
 	chain   *plugin.Chain[*Request, *Response]
+
+	// worst is the longest one Handle can take. See [Stage.Worst].
+	worst time.Duration
 }
+
+// Worst is the longest one call to [Stage.Handle] can take.
+//
+// # Why the chain answers this rather than the caller working it out
+//
+// Because the caller cannot, and kept trying. A lease in the crawl loop has to
+// outlast the work it covers, and that length was computed there from the job
+// document: the request timeout, then the timeout times the redirect
+// allowance. Both were wrong, in that order, and each was found when a lease
+// expired under a worker that was still fetching, so a second worker took the
+// URL and both hit the same host at once. The report from the first was then
+// discarded by the attempt fence, correctly and silently, so the crawl looked
+// healthy while hitting the site twice.
+//
+// The second attempt was still wrong when it landed, because a redirect hop
+// re-enters from the top of this chain and the robots guard has a redirect loop
+// of its own: one hop can pay for a robots.txt fetch plus its own hops before
+// the page is touched. Nothing in the job document says that, and nothing ever
+// will - it is a property of how this chain is assembled.
+//
+// So it is accumulated here, as each wrapper is added, by the code that adds
+// it. A wrapper introduced later either contributes its term or is missing from
+// a number the loop depends on, and the answer is at least in the same file as
+// the reason.
+func (s *Stage) Worst() time.Duration { return s.worst }
 
 // Options are what a caller supplies that the job document cannot.
 type Options struct {
@@ -56,6 +85,11 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Stage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("downloader: job %q: %w", job.Name, err)
 	}
+
+	// How many requests one Handle can make, accumulated by each wrapper below
+	// as it is added. One for the page itself, before anything wraps it. See
+	// [Stage.Worst].
+	fetches := 1
 
 	client := opts.Client
 	if client == nil {
@@ -100,6 +134,11 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Stage, error) {
 		reader.Truncate = true
 
 		handler = newGuard(&reader, core.Agent).wrap(handler)
+
+		// A robots.txt load is a fetch of its own, and it follows redirects
+		// itself, so the guard costs the whole of that before the request it
+		// guards is made.
+		fetches += robotsRedirects + 1
 	}
 
 	// Outside even that: a redirect is a different URL on a host with its own
@@ -117,12 +156,17 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Stage, error) {
 			return nil, fmt.Errorf("downloader: job %q: %w", job.Name, err)
 		}
 		handler = (&follower{max: hops, bounds: bounds}).wrap(handler)
+
+		// Every hop re-enters from the top, so the whole of what is wrapped
+		// happens again per hop, robots and all.
+		fetches *= hops + 1
 	}
 
 	return &Stage{
 		job:     job.Name,
 		handler: handler,
 		chain:   built,
+		worst:   time.Duration(fetches) * timeout,
 	}, nil
 }
 

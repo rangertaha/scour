@@ -76,6 +76,14 @@ const Lease = 5 * time.Minute
 // A minute of margin over the fetch, because a request that has just timed out
 // still has to be reported before the hold is worth releasing.
 //
+// # Prefer asking the stage
+//
+// This computes the answer from the job document, and the job document does not
+// know it: see [downloader.Stage.Worst], which accumulates it as the chain is
+// assembled. [Run.hold] asks the stage when the stage can say, and falls back
+// to this when it cannot - a stand-in in a test, or a client for a stage on
+// another machine that answers with its own bound instead.
+//
 // # One lease can cost more than one timeout
 //
 // The redirect follower loops hop by hop and the timeout is applied to each
@@ -118,6 +126,9 @@ const Shutdown = 30 * time.Second
 // A function rather than an expression at the one call site, so a test can
 // assert the bound this computes rather than recomputing it and agreeing with
 // itself.
+//
+// Kept as the documented formula for a caller that has no stage to ask; the
+// loop itself now builds its bound from the hold it actually took.
 func StallFor(rate, fetch time.Duration, redirects int) time.Duration {
 	// Built on [Hold] rather than on `fetch`, so the two bounds cannot drift
 	// apart. They answer the same question from opposite sides: a hold is how
@@ -134,6 +145,34 @@ func StallFor(rate, fetch time.Duration, redirects int) time.Duration {
 	// relationship passed throughout, because it compared against Hold with
 	// the redirects hard-coded to zero.
 	return Stall + rate + Hold(fetch, redirects)
+}
+
+// Worst is a fetch stage that can say how long one call to it may take.
+//
+// Implemented by [downloader.Stage], which accumulates it as its chain is
+// built, and by the client for a stage on another machine, which is bounded by
+// how long it waits for an answer. A stage that cannot say leaves the loop to
+// compute a bound from the job, which is what [Hold] is for and what kept being
+// wrong.
+type Worst interface {
+	Worst() time.Duration
+}
+
+// hold is how long a worker holds a request.
+//
+// Asked of the stage that will do the work, because it is the only thing that
+// knows: the chain's cost is a property of how it was assembled, not of
+// anything written in the document. A lease shorter than the work means the URL
+// comes due while a worker is still fetching it, a second worker takes it, and
+// both hit the same host at once - silently, because the first one's report is
+// then discarded by the attempt fence.
+func (r *Run) hold(fetch time.Duration) time.Duration {
+	if worst, ok := r.fetch.(Worst); ok {
+		if longest := worst.Worst(); longest > 0 {
+			return max(Lease, longest+time.Minute)
+		}
+	}
+	return Hold(fetch, r.job.Downloader.Redirects())
 }
 
 // Idle is how long the loop waits when the frontier has nothing due but is not
@@ -518,11 +557,11 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 	if err != nil {
 		return "", fmt.Errorf("run: job %q: %w", r.job.Name, err)
 	}
-	hold := Hold(fetch, r.job.Downloader.Redirects())
+	hold := r.hold(fetch)
 
 	stall := r.opts.Stall
 	if stall <= 0 {
-		stall = StallFor(rate, fetch, r.job.Downloader.Redirects())
+		stall = Stall + rate + hold
 	}
 
 	for range workers {
