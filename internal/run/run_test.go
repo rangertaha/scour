@@ -883,7 +883,7 @@ func TestTheHoldOutlastsOneFetch(t *testing.T) {
 		10 * time.Minute,
 		time.Hour,
 	} {
-		hold := run.Hold(fetch)
+		hold := run.Hold(fetch, 0)
 		if hold <= fetch {
 			t.Errorf("Hold(%s) = %s, and the lease expires while the fetch is still running", fetch, hold)
 		}
@@ -907,7 +907,7 @@ func TestTheHoldOutlastsOneFetch(t *testing.T) {
 	if fetch != 10*time.Minute {
 		t.Fatalf("the job's timeout read as %s", fetch)
 	}
-	if got := run.Hold(fetch); got <= 10*time.Minute {
+	if got := run.Hold(fetch, 0); got <= 10*time.Minute {
 		t.Errorf("Hold = %s for a ten minute fetch", got)
 	}
 }
@@ -944,7 +944,7 @@ func TestASlowFetchIsNotAStall(t *testing.T) {
 	}
 
 	stall := run.StallFor(rate, fetch)
-	hold := run.Hold(fetch)
+	hold := run.Hold(fetch, 0)
 
 	if stall <= hold {
 		t.Errorf("stall %s does not outlast a hold of %s, so a worker waiting on one fetch declares a stall",
@@ -1100,5 +1100,38 @@ func TestClosingACrawlTwiceIsSafeAndSaysTheSameThing(t *testing.T) {
 	}
 	if second := r.Close(); second != nil {
 		t.Errorf("second close reported %v, and the deferred call that makes it has nowhere to say so", second)
+	}
+}
+
+// TestTheHoldCoversAWholeRedirectChain.
+//
+// A lease has to outlast the work it covers, and the work is not one request:
+// the redirect follower loops hop by hop with the timeout applied to each, so a
+// lease costs up to one timeout per allowed hop plus one. At the defaults that
+// is eleven timeouts of thirty seconds against a hold of five minutes, so a
+// chain of slow redirects outlived its own lease, a second worker took the URL
+// while the first was still following it, and both fetched the same host at
+// once. The first worker's report was then discarded by the lease fence,
+// correctly and silently, so nothing counted it: the crawl looked healthy and
+// was hitting the site twice.
+//
+// Asserted against the bound rather than by timing a real chain, which would
+// take five and a half minutes to fail.
+func TestTheHoldCoversAWholeRedirectChain(t *testing.T) {
+	const (
+		fetch     = 30 * time.Second
+		redirects = 10
+	)
+
+	worst := fetch * (redirects + 1)
+	if got := run.Hold(fetch, redirects); got <= worst {
+		t.Errorf("a lease is held for %s, and following %d redirects at %s each can take %s: "+
+			"the URL comes due again while the first worker is still fetching it",
+			got, redirects, fetch, worst)
+	}
+
+	// A job that follows no redirects is not charged for them.
+	if got, want := run.Hold(fetch, 0), run.Lease; got != want {
+		t.Errorf("with no redirects the hold is %s, want the floor of %s", got, want)
 	}
 }

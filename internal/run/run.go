@@ -75,8 +75,25 @@ const Lease = 5 * time.Minute
 //
 // A minute of margin over the fetch, because a request that has just timed out
 // still has to be reported before the hold is worth releasing.
-func Hold(fetch time.Duration) time.Duration {
-	return max(Lease, fetch+time.Minute)
+//
+// # One lease can cost more than one timeout
+//
+// The redirect follower loops hop by hop and the timeout is applied to each
+// request inside it, with no budget over the chain, so a lease costs up to one
+// timeout per hop the job allows plus one. At the defaults that is eleven
+// timeouts of thirty seconds against a hold of five minutes: a chain of slow
+// redirects outlived its own lease, a second worker took the URL while the
+// first was still following it, and both fetched the same host at once. That is
+// the failure this function exists to prevent, arriving through the door it did
+// not budget for. The first worker's report was then discarded by the lease
+// fence, correctly and silently, so nothing counted it and the crawl looked
+// healthy while hitting the site twice.
+func Hold(fetch time.Duration, redirects int) time.Duration {
+	if redirects < 0 {
+		redirects = 0
+	}
+	// The hops, plus the request that started them.
+	return max(Lease, fetch*time.Duration(redirects+1)+time.Minute)
 }
 
 // Shutdown is how long the tidying up after a crawl may take.
@@ -469,7 +486,7 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 	if err != nil {
 		return "", fmt.Errorf("run: job %q: %w", r.job.Name, err)
 	}
-	hold := Hold(fetch)
+	hold := Hold(fetch, r.job.Downloader.Redirects())
 
 	stall := r.opts.Stall
 	if stall <= 0 {
