@@ -9,7 +9,7 @@ import (
 
 // TestANodeServesAndASecondOneJoinsIt.
 //
-// `scour serve` is a documented command that nothing ran. Every test it had
+// `scour server` is a documented command that nothing ran. Every test it had
 // checked that it refuses arguments, so the whole of what it does — start a
 // broker, join a cluster, register, watch for jobs, and leave cleanly on a
 // signal — had no coverage at all, and internal/node measured 0% under the
@@ -27,11 +27,11 @@ import (
 // tested in one: the interesting part is precisely that the second node needs
 // an address and nothing else.
 func TestANodeServesAndASecondOneJoinsIt(t *testing.T) {
-	first := start(t, t.TempDir(), "serve", "--name", "first")
+	first := start(t, t.TempDir(), "server", "--name", "first")
 
 	// The address the embedded broker chose. Printed as the line somebody is
 	// meant to copy, so this reads it the way a person would.
-	address := waitFor(t, first, "join it with: scour serve --join ")
+	address := waitFor(t, first, "join it with: scour server --join ")
 	address = strings.TrimSpace(address)
 	if !strings.HasPrefix(address, "nats://") {
 		t.Fatalf("the address to join is %q, which is not one\n%s", address, first.output.String())
@@ -44,7 +44,7 @@ func TestANodeServesAndASecondOneJoinsIt(t *testing.T) {
 	// A second node, given the address and nothing else. It must not stand up
 	// a broker of its own: two brokers on one machine is a cluster that is
 	// really two clusters, and the symptom is jobs that only some nodes see.
-	second := start(t, t.TempDir(), "serve", "--name", "second", "--join", address)
+	second := start(t, t.TempDir(), "server", "--name", "second", "--join", address)
 	waitFor(t, second, "second joined ")
 
 	if said := second.output.String(); strings.Contains(said, "is the broker") {
@@ -71,7 +71,7 @@ func TestANodeServesAndASecondOneJoinsIt(t *testing.T) {
 // addresses and the parsing on the hosts with the cores. A flag that was
 // accepted and ignored would be invisible until the cluster was busy.
 func TestANodeServesOnlyTheStagesItWasTold(t *testing.T) {
-	node := start(t, t.TempDir(), "serve", "--name", "downloaders", "--stages", "download")
+	node := start(t, t.TempDir(), "server", "--name", "downloaders", "--stages", "download")
 	waitFor(t, node, "downloaders is serving")
 
 	node.stop(t)
@@ -86,14 +86,14 @@ func TestANodeServesOnlyTheStagesItWasTold(t *testing.T) {
 // least likely to be reported: the value was never validated anywhere, so the
 // node connected, announced the misspelled stage into the registry, printed
 // that it was serving, and then answered nothing for the rest of its life while
-// logging one warning per job. `scour nodes` said the capacity was there.
+// logging one warning per job. `scour cluster list` said the capacity was there.
 //
 // Worse with a mixed list. The correctly spelled stage was built and subscribed
 // first, and the unknown one then tore it down again, so a node asked for
 // "read,downlaod" served neither.
 func TestANodeRefusesAStageNobodyServes(t *testing.T) {
 	for _, stages := range []string{"downlaod", "read,downlaod"} {
-		got := scour(t, t.TempDir(), "serve", "--stages", stages)
+		got := scour(t, t.TempDir(), "server", "--stages", stages)
 		if got.code == 0 {
 			t.Errorf("--stages %q was accepted:\n%s%s", stages, got.stdout, got.stderr)
 			continue

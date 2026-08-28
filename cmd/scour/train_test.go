@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// `scour train` had no end-to-end test at all, and it is the one command that
+// `scour job train` had no end-to-end test at all, and it is the one command that
 // writes to a file somebody wrote by hand.
 //
 // Everything under it was covered: induction has its own tests, and so does the
@@ -67,7 +67,7 @@ func trainDoc(t *testing.T, server *httptest.Server, jobs string) (dir, path str
 		t.Fatal(err)
 	}
 
-	if got := scour(t, dir, "run", path); got.code != 0 {
+	if got := scour(t, dir, "crawl", path); got.code != 0 {
 		t.Fatalf("seeding the corpus: exit %d\n%s%s", got.code, got.stdout, got.stderr)
 	}
 	return dir, path
@@ -111,7 +111,7 @@ func TestTrainPrintsAndChangesNothingWithoutWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := scour(t, dir, "train", path)
+	got := scour(t, dir, "job", "train", "--file", path)
 	if got.code != 0 {
 		t.Fatalf("exit %d\n%s%s", got.code, got.stdout, got.stderr)
 	}
@@ -147,7 +147,7 @@ func TestTrainWritesALocatorAndTheDocumentStillWorks(t *testing.T) {
 	server := trainSite(t)
 	dir, path := trainDoc(t, server, oneJobDoc(server))
 
-	got := scour(t, dir, "train", "--write", path)
+	got := scour(t, dir, "job", "train", "--write", "--file", path)
 	if got.code != 0 {
 		t.Fatalf("exit %d\n%s%s", got.code, got.stdout, got.stderr)
 	}
@@ -164,10 +164,10 @@ func TestTrainWritesALocatorAndTheDocumentStillWorks(t *testing.T) {
 	}
 
 	// It still parses, and it still runs.
-	if v := scour(t, dir, "validate", path); v.code != 0 {
+	if v := scour(t, dir, "job", "valid", path); v.code != 0 {
 		t.Fatalf("the edited document no longer validates: exit %d\n%s%s", v.code, v.stdout, v.stderr)
 	}
-	if r := scour(t, dir, "run", "--fresh", path); r.code != 0 {
+	if r := scour(t, dir, "crawl", "--fresh", path); r.code != 0 {
 		t.Fatalf("the edited document no longer runs: exit %d\n%s%s", r.code, r.stdout, r.stderr)
 	}
 
@@ -229,11 +229,11 @@ job "second" {
 		t.Fatal(err)
 	}
 
-	if got := scour(t, dir, "run", "--job", "second", path); got.code != 0 {
+	if got := scour(t, dir, "crawl", "--job", "second", path); got.code != 0 {
 		t.Fatalf("seeding: exit %d\n%s%s", got.code, got.stdout, got.stderr)
 	}
 
-	got := scour(t, dir, "train", "--job", "second", "--write", path)
+	got := scour(t, dir, "job", "train", "--write", "--file", path, "second")
 	if got.code != 0 {
 		t.Fatalf("exit %d\n%s%s", got.code, got.stdout, got.stderr)
 	}
@@ -269,11 +269,11 @@ func TestTrainWithNoCorpusSaysWhatToDo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := scour(t, dir, "train", path)
+	got := scour(t, dir, "job", "train", "--file", path)
 	if got.code == 0 {
 		t.Fatalf("training with nothing to learn from succeeded:\n%s%s", got.stdout, got.stderr)
 	}
-	if !strings.Contains(got.stderr, "scour run") && !strings.Contains(got.stderr, "scour try") {
+	if !strings.Contains(got.stderr, "scour crawl") && !strings.Contains(got.stderr, "scour scrape") {
 		t.Errorf("the message does not say how to get a corpus: %s", got.stderr)
 	}
 }

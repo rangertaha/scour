@@ -1,6 +1,6 @@
 ---
 title: Local until it has to be shared
-description: Twelve commands, the loop they make, and the line between what runs here and what needs a cluster.
+description: Eight commands, the loop they make, and the line between what runs here and what needs a cluster.
 ---
 
 # Local until it has to be shared
@@ -12,35 +12,34 @@ read a document need nothing running at all, and the line between those and
 the rest is the first thing worth knowing about the command line.
 
 <figure>
-<img src="../img/cli.svg" alt="Three nested rings of commands. The innermost holds init, validate, show, spec and defaults, which need nothing but the document. Around it, try, run, train and topic, which need a directory on this machine for the cache and the frontier. Around those, serve, service and secret, which need a cluster. A command in an outer ring needs everything in the rings inside it.">
+<img src="../img/cli.svg" alt="Three nested rings of commands. The innermost holds job init, job valid, job show, job spec and defaults, which need nothing but the document. Around it, scrape, crawl, job train and topic, which need a directory on this machine for the cache and the frontier. Around those, cluster, server, the cluster half of job, and secret, which need a cluster. A command in an outer ring needs everything in the rings inside it.">
 <figcaption>What has to exist before a command can work. The innermost ring is the one you are in while a job is still being written, which is most of the time.</figcaption>
 </figure>
-
 ## The loop
 
 Start from something that already validates, look at one page, then crawl a
 few hundred and let induction propose the locators the guessing missed.
 
 ```console
-$ scour init --list
+$ scour job init --list
 basic      The plainest job that works. Start here
 listing    A directory of entries: jobs, venues, courses
 news       Articles: headline, byline, dates, body
 product    A shop: name, price, availability, images
 
-$ scour init news > news.hcl
-$ scour validate news.hcl
+$ scour job init news > news.hcl
+$ scour job valid news.hcl
 news.hcl: ok, 1 job(s): news
 ```
 
-**`try` is the one you will type most.** One page, fetched once and cached, so
+**`scrape` is the one you will type most.** One page, fetched once and cached, so
 the second run and the twentieth cost nothing and the site is asked once.
 Against each property it prints the value and which of the four ways found it,
 which is the only way to tell a locator that works from one that has never
 been tested.
 
 ```console
-$ scour try news.hcl
+$ scour scrape news.hcl
 fetched https://example.com/  200  559 B  text/html  (125ms)
 
 article
@@ -50,7 +49,7 @@ article
 1 of 2 properties found. 1 links.
 ```
 
-The line with nothing on it is the interesting one, and it is why `try`
+The line with nothing on it is the interesting one, and it is why `scrape`
 exists. Nothing is wrong with the document: the guess simply did not land on
 this page, and the answer is an alias, a locator, or an example for training
 to work from. What is listed is what was found plus the *required* properties
@@ -59,7 +58,7 @@ the output and the count, which is worth knowing before you read too much into
 the ratio.
 
 ```console
-$ scour run news.hcl
+$ scour crawl news.hcl
 crawling news: 1 seeded, 1 queued
 finished in 156ms
   fetched   1 (1 from the cache)
@@ -69,13 +68,13 @@ finished in 156ms
   exported  1
   wrote     json.article
 
-$ scour train news.hcl
+$ scour job train --file news.hcl
 read 1 cached pages
   article.title                h1                           1/1 pages  "Example Domain"
 nothing written. Pass --write to edit news.hcl
 ```
 
-**The crawl reused what `try` had already fetched.** One page, asked for once,
+**The crawl reused what `scrape` had already fetched.** One page, asked for once,
 whichever command wanted it. That is the cache doing the thing the whole
 corpus argument is about, and it is why the loop above can be run twenty times
 over a lunch break without leaning on anybody's server.
@@ -89,177 +88,174 @@ going round.
 
 > **Why the whole crawl runs here**
 >
-> `scour run` is not a demonstration mode. It is the same four stages the
+> `scour crawl` is not a demonstration mode. It is the same four stages the
 > cluster wires over the bus, wired directly instead, and a test holds one
 > job to producing the same records either way. A laptop is a complete
 > deployment, which is what makes the loop above possible at all.
-
 ## The surface
 
-### Reading a document
+### Building a job
 
 These need nothing running.
 
 ```
-scour init [name]          Print a starter job document
-scour validate <file>      Check it. Report every problem at once
-scour show <file>          The resolved job: every default filled in
-scour spec <file>          What a spider is handed, as HCL
-scour defaults             Every default and its value
+scour job init [name]        Print a starter job document
+scour job valid <file>       Check it. Report every problem at once
+scour scrape <file> [url]    One page, and what came out of it
+scour crawl <file>           The whole crawl, here, without a server
+scour defaults               Every default and its value
 ```
 
-#### `scour init [name]`
+And these read a job, from a cluster or from a file with `--file`:
+
+```
+scour job show <job>         The resolved job: every default filled in
+scour job spec <job>         What a spider is handed, as HCL
+scour job train <job>        Read the cache, propose locators, write them back
+```
+
+#### `scour job`
+
+Everything that happens to a job, under the noun it happens to. Seventeen
+subcommands in three groups, which is why they are grouped: `scour job --help`
+lists them under what somebody is doing rather than alphabetically.
+
+| Flag | Effect |
+| --- | --- |
+| `--join <url>` | The cluster, as `nats://host:port`. Every cluster subcommand takes it |
+| `--file <path>` | `show`, `spec` and `train` only: read a document instead of asking the cluster |
+| `--list` | `init` only: list the templates and what they are for |
+| `--force` | `init` only: overwrite the file if it is already there |
+| `--fresh` | `start` and `run`: forget what a previous run queued |
+| `--json` | `show` only: print as JSON |
+| `--item <name>` | `train` only: only this shape |
+| `--dir <path>` | Where the cache or the frontier is |
+| `--pages <n>` | `train` only: how many cached pages to learn from |
+| `--min <n>` | `train` only: ignore a locator matching fewer than this share of pages, as a percentage |
+| `--write` | `train` only: write the locators back instead of printing what would change |
+| `--job <name>` | `run` only: which job, if the document holds several |
+| `--verbose`, `-v` | `run` only: log every page |
+
+**Authoring a document**: `init`, `valid`, `train`, `run`. What somebody does
+while a job is still being written, and all four take a file or a path.
+
+**In the cluster**: `create`, `list`, `show`, `spec`, `update`, `delete`. A job
+the cluster holds, by name.
+
+**Running a crawl**: `start`, `stop`, `pause`, `resume`, `status`, `stats`,
+`watch`. What the job service is doing with it.
+
+The split is what each takes. A document command takes a path, because that is
+what somebody editing a job has; a cluster command takes a name, because that is
+a job's identity once submitted. A command accepting either would have to guess,
+and would guess wrong the day somebody names a job after a file.
+
+##### `scour job init [name]`
 
 Prints a job that validates as it stands, so it can be run and then grown. To
 stdout, so it composes.
 
-| Flag | Effect |
-| --- | --- |
-| `-t`, `--template <name>` | Which starting point. Defaults to `basic` |
-| `--list` | List the templates and what they are for |
-| `-o`, `--out <file>` | Write to a file instead of stdout |
-| `--force` | Overwrite the file if it is already there |
+##### `scour job valid <file>`
 
-**The templates differ in what they extract, not in how they crawl.** All of
-them are polite, budgeted and cached, because a starting point gets copied
-without being read and its defaults are what most crawls will actually run at.
-Tests hold them to that: robots on, no faster than the default rate, a page
-ceiling, and a concurrency nobody would notice.
+Parses and validates, reporting every problem at once rather than the first: a
+person fixing a document one error per run gives up, and so does a build script.
+It does not reach the network, so it works offline and in CI.
 
-**None of them contains a locator.** No `xpath`, no `css`, because the ones that
-work depend on the site and a wrong selector shipped in a template is worse than
-an absent one. They carry `aliases` instead, which is how a property is found
-before anything has been learned, and `scour train` proposes the rest once there
-are pages to look at.
+##### `scour job show <job>` and `scour job spec <job>`
 
-**And none of them starts outside its own scope.** Three of the four shipped
-with `included = ["*.example.com"]` beside `domains = ["example.com"]`, written
-meaning "this site and below it", which is what `domains` already says. As an
-inclusion pattern it means something else, and it refused the apex the job
-started from, so the first thing anybody did crawled nothing and said it was
-fine. That is now refused outright rather than warned about.
+`show` is the resolved job, every default filled in. `spec` is the narrower
+thing: what a spider is handed and nothing else, as the HCL a person would have
+written, which is what a spider in another language receives.
 
-Writing to a file refuses to clobber one, because somebody running this twice in
-a directory they have been working in should not lose what they wrote the first
-time. Printing to stdout has no such problem, which is why it is the default.
+Both read the cluster's copy by default and a file with `--file`. The positional
+argument names the job either way: in the cluster it is the job's identity, and
+in a `--file` document holding several it says which. One argument, one meaning.
 
-A test renders every template, validates it, and checks it extracts something
-and has somewhere to put it. A sample that does not work is worse than none,
-since the first thing anybody does with it is assume it does.
+##### `scour job create <file>` and `scour job update <file>`
 
-#### `scour validate <file>`
+`create` submits a job the cluster does not have; a name already taken is
+refused rather than replaced. `update` resubmits one it does. Creating a job
+does not start it.
 
-Parses and validates, reporting everything wrong at once.
+Both go through the job service, which is the only writer of the job store. That
+is not ceremony: a submission has to be parsed, validated, and compared against
+the revision already running, and every client doing that for itself is every
+client doing it slightly differently.
 
-It does not reach the network, so it works offline and in CI, and it cannot know
-whether a plugin somebody else's node registers exists. That answer arrives when
-a chain is built, on the machine that has the implementations.
+**An update to a running job is reviewed first.** The job's own `mutation` block
+says which changes may be applied to a crawl in progress, and the engine already
+computes a diff with an effect per change: raising a page budget is free,
+narrowing scope drops queued URLs, moving the cache orphans every body already
+fetched. A change the policy refuses leaves the running revision alone and says
+which change was refused. A running job keeps the revision it started with until
+it is stopped and started again, and `scour job list` shows both when they
+differ.
+
+##### `scour job start <job>` and the rest of the lifecycle
 
 ```console
-$ scour validate job.hcl
-job.hcl: ok, 1 job(s): news
-
-$ scour validate broken.hcl
-broken.hcl: refused
-  job "news": start[0] "file:///etc/passwd": only http and https are crawled
-  job "news": scheduler.concurrency: 999 is more than 64 against a single host
-  job "news": item article.title: has nested properties but is typed str, which only object can hold
-$ echo $?
-1
+$ scour job start news
+news is running
+  since     2026-08-27T18:22:04Z
+  revision  3
+  driver    node-a
 ```
 
-#### `scour show <file>`
+`start` seeds the frontier from the job's start URLs and drives the crawl.
+`--fresh` forgets what a previous run queued; without it, starting a job that
+was stopped carries on from where it was, because the frontier is on disk.
 
-What the document means once every default is filled in: the settings, the
-chains in the order they run, the items, and the pipeline as the waves it will
-run in.
+`stop` ends the loop and keeps the frontier. The pages already in flight are
+finished rather than abandoned, so it takes as long as the last fetch, and the
+command waits for that rather than returning while the exporters are still
+flushing.
 
-Deliberately not called `plan`. A plan is a comparison against something
-running; a resolved job is what a document means on its own. Giving one name to
-both would mean the command changed meaning the day the server arrived.
+`pause` is `stop` with the intention recorded. The loop ends the same way and
+the frontier is kept either way; what pause adds is that `resume` knows to carry
+on rather than to seed again. There is no gate holding workers still inside the
+crawl, because a frontier that survives a restart makes one unnecessary.
 
-| Flag | Effect |
-| --- | --- |
-| `--json` | Print as JSON |
-| `--job <name>` | Which job, if the document holds several |
+`status` is the phase. `stats` is how far the crawl has got, and a job that is
+not running reports what is left in its frontier and nothing else: the counters
+belong to a run, and the run is over.
+
+`watch` follows the execution as it happens, and costs the crawl nothing because
+the driver publishes and nobody subscribing slows it down:
 
 ```console
-$ scour show news.hcl
-job "news"
-
-scope
-  start          https://example.com/
-  domains        example.com
-
-scheduler
-  policy         priority
-  rate           2s
-  concurrency    2
-  max_depth      3
-  max_pages      100
-  max_time       no limit
-  chain          empty
-
-downloader
-  robots         true
-  user_agent     scour
-  timeout        30s
-  max_body       33554432
-  max_redirects  10
-  chain          cache(900)
-...
-pipeline: 2 wave(s), 2 at once at the widest
-  1. clean.article
-  2. rank.article, score.article
+$ scour job watch news
+news is running
+  since     2026-08-27T18:22:04Z
+  revision  3
+  driver    node-a
+18:22:06  running  fetched 12  items 9  exported 0  queued 47
+18:22:08  running  fetched 31  items 24  exported 20  queued 61
+18:22:34  done     finished
 ```
 
-`rate` here is what the job asked for, and it is a floor rather than the whole
-answer. With `robots` on, a site asking for longer in its own `Crawl-delay` gets
-it: the wait is whichever of the two is longer, so this crawl would leave a host
-requesting thirty seconds alone for thirty and one requesting one alone for two.
-The number a site asked for is learnt on the first fetch of that host and applies
-from then on, including to the crawl that learnt it.
-
-The chain is printed in the order it runs, with the order numbers, because that
-is the whole reason the numbers exist. The pipeline is printed as waves rather
-than as a list, because a list hides the concurrency that is the point of having
-a graph.
-
-#### `scour spec <file>`
-
-What a spider is handed: the shapes to extract and nothing else. Not where
-bodies are cached, not the budget, not the exporters.
-
-| Flag | Effect |
+| Phase | Means |
 | --- | --- |
-| `--job <name>` | Which job, if the document holds several |
-
-The spec goes to stdout alone and the fingerprint to stderr, so
-`scour spec job.hcl > spec.hcl` writes a spec rather than a spec with a note in
-the middle of it.
+| `stopped` | Submitted and not running. Also what a job that has never been started reports |
+| `running` | Being driven right now |
+| `paused` | The loop was stopped with the frontier kept, so `resume` carries on |
+| `done` | The crawl ended on its own. `status` says whether the frontier ran dry or a budget was reached |
+| `failed` | It stopped because something went wrong, and `status` says what |
 
 #### `scour defaults`
 
-Every default and its value, which is otherwise answerable only by reading the
-source.
+Every default and its value, which is the answer to "what happens if I leave
+this out" without reading the source.
 
 | Flag | Effect |
 | --- | --- |
 | `--json` | Print as JSON |
 
-### Developing a job
 
 The loop a person is actually in: change a selector, see what it pulls out, and
 do it again. It has to be fast, which means it must not touch the network twice
 for the same page.
 
-```
-scour try <file> [url]     Run one page and show what came out
-scour run <file>           Crawl a job here, without a server
-scour train <file>         Read the cache, propose locators, write them back
-```
-
-#### `scour try <file> [url]`
+#### `scour scrape <file> [url]`
 
 Fetches one page, caches it, and runs it through extraction, printing what each
 property found.
@@ -279,7 +275,7 @@ edit-run cycle is against bytes on disk, not against somebody's server.
 | `--json` | Print as JSON |
 
 ```console
-$ scour try news.hcl https://example.com/story/1
+$ scour scrape news.hcl https://example.com/story/1
 fetched  https://example.com/story/1  200  48.2 kB  text/html  (cached)
 
 article
@@ -298,7 +294,7 @@ does.
 `--strict` is for CI: a job whose `required` properties stopped matching has
 broken, and that should fail a build rather than quietly export nothing.
 
-#### `scour run <file>`
+#### `scour crawl <file>`
 
 Runs the whole engine in this process: scheduler, downloader, spider, pipeline
 and exporters, wired to each other directly. No server, no cluster, no broker.
@@ -314,7 +310,7 @@ crawl that was stopped, or that hit its budget, continues where it left off.
 | `--fresh` | Forget what a previous run queued |
 
 ```console
-$ scour run news.hcl
+$ scour crawl news.hcl
 crawling news: 1 seeded, 1 queued
 finished in 2.4s
   fetched   48 (12 from the cache)
@@ -337,7 +333,7 @@ This is also the thing a cluster has to be equivalent to: the same job on
 several nodes should produce the same records, and being able to run both is
 what makes that checkable rather than merely claimed.
 
-#### `scour train <file>`
+##### `scour job train <job>`
 
 Reads the pages already in the cache, works out how to find each property, and
 writes the locators back into the document.
@@ -354,7 +350,7 @@ and offline. The same corpus produces the same locators, which is what makes a
 change to induction measurable rather than merely different.
 
 ```console
-$ scour train news.hcl
+$ scour job train news.hcl
 read 312 cached pages
   article.title                .headline                    308/312 pages  "Something happened yesterday"
   article.published_time       time[itemprop="datePublished"] 295/312 pages  "2026-08-04T09:15:00Z"
@@ -381,12 +377,11 @@ before it falls back to what extraction already finds.
 
 There is no `--replace`. What may be overwritten is decided by the document
 rather than by a flag, and the rule below is the whole of it.
-
 ##### Teaching it an answer
 
 **Designed, not built.** The `examples` in the document are what training reads
 today. What follows is the command-line shortcut for putting one there, and
-nothing implements it yet: `scour train` takes no `--url` and no `-i`.
+nothing implements it yet: `scour job train` takes no `--url` and no `-i`.
 
 Induction over a corpus can find what is *consistent*. It cannot know which
 consistent thing you wanted, and on a page with three plausible headings it will
@@ -467,31 +462,82 @@ hundred, train, and spend the time you saved looking at what it proposed.
 **Train across several sites if the job crawls several sites.** A locator
 induced from one site will be pinned to that site's markup, and the failure is
 invisible until the second site quietly extracts nothing.
-
-### Running a node
+### Running a cluster
 
 ```
-scour serve                 Serve stages for whatever jobs the cluster has
-scour service <file.hcl>    Run the entity graph, the event store and the topics
+scour cluster join <url>       Remember a cluster, after checking it answers
+scour cluster list             Who is in it now
+scour server [service.hcl]     Run this machine's share of one
 ```
 
-#### `scour serve`
-
-A node joins a cluster, watches the jobs and serves the stages it offers for
-every job that appears. Nothing elects anything and nothing assigns anything:
-work is distributed by queue group, so adding a machine is a matter of starting
-one.
-
-With no `--join` it starts a broker in this process and prints the address the
-next node should join, which is what makes a single node need nothing installed.
+#### `scour cluster`
 
 | Flag | Effect |
 | --- | --- |
-| `--join <url>` | A node to join, as `nats://host:port` |
+| `--join <url>` | `list` only: a cluster to ask, as `nats://host:port` |
+
+`join` connects, lists who is there, and writes the address down. Every later
+command uses it, so the address is typed once rather than on each command, which
+is how people end up pointing half their commands at the wrong cluster.
+
+It is remembered rather than configured. A file somebody edits would be a second
+place for the address to be wrong, so this writes it and the commands read it.
+The order is the flag, then `SCOUR_SERVER`, then whatever was last joined, then
+the address a single node listens on: each is more deliberate than the next.
+
+Nothing is written until the cluster has answered. Remembering an address that
+does not work is worse than remembering none, because every later command fails
+against it and nothing says where the address came from.
+
+```console
+$ scour cluster join nats://10.0.0.5:4222
+NODE                     STAGES               BUS
+node-a                   download,read        nats://10.0.0.5:4222
+node-b                   download             nats://10.0.0.5:4222
+joined nats://10.0.0.5:4222, remembered in ~/.config/scour/cluster
+```
+
+`join` joins nothing by itself: this is the client end. A machine offers work by
+running `scour server --join <address>`.
+
+#### `scour server [service.hcl]`
+
+One machine's share of a cluster: the stages it offers, the job service that
+submits and drives jobs, and the shared stores when a service document names
+them.
+
+| Flag | Effect |
+| --- | --- |
+| `--join <url>` | A server to join, as `nats://host:port` |
 | `--name <name>` | What to call this node. Defaults to the hostname |
-| `--dir <path>` | Where to keep the cache and the cluster's state |
+| `--dir <path>` | Where to keep the cache, the frontiers and the cluster's state |
 | `--stages <list>` | Which stages to serve: `download`, `read`, or both |
+| `--jobs` | Run the job service here. On by default |
 | `--quiet` | Say nothing but failures |
+
+This was two commands, `serve` and `service`, and the split was along the wrong
+line: it divided what a process runs rather than what an operator decides.
+Somebody bringing a cluster up had to start a node, start the stores, and then
+discover that nothing at all submitted or drove a job. Three processes to answer
+one question, and the third did not exist.
+
+What it runs is decided by what it is given. Always a node and the job service,
+because those are what a machine offering itself to a cluster is for. The shared
+stores as well when a service document names them, because where the entity
+graph lives is a decision somebody makes once and writes down.
+
+With no `--join` it starts a broker in this process and prints the address the
+next server should join, which is what makes a single machine need nothing
+installed.
+
+```console
+$ scour server
+node-a is serving, and is the broker listening on nats://127.0.0.1:41923
+join it with: scour server --join nats://127.0.0.1:41923
+
+$ scour server --join nats://127.0.0.1:41923 --name node-b
+node-b joined nats://127.0.0.1:41923
+```
 
 A stage nothing serves is refused before the node announces itself, naming what
 the stages are. A typo is the likeliest thing to be wrong with that flag, and
@@ -499,27 +545,19 @@ until it was checked at the door `--stages downlaod` connected, announced the
 capacity into the registry, printed that it was serving, and then answered
 nothing for the rest of its life while logging one warning per job.
 
-```console
-$ scour serve
-node-a is serving, and is the broker
-join it with: scour serve --join nats://127.0.0.1:41923
+**One driver per job, and it is the job service.** It owns the frontier and asks
+the nodes to fetch and read, because the frontier cannot be shared: two
+schedulers handing out the same host cannot honour a crawl delay between them.
+That asymmetry is the politeness rule rather than a limitation to be lifted.
 
-$ scour serve --join nats://127.0.0.1:41923 --name node-b
-node-b joined nats://127.0.0.1:41923
-```
+**The cache is shared between the node and the driver.** A body never crosses the
+bus: the stage that fetched it writes it to the cache and only the key travels,
+so the driver reads it back from there. On one machine `--dir` gives both the
+same directory. A cluster across machines wants a cache every machine can see,
+which is what the object-store backends are for, and `--jobs=false` keeps the
+driver off a machine that is there only to fetch.
 
-**One node per job still drives the crawl.** It owns the frontier, and the
-frontier cannot be shared: two schedulers handing out the same host cannot
-honour a crawl delay between them. Every other node serves stages. That
-asymmetry is the politeness rule rather than a limitation to be lifted.
-
-#### `scour service <file.hcl>`
-
-The stores a cluster shares, on the bus, until interrupted.
-
-| Flag | Effect |
-| --- | --- |
-| `--join <url>` | The cluster, as `nats://host:port` |
+##### The service document
 
 A service document is not a job document. A job says it wants entities; it does
 not say where they live, and the difference matters more than it looks. The
@@ -550,13 +588,14 @@ topic {
 | `url` | The bus to answer on. Empty starts one in this process |
 | `timeout` | How long one request may take. Default `30s` |
 
-```
-$ scour service service.hcl
+```console
+$ scour server service.hcl
 entities: serving ./graph on scour.entity.*
 events: serving ./events on scour.event.*
 topics: serving ./topics on scour.topic.*
-listening on nats://127.0.0.1:41923
-ready. Interrupt to stop
+jobs: serving on scour.jobs.*
+node-a is serving, and is the broker listening on nats://127.0.0.1:41923
+join it with: scour server --join nats://127.0.0.1:41923
 ```
 
 **A node fetches topics from here.** A job's `topic` middleware takes a `url`
@@ -579,18 +618,18 @@ reason a fetched body never crosses the bus and a cache key goes instead.
 **The stores have one writer each**, because they are SQLite. That is why they
 are behind a service rather than a file each node opens: a cluster where every
 node opened the file would be one where the answer depended on which node you
-asked, and where two nodes writing at once failed. Running a second
-`scour service` against the same document joins the queue group as a standby
-that shares the load, not as a second writer.
+asked, and where two nodes writing at once failed. Running a second server
+against the same document joins the queue group as a standby that shares the
+load, not as a second writer. The job service works the same way.
 
 ### Teaching it a subject
 
 ```
-scour topic ls                      What has been trained
+scour topic list                      What has been trained
 scour topic propose <labels.hcl>    Label the cached corpus from seed terms
 scour topic train <labels.hcl>      Learn from the labels, writing the next version
 scour topic show <name@version>     What it learned
-scour topic rm <name@version>
+scour topic delete <name@version>
 ```
 
 #### `scour topic`
@@ -655,16 +694,15 @@ version rather than a subject.
 
 A model is replaced by writing a new file beside the old one and renaming it
 over the top, so a reader either gets the whole of one version or the whole of
-the other. Writing in place truncated a file that `scour service` was serving
+the other. Writing in place truncated a file that `scour server` was serving
 from, and a node asking for a model while somebody corrected it got half of one.
-
 ### Secrets
 
 ```
 scour secret key            Print a new sealing key, once
 scour secret set <name>     Store one, read from stdin
-scour secret ls             The names that have been set
-scour secret rm <name>
+scour secret list             The names that have been set
+scour secret delete <name>
 ```
 
 #### `scour secret`
@@ -692,11 +730,10 @@ argument is in the shell history and in `ps` output the moment it runs.
 $ pbpaste | scour secret set acme-s3-key
 stored acme-s3-key
 
-$ scour secret ls
+$ scour secret list
 acme-s3-key       set 2026-08-04
 acme-s3-secret    set 2026-08-04
 ```
-
 ## A setting belongs in the document, not in a flag
 
 Every flag here is about *this invocation*: which job, which item, where the
@@ -777,46 +814,47 @@ document was not refused, nothing looked at it.
 
 ### Machine output on stdout, commentary on stderr
 
-So `scour spec job.hcl > spec.hcl` writes a spec and not a spec with a
+So `scour job spec --file job.hcl > spec.hcl` writes a spec and not a spec with a
 progress line in the middle of it. Anything with structure takes `--json`, and
 human output is the default because the common case is a person. There is
 never a third format for somebody to maintain.
-
 ## What exists today
 
 Built and tested. This is the whole of what the binary has:
 
 | Command | Needs |
 | --- | --- |
-| `scour init` | Nothing |
-| `scour validate` | Nothing |
-| `scour show` | Nothing |
-| `scour spec` | Nothing |
+| `scour job` | Nothing to write one; a cluster to submit or run one |
+| `scour scrape` | The cache on disk |
+| `scour crawl` | A directory for the frontier and the cache |
 | `scour defaults` | Nothing |
-| `scour try` | The cache on disk |
-| `scour run` | A directory for the frontier and the cache |
-| `scour train` | The cache on disk |
+| `scour cluster` | A cluster to ask |
+| `scour server` | Nothing, or `--join` to a cluster |
 | `scour topic` | A directory of trained topics, or a cluster |
-| `scour serve` | Nothing, or `--join` to a cluster |
-| `scour service` | A directory per store, and a cluster to answer on |
 | `scour secret` | A cluster, and a sealing key |
 
-The first five need only the engine package, which is why they work offline, in
-CI and on a plane. `run` is the whole crawl in one process: the same four stages
-the cluster wires over the bus, wired directly, and held to producing the same
-records either way.
+`job init`, `job valid`, `job show`, `job spec` and `defaults` need only the
+engine package, which is why they work offline, in CI and on a plane. `crawl` is
+the whole crawl in one process: the same four stages the cluster wires over the
+bus, wired directly, and held to producing the same records either way.
 
-> **Not built yet**
+> **What changed, and why the names moved**
 >
-> `plan`, `apply`, `ls`, `status`, `logs`, `pause`, `resume`, `stop`, `rm`,
-> `records`, `nodes` and `version`. Every one of them is a question about
-> running state, which the command line deliberately does not hold, so each
-> needs a server that does, and the `--server` and `--timeout` flags arrive
-> with them. `plan` is the one that earns the comparison with Terraform: the
-> engine already computes a diff with an effect per change, so it can say that
-> raising a page budget is free and that narrowing scope will drop 1,204
-> queued URLs, before anything happens. The diff is built and tested; nothing
-> calls it yet.
+> The tree was flat, back when a job was the only noun these commands acted on.
+> It stopped being one: a cluster, its jobs, its topics and its secrets are four
+> things somebody manages separately, and three of them had nowhere to live.
+>
+> `try` is `scrape`, `run` is `crawl`, and `serve` and `service` are one
+> `server`. `init`, `valid`, `show`, `spec` and `train` moved under `job`, and
+> `ls` and `rm` are `list` and `delete` wherever they appeared. The old names
+> are gone rather than aliased: two names for one command is a tree somebody
+> has to learn twice.
+>
+> The previous edition of this chapter listed `ls`, `status`, `pause`,
+> `resume`, `stop`, `rm` and `nodes` as not built, each needing a server to
+> hold running state. That server is `scour server`, and it holds it. What is
+> still missing is `plan`: the engine computes the diff and `job update`
+> applies its verdict, but nothing yet prints the diff before anything happens.
 
 > **How this chapter is held to the binary**
 >
@@ -827,7 +865,8 @@ records either way.
 > that nothing takes. The second direction was added after this text spent a
 > while promising `scour train --url`, `-i` and `--replace`, none of which
 > were ever built, and after it said five commands were built when there were
-> twelve.
+> twelve. It is also what caught this chapter still describing `try`, `run`,
+> `serve` and `service` after they had been renamed.
 
 ---
 

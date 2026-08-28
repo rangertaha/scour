@@ -110,7 +110,7 @@ func CodeOf(err error) int {
 
 	// A flag the parser did not recognise is a wrong command line, not a
 	// broken scour. urfave/cli returns a plain error for it, so without this
-	// `scour validate --nope job.hcl` exited 3, and a build script that
+	// `scour job valid --nope job.hcl` exited 3, and a build script that
 	// retries on 3 and gives up on 2 would retry a typo forever. That is
 	// exactly the conflation the exit codes are documented to prevent.
 	if usage(err) {
@@ -235,4 +235,39 @@ func Run(ctx context.Context, a *App, root *ucli.Command, args []string) int {
 		_, _ = fmt.Fprintf(a.Err, "scour: %s\n", msg)
 	}
 	return CodeOf(err)
+}
+
+// AcceptBytes parses and validates a document that did not come from a file.
+//
+// The cluster's copy of a job arrives as bytes, and every command that shows or
+// edits one has to do this. The name is what a parse error is reported against,
+// so it should be something a reader recognises: a path, or a job's name.
+func AcceptBytes(src []byte, name string) (*engine.Document, error) {
+	doc, err := engine.Parse(src, name)
+	if err != nil {
+		return nil, Invalidf("%v", err)
+	}
+	if err := doc.Validate(); err != nil {
+		return nil, Invalidf("%s", Problems(err))
+	}
+	return doc, nil
+}
+
+// oneName adapts an action that takes exactly one job name.
+//
+// The counterpart of [oneFile], and separate from it because the two halves of
+// this command line take different arguments for a reason: a document is a file
+// somebody is editing, and a job is a name the cluster already knows. A command
+// that took either would have to guess which it had been given.
+func oneName(fn func(ctx context.Context, name string) error) func(context.Context, *ucli.Command) error {
+	return func(ctx context.Context, cmd *ucli.Command) error {
+		switch cmd.Args().Len() {
+		case 1:
+			return fn(ctx, cmd.Args().First())
+		case 0:
+			return Usagef("no job named")
+		default:
+			return Usagef("one job at a time, got %d", cmd.Args().Len())
+		}
+	}
 }

@@ -78,13 +78,13 @@ job "news" {
 }
 `
 
-// TestTryShowsWhatEachPropertyFoundAndWhere. A value on its own does not tell
+// TestScrapeShowsWhatEachPropertyFoundAndWhere. A value on its own does not tell
 // you whether the locator will hold on the next page.
-func TestTryShowsWhatEachPropertyFoundAndWhere(t *testing.T) {
+func TestScrapeShowsWhatEachPropertyFoundAndWhere(t *testing.T) {
 	server, _ := site(t)
 	path := document(t, tryJob)
 
-	out, _, code := run(t, "try", path, server.URL+"/news/story.html")
+	out, _, code := run(t, "scrape", path, server.URL+"/news/story.html")
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
@@ -114,14 +114,14 @@ func TestTheSecondRunNeverReachesTheSite(t *testing.T) {
 	path := document(t, tryJob)
 	url := server.URL + "/news/story.html"
 
-	if _, _, code := run(t, "try", path, url); code != 0 {
+	if _, _, code := run(t, "scrape", path, url); code != 0 {
 		t.Fatal("first run failed")
 	}
 	if hits.Load() != 1 {
 		t.Fatalf("the first run asked the site %d times", hits.Load())
 	}
 
-	out, _, code := run(t, "try", path, url)
+	out, _, code := run(t, "scrape", path, url)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
@@ -139,7 +139,7 @@ func TestTheCacheGoesBesideTheDocument(t *testing.T) {
 	server, _ := site(t)
 	path := document(t, tryJob)
 
-	if _, _, code := run(t, "try", path, server.URL+"/a"); code != 0 {
+	if _, _, code := run(t, "scrape", path, server.URL+"/a"); code != 0 {
 		t.Fatal("run failed")
 	}
 
@@ -155,7 +155,7 @@ func TestStrictIsForCI(t *testing.T) {
 	server, _ := site(t)
 	path := document(t, tryJob)
 
-	out, errOut, code := run(t, "try", "--strict", path, server.URL+"/a")
+	out, errOut, code := run(t, "scrape", "--strict", path, server.URL+"/a")
 	if code == 0 {
 		t.Fatalf("a missing required property passed --strict:\n%s", out)
 	}
@@ -164,11 +164,11 @@ func TestStrictIsForCI(t *testing.T) {
 	}
 }
 
-func TestTryAsJSON(t *testing.T) {
+func TestScrapeAsJSON(t *testing.T) {
 	server, _ := site(t)
 	path := document(t, tryJob)
 
-	out, _, code := run(t, "try", "--json", path, server.URL+"/a")
+	out, _, code := run(t, "scrape", "--json", path, server.URL+"/a")
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
@@ -183,7 +183,7 @@ func TestTryAsJSON(t *testing.T) {
 	}
 }
 
-func TestTryOneItemOnly(t *testing.T) {
+func TestScrapeOneItemOnly(t *testing.T) {
 	server, _ := site(t)
 	path := document(t, `
 job "news" {
@@ -203,7 +203,7 @@ job "news" {
 }
 `)
 
-	out, _, code := run(t, "try", "--item", "product", path, server.URL+"/a")
+	out, _, code := run(t, "scrape", "--item", "product", path, server.URL+"/a")
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
@@ -215,15 +215,15 @@ job "news" {
 	}
 }
 
-// TestTryFallsBackToTheJobsFirstStartURL, because the common case is running it
+// TestScrapeFallsBackToTheJobsFirstStartURL, because the common case is running it
 // on the page the job already names.
-func TestTryFallsBackToTheJobsFirstStartURL(t *testing.T) {
+func TestScrapeFallsBackToTheJobsFirstStartURL(t *testing.T) {
 	server, hits := site(t)
 	path := document(t, strings.Replace(tryJob,
 		`start = ["https://example.com/"]`,
 		`start = ["`+server.URL+`/from-the-document"]`, 1))
 
-	if _, _, code := run(t, "try", path); code != 0 {
+	if _, _, code := run(t, "scrape", path); code != 0 {
 		t.Fatal("run failed")
 	}
 	if hits.Load() != 1 {
@@ -231,14 +231,14 @@ func TestTryFallsBackToTheJobsFirstStartURL(t *testing.T) {
 	}
 }
 
-func TestTryUsage(t *testing.T) {
+func TestScrapeUsage(t *testing.T) {
 	server, _ := site(t)
 	path := document(t, tryJob)
 
 	for name, args := range map[string][]string{
-		"no document": {"try"},
-		"too many":    {"try", path, server.URL, "extra"},
-		"url twice":   {"try", "--url", server.URL, path, server.URL},
+		"no document": {"scrape"},
+		"too many":    {"scrape", path, server.URL, "extra"},
+		"url twice":   {"scrape", "--url", server.URL, path, server.URL},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, _, code := run(t, args...); code != 2 {
@@ -248,10 +248,10 @@ func TestTryUsage(t *testing.T) {
 	}
 }
 
-// TestTryOnAJobWithNowhereToStart is refused by validation before it gets as
+// TestScrapeOnAJobWithNowhereToStart is refused by validation before it gets as
 // far as fetching, which is the right place: a job with no start urls is not a
 // job, whatever command was pointed at it.
-func TestTryOnAJobWithNowhereToStart(t *testing.T) {
+func TestScrapeOnAJobWithNowhereToStart(t *testing.T) {
 	path := document(t, `
 job "news" {
   start = []
@@ -264,7 +264,7 @@ job "news" {
 }
 `)
 
-	out, errOut, code := run(t, "try", path)
+	out, errOut, code := run(t, "scrape", path)
 	if code != 1 {
 		t.Fatalf("exit %d, want the document to be refused", code)
 	}
@@ -273,11 +273,11 @@ job "news" {
 	}
 }
 
-// TestTryOnASiteThatIsNotThere fails rather than pretending.
-func TestTryOnASiteThatIsNotThere(t *testing.T) {
+// TestScrapeOnASiteThatIsNotThere fails rather than pretending.
+func TestScrapeOnASiteThatIsNotThere(t *testing.T) {
 	path := document(t, tryJob)
 
-	if _, _, code := run(t, "try", path, "http://127.0.0.1:1/nothing"); code != 3 {
+	if _, _, code := run(t, "scrape", path, "http://127.0.0.1:1/nothing"); code != 3 {
 		t.Errorf("exit %d, want a failure", code)
 	}
 }

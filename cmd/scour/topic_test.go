@@ -99,7 +99,7 @@ job "news" {
 		t.Fatal(err)
 	}
 
-	if got := scour(t, dir, "run", job); got.code != 0 {
+	if got := scour(t, dir, "crawl", job); got.code != 0 {
 		t.Fatalf("filling the cache: exit %d\n%s%s", got.code, got.stdout, got.stderr)
 	}
 	return dir
@@ -179,7 +179,7 @@ topic "climate" {
 	}
 
 	// It is listed, and it can be read back.
-	list := scour(t, dir, "topic", "ls")
+	list := scour(t, dir, "topic", "list")
 	if !strings.Contains(list.stdout, "climate@1") {
 		t.Errorf("ls does not show it:\n%s", list.stdout)
 	}
@@ -203,10 +203,10 @@ topic "climate" {
 	}
 
 	// And rm takes one version, leaving the other.
-	if got := scour(t, dir, "topic", "rm", "climate@1"); got.code != 0 {
+	if got := scour(t, dir, "topic", "delete", "climate@1"); got.code != 0 {
 		t.Fatalf("rm: exit %d\n%s%s", got.code, got.stdout, got.stderr)
 	}
-	list = scour(t, dir, "topic", "ls")
+	list = scour(t, dir, "topic", "list")
 	if strings.Contains(list.stdout, "climate@1") {
 		t.Errorf("rm left it behind:\n%s", list.stdout)
 	}

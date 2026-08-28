@@ -15,7 +15,8 @@ import (
 // gives up, and so does a build script.
 func Validate(a *App) *ucli.Command {
 	return &ucli.Command{
-		Name:      "validate",
+		Name:      "valid",
+		Category:  "Authoring a document",
 		Usage:     "Check a job document, reporting every problem at once",
 		ArgsUsage: "<document.hcl>",
 		Description: "Parses and validates the document. It does not reach the network, so\n" +
@@ -48,7 +49,7 @@ func Validate(a *App) *ucli.Command {
 // Because dropping it here made ctrl-c stop nothing. This helper took a
 // callback of one path and threw the context away, so a command that needed one
 // had no choice but to make its own, and both of the long-running commands did:
-// `scour run` and `scour train` each called context.Background(). The context
+// `scour crawl` and `scour job train` each called context.Background(). The context
 // main builds is the one signal.NotifyContext cancels on an interrupt, so
 // discarding it meant a crawl could not be interrupted at all. It kept crawling
 // until it ran out of pages, and the only way to stop it was to press ctrl-c a

@@ -155,13 +155,13 @@ job "news" {
 		args []string
 		want int
 	}{
-		{"a document that validates", []string{"validate", good}, 0},
-		{"a document that does not", []string{"validate", bad}, 1},
+		{"a document that validates", []string{"job", "valid", good}, 0},
+		{"a document that does not", []string{"job", "valid", bad}, 1},
 		{"a command that is not one", []string{"nonesuch"}, 2},
 		// Three and not one: a file that is not there is not a document that
 		// was read and refused, and the table draws that line deliberately so
 		// a script can tell "fix your file" from "the tool could not do it".
-		{"a file that is not there", []string{"validate", filepath.Join(dir, "missing.hcl")}, 3},
+		{"a file that is not there", []string{"job", "valid", filepath.Join(dir, "missing.hcl")}, 3},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got := scour(t, dir, c.args...)
@@ -174,7 +174,7 @@ job "news" {
 
 // TestTheStreamsAreSeparate.
 //
-// `scour spec` is meant to be piped, so what it prints has to be on stdout with
+// `scour job spec` is meant to be piped, so what it prints has to be on stdout with
 // nothing else mixed in, and the human commentary has to be on stderr. In
 // process that is two buffers somebody wired up; here it is the two file
 // descriptors a pipe actually reads.
@@ -197,7 +197,7 @@ job "news" {
 		t.Fatal(err)
 	}
 
-	got := scour(t, dir, "spec", path)
+	got := scour(t, dir, "job", "spec", "--file", path)
 	if got.code != 0 {
 		t.Fatalf("exit %d: %s", got.code, got.stderr)
 	}
@@ -280,7 +280,7 @@ job "news" {
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command(binary, "run", path)
+	cmd := exec.Command(binary, "crawl", path)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOCOVERDIR="+coverDir)
 
@@ -330,7 +330,7 @@ job "news" {
 	// And what it had queued is still there, so the next run continues rather
 	// than starting over.
 	before := served.Load()
-	again := scour(t, dir, "run", path)
+	again := scour(t, dir, "crawl", path)
 	if again.code != 0 {
 		t.Fatalf("the second run exited %d\n%s%s", again.code, again.stdout, again.stderr)
 	}

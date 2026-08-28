@@ -47,7 +47,7 @@ func TestEveryCommandIsDocumented(t *testing.T) {
 	}
 }
 
-// builtRow matches a row of the "What exists today" table: | `scour run` | ... |
+// builtRow matches a row of the "What exists today" table: | `scour crawl` | ... |
 var builtRow = regexp.MustCompile("(?m)^\\|\\s*`scour ([a-z]+)`\\s*\\|")
 
 // TestWhatExistsTodayIsWhatExists holds that table to the binary, in both
@@ -56,7 +56,7 @@ var builtRow = regexp.MustCompile("(?m)^\\|\\s*`scour ([a-z]+)`\\s*\\|")
 // The direction that matters is the second. A command built and left out of the
 // table reads as a command that does not exist, and this file spent a while
 // saying five things were built when there were twelve: everything a person
-// could actually run, from `scour run` to `scour service`, was described here
+// could actually run, from `scour crawl` to `scour server`, was described here
 // as waiting on the stages.
 func TestWhatExistsTodayIsWhatExists(t *testing.T) {
 	a := &cli.App{Out: os.Stdout, Err: os.Stderr}
@@ -121,7 +121,7 @@ var flagRow = regexp.MustCompile("(?m)^\\|\\s*`(--[a-z-]+)")
 // wastes somebody's afternoon.
 //
 // A flag written down and never built is not a gap, it is an instruction that
-// fails. `scour train` was documented here with `--url`, `-i` and `--replace`,
+// fails. `scour job train` was documented here with `--url`, `-i` and `--replace`,
 // which sound like exactly what somebody teaching it an answer would reach for,
 // and the binary has never had any of them.
 //
@@ -194,8 +194,8 @@ func TestExitCodesAreDocumented(t *testing.T) {
 // level, or to the end of the file when toEnd is set.
 //
 // Any level, and that matters. It used to stop at the next "####", so the
-// `scour service` section ran on through `### Secrets` and claimed its flag
-// table: the reverse flag check then reported that `scour service` documents a
+// `scour server` section ran on through `### Secrets` and claimed its flag
+// table: the reverse flag check then reported that `scour server` documents a
 // `--key-file` it does not take, which was the check being wrong rather than
 // the document.
 func between(t *testing.T, src, start string, toEnd bool) string {

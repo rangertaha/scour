@@ -33,7 +33,7 @@ import (
 // terms to make a first pass at that file, a person corrects it, and `train`
 // learns from what they decided.
 //
-// That is the same shape `scour train` uses for locators, and it is the shape
+// That is the same shape `scour job train` uses for locators, and it is the shape
 // because the alternative is a model whose mistakes cannot be traced to the
 // decision that caused them. A classifier trained from state inside the tool
 // says a page is about climate and there is nowhere to go and look at why.
@@ -56,9 +56,11 @@ func Topic(a *App) *ucli.Command {
 	}
 
 	return &ucli.Command{
-		Name:      "topic",
-		Usage:     "Train and manage the subjects a crawl recognises",
-		ArgsUsage: "<command>",
+		Name:            "topic",
+		HideHelpCommand: true,
+		Category:        "Shared across jobs",
+		Usage:           "Train and manage the subjects a crawl recognises",
+		ArgsUsage:       "<command>",
 		Description: "A topic is a trained classifier a job refers to by name and version,\n" +
 			"as `climate@7`. It is learned from a labels document: the cached pages\n" +
 			"somebody decided are and are not the subject.\n\n" +
@@ -66,7 +68,7 @@ func Topic(a *App) *ucli.Command {
 			"got wrong, then `scour topic train labels.hcl`.",
 		Commands: []*ucli.Command{
 			{
-				Name:  "ls",
+				Name:  "list",
 				Usage: "What has been trained",
 				Flags: shared,
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
@@ -83,7 +85,7 @@ func Topic(a *App) *ucli.Command {
 				},
 			},
 			{
-				Name:      "rm",
+				Name:      "delete",
 				Usage:     "Remove one trained version",
 				ArgsUsage: "<name@version>",
 				Flags:     shared,
@@ -319,7 +321,7 @@ func proposeLabels(ctx context.Context, a *App, path, corpusDir string, limit in
 		return Failedf("%v", err)
 	}
 	if len(corpus) == 0 {
-		return Invalidf("no cached pages to label. Run `scour run` or `scour try` first")
+		return Invalidf("no cached pages to label. Run `scour crawl` or `scour scrape` first")
 	}
 	a.Warnf("read %d cached pages\n", len(corpus))
 
@@ -404,7 +406,7 @@ func hclString(value string) string {
 //
 // Rendered rather than edited in place, unlike the job document. A job document
 // is a person's own file with their comments and their ordering in it, and
-// `scour train` edits its text precisely so that a diff stays reviewable. This
+// `scour job train` edits its text precisely so that a diff stays reviewable. This
 // file is mostly a list this command generated, so rendering it keeps the
 // ordering stable and the diff small, which is what makes the corrections
 // visible.
@@ -474,7 +476,7 @@ func trainTopics(ctx context.Context, a *App, path, dir, corpusDir string) error
 		return Failedf("%v", err)
 	}
 	if len(corpus) == 0 {
-		return Invalidf("no cached pages to learn from. Run `scour run` or `scour try` first")
+		return Invalidf("no cached pages to learn from. Run `scour crawl` or `scour scrape` first")
 	}
 
 	text := make(map[string]string, len(corpus))

@@ -36,12 +36,25 @@ import (
 	"github.com/rangertaha/scour/internal/extract"
 )
 
+// Mark is what identifies an induced locator, and what is matched.
+//
+// It carries no command name on purpose. The marker is written into somebody's
+// document and stays there for years, so anything in it that can go out of date
+// eventually does: this said "induced by scour job train" until that command became
+// `scour job train`, at which point every document in the world carried an
+// instruction that no longer worked.
+//
+// Matching a prefix rather than the whole sentence is what makes that a
+// one-time problem. The markers already written still start with this, so they
+// are still recognised, and the next rename cannot reach it either.
+const Mark = "# induced by scour"
+
 // Marker is written beside an induced locator.
 //
 // It is the whole of how a guess is told from an instruction. Deliberately a
 // sentence rather than a token: the person who finds it in a diff should not
 // have to look anything up.
-const Marker = "# induced by scour train; delete this comment to keep your own"
+const Marker = Mark + "; delete this comment to keep your own"
 
 // Proposal is one locator this would write.
 type Proposal struct {
@@ -326,7 +339,7 @@ func rank(selector string) int {
 	}
 }
 
-// Report renders proposals the way `scour train` prints them.
+// Report renders proposals the way `scour job train` prints them.
 func Report(proposals []Proposal) string {
 	sort.Slice(proposals, func(i, j int) bool {
 		if proposals[i].Item != proposals[j].Item {

@@ -33,7 +33,16 @@ import (
 // continues where it left off. That is why the summary says why it ended: a
 // crawl that finished a site and one that ran out of budget look identical
 // otherwise and mean opposite things.
-func Crawl(a *App) *ucli.Command {
+func Crawl(a *App) *ucli.Command { return crawlCommand(a, "crawl", "Building a job") }
+
+// crawlCommand builds the local crawl under a given name.
+//
+// Two names, one command. It is `scour crawl` at the top level, where it sits
+// beside the other things somebody does to a document, and `scour job run`
+// among the job commands, where somebody who has been driving a cluster wants
+// the local equivalent without leaving the noun they are in. Building it twice
+// would be two commands that drifted.
+func crawlCommand(a *App, name, category string) *ucli.Command {
 	var (
 		jobName string
 		dir     string
@@ -42,7 +51,8 @@ func Crawl(a *App) *ucli.Command {
 	)
 
 	return &ucli.Command{
-		Name:      "run",
+		Name:      name,
+		Category:  category,
 		Usage:     "Crawl a job here, without a server",
 		ArgsUsage: "<document.hcl>",
 		Description: "Runs the whole engine in this process: scheduler, downloader, spider,\n" +
@@ -107,7 +117,7 @@ func runCrawl(ctx context.Context, a *App, path, jobName, dir string, verbose, f
 	// every run.
 	//
 	// Read at all because it was not: `monitoring { logging { level = "debug" } }`
-	// was parsed, defaulted, validated and reported by `scour show`, and the
+	// was parsed, defaulted, validated and reported by `scour job show`, and the
 	// run logged at warn regardless. A setting the document accepts and nothing
 	// acts on is worse than one that does not exist, because the operator has
 	// been told otherwise.
@@ -183,7 +193,7 @@ func runCrawl(ctx context.Context, a *App, path, jobName, dir string, verbose, f
 	// said the records were written and after this function had returned nil.
 	// A `json` exporter that cannot write its closing bracket, or a parquet one
 	// that cannot write its footer, left an unreadable file behind while
-	// `scour run` printed "exported 7000 / wrote out.json" and exited 0. A
+	// `scour crawl` printed "exported 7000 / wrote out.json" and exited 0. A
 	// pipeline reading the exit code treated the run as complete.
 	//
 	// Closed before the summary rather than checked after it, so that what the

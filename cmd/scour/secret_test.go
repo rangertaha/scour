@@ -35,7 +35,7 @@ func TestTheClientNeverStandsUpItsOwnCluster(t *testing.T) {
 	t.Setenv(secret.KeyVar, strings.TrimSpace(key))
 	t.Setenv("SCOUR_SERVER", "nats://127.0.0.1:1")
 
-	out, errOut, code := run(t, "secret", "ls")
+	out, errOut, code := run(t, "secret", "list")
 	if code == 0 {
 		t.Fatalf("listing against a cluster that is not there succeeded:\n%s", out)
 	}
@@ -48,7 +48,7 @@ func TestTheClientNeverStandsUpItsOwnCluster(t *testing.T) {
 func TestSecretNeedsAKeyAndSaysWhere(t *testing.T) {
 	t.Setenv(secret.KeyVar, "")
 
-	out, errOut, code := run(t, "secret", "ls")
+	out, errOut, code := run(t, "secret", "list")
 	if code == 0 {
 		t.Fatal("listed secrets with no sealing key")
 	}
@@ -65,18 +65,12 @@ func TestSecretUsage(t *testing.T) {
 	for name, args := range map[string][]string{
 		"set with no name": {"secret", "set"},
 		"set with two":     {"secret", "set", "a", "b"},
-		"rm with no name":  {"secret", "rm"},
+		"rm with no name":  {"secret", "delete"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, _, code := run(t, args...); code != 2 {
 				t.Errorf("exit %d, want a usage error", code)
 			}
 		})
-	}
-}
-
-func TestServeTakesNoArguments(t *testing.T) {
-	if _, _, code := run(t, "serve", "somefile.hcl"); code != 2 {
-		t.Errorf("exit %d, want a usage error", code)
 	}
 }

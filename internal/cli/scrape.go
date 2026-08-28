@@ -21,7 +21,7 @@ import (
 	"github.com/rangertaha/scour/internal/spider"
 )
 
-// Try fetches one page and shows what came out of it.
+// Scrape fetches one page and shows what came out of it.
 //
 // # Why this exists
 //
@@ -40,7 +40,7 @@ import (
 // The job's own cache plugin is used when it has one, and a directory under the
 // document otherwise, because a job that has not decided where bodies live
 // should still be tryable.
-func Try(a *App) *ucli.Command {
+func Scrape(a *App) *ucli.Command {
 	var (
 		jobName  string
 		url      string
@@ -51,7 +51,8 @@ func Try(a *App) *ucli.Command {
 	)
 
 	return &ucli.Command{
-		Name:      "try",
+		Name:      "scrape",
+		Category:  "Building a job",
 		Usage:     "Run one page and show what came out",
 		ArgsUsage: "<document.hcl> [url]",
 		Description: "Fetches one page, caches it, and runs it through extraction, printing\n" +
@@ -166,7 +167,7 @@ func runTry(ctx context.Context, a *App, opts tryOptions) error {
 	if opts.json {
 		return printTryJSON(a, resp, out)
 	}
-	printTry(a, resp, out, elapsed)
+	printScrape(a, resp, out, elapsed)
 
 	if opts.strict {
 		var missing []string
@@ -207,7 +208,7 @@ func withCache(job *engine.Job, dir string) *engine.Job {
 	return &copied
 }
 
-func printTry(a *App, resp *downloader.Response, out *spider.Output, elapsed time.Duration) {
+func printScrape(a *App, resp *downloader.Response, out *spider.Output, elapsed time.Duration) {
 	where := "fetched"
 	if resp.Cached {
 		where = "cached "

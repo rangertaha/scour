@@ -19,8 +19,9 @@ func Defaults(a *App) *ucli.Command {
 	var asJSON bool
 
 	return &ucli.Command{
-		Name:  "defaults",
-		Usage: "Print every default and its value",
+		Name:     "defaults",
+		Category: "Building a job",
+		Usage:    "Print every default and its value",
 		Description: "Defaults are applied when a job is accepted, not when it runs, so a\n" +
 			"stored job records what it will actually do rather than inheriting\n" +
 			"whatever these were on the day it started.",

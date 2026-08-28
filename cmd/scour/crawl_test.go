@@ -19,7 +19,7 @@ import (
 // Everything here was true of the code before it was written down; none of it
 // is a change. What it is, is the difference between behaviour that happens to
 // hold and behaviour somebody would notice breaking. The unit tests under
-// internal/ ask each stage what it does with a page. These ask what `scour run`
+// internal/ ask each stage what it does with a page. These ask what `scour crawl`
 // does with a website, which is the only question a user has.
 
 // job builds a document for the site with one property and whatever else a
@@ -68,7 +68,7 @@ func TestEveryVocabularyIsRead(t *testing.T) {
 		{"/article/messy", "A messy story", "<meta og:title>"},
 	} {
 		t.Run(strings.TrimPrefix(one.page, "/article/"), func(t *testing.T) {
-			out, errOut, code := run(t, "try", "--url", site.URL+one.page, path)
+			out, errOut, code := run(t, "scrape", "--url", site.URL+one.page, path)
 			if code != 0 {
 				t.Fatalf("exit %d\n%s%s", code, out, errOut)
 			}
@@ -99,7 +99,7 @@ func TestAPropertyIsOnlyFoundUnderNamesItAnswersTo(t *testing.T) {
   }`
 
 	bare := site.job(t, "", rate)
-	out, _, code := run(t, "try", "--url", site.URL+"/article/jsonld", bare)
+	out, _, code := run(t, "scrape", "--url", site.URL+"/article/jsonld", bare)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
@@ -108,7 +108,7 @@ func TestAPropertyIsOnlyFoundUnderNamesItAnswersTo(t *testing.T) {
 	}
 
 	aliased := site.job(t, `      aliases = ["headline"]`, rate)
-	out, _, code = run(t, "try", "--url", site.URL+"/article/jsonld", aliased)
+	out, _, code = run(t, "scrape", "--url", site.URL+"/article/jsonld", aliased)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
@@ -128,7 +128,7 @@ func TestAnEncodingDeclaredOnlyInTheHeaderSurvives(t *testing.T) {
     rate = "1ms"
   }`)
 
-	out, errOut, code := run(t, "try", "--url", site.URL+"/article/cyrillic", path)
+	out, errOut, code := run(t, "scrape", "--url", site.URL+"/article/cyrillic", path)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
@@ -152,7 +152,7 @@ func TestRedirectsAreFollowedToWhereTheyLand(t *testing.T) {
 		{"/moved", "An Open Graph story"},
 		{"/chain/1", "The end of the chain"},
 	} {
-		out, errOut, code := run(t, "try", "--url", site.URL+one.from, path)
+		out, errOut, code := run(t, "scrape", "--url", site.URL+one.from, path)
 		if code != 0 {
 			t.Fatalf("%s: exit %d\n%s%s", one.from, code, out, errOut)
 		}
@@ -178,7 +178,7 @@ func TestARedirectLoopIsGivenUpOnAndSaysWhere(t *testing.T) {
     rate = "1ms"
   }`)
 
-	out, errOut, code := run(t, "try", "--url", site.URL+"/loop", path)
+	out, errOut, code := run(t, "scrape", "--url", site.URL+"/loop", path)
 	if code == 0 {
 		t.Fatalf("a redirect loop was reported as a success:\n%s", out)
 	}
@@ -205,7 +205,7 @@ func TestACrawlStaysWhereItIsAllowed(t *testing.T) {
     rate = "1ms"
   }`)
 
-	out, errOut, code := run(t, "run", path)
+	out, errOut, code := run(t, "crawl", path)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
@@ -230,7 +230,7 @@ func TestMaxDepthStopsTheLadder(t *testing.T) {
     max_depth = 2
   }`)
 
-	if out, errOut, code := run(t, "run", path); code != 0 {
+	if out, errOut, code := run(t, "crawl", path); code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
 
@@ -259,7 +259,7 @@ func TestMaxPagesStopsAndLeavesTheRestQueued(t *testing.T) {
     max_pages = 3
   }`)
 
-	out, errOut, code := run(t, "run", path)
+	out, errOut, code := run(t, "crawl", path)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
@@ -294,7 +294,7 @@ func TestTheDupefilterCollapsesATrackedURL(t *testing.T) {
   }`
 
 	plain := newWebsite(t, mocksite.Options{})
-	if out, errOut, code := run(t, "run", plain.job(t, "", rate)); code != 0 {
+	if out, errOut, code := run(t, "crawl", plain.job(t, "", rate)); code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
 	if n := plain.Asked("/article/og"); n != 2 {
@@ -302,7 +302,7 @@ func TestTheDupefilterCollapsesATrackedURL(t *testing.T) {
 	}
 
 	stripped := newWebsite(t, mocksite.Options{})
-	if out, errOut, code := run(t, "run", stripped.job(t, "", stripping)); code != 0 {
+	if out, errOut, code := run(t, "crawl", stripped.job(t, "", stripping)); code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
 	if n := stripped.Asked("/article/og"); n != 1 {
@@ -322,7 +322,7 @@ func TestPagesThatFailDoNotStopTheCrawl(t *testing.T) {
     rate = "1ms"
   }`)
 
-	out, errOut, code := run(t, "run", path)
+	out, errOut, code := run(t, "crawl", path)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
@@ -365,7 +365,7 @@ func TestACrawlHonoursTheSitesCrawlDelay(t *testing.T) {
   }`)
 
 	start := time.Now()
-	out, errOut, code := run(t, "run", path)
+	out, errOut, code := run(t, "crawl", path)
 	took := time.Since(start)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
@@ -431,7 +431,7 @@ job "news" {
 }
 `, strings.TrimPrefix(site.URL, "http://"), site.URL))
 
-	out, errOut, code := run(t, "run", path)
+	out, errOut, code := run(t, "crawl", path)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}

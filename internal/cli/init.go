@@ -15,7 +15,7 @@ import (
 //
 // To stdout by default, so it composes:
 //
-//	scour init news --template news > news.hcl
+//	scour job init news --template news > news.hcl
 //
 // A path can be given instead, and then it refuses to overwrite: somebody
 // running this twice in a directory they have been working in should not lose
@@ -26,6 +26,7 @@ func Init(a *App) *ucli.Command {
 
 	return &ucli.Command{
 		Name:      "init",
+		Category:  "Authoring a document",
 		Usage:     "Print a starter job document",
 		ArgsUsage: "[name]",
 		Description: "Writes a job that validates as it stands, so it can be run and then\n" +
@@ -34,7 +35,7 @@ func Init(a *App) *ucli.Command {
 			"The templates differ in what they extract, not in how they crawl: all\n" +
 			"of them are polite, budgeted and cached. None contains a locator,\n" +
 			"because the ones that work depend on the site. Crawl a few hundred\n" +
-			"pages and `scour train` will propose them.",
+			"pages and `scour job train` will propose them.",
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{
 				Name:        "template",

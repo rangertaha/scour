@@ -138,7 +138,7 @@ func find(lines []string, from, to int, proposal Proposal) (insertAt int, indent
 				body := strings.TrimSpace(lines[j])
 				switch {
 				case strings.HasPrefix(body, "css ") || strings.HasPrefix(body, "css="):
-					if strings.Contains(lines[j], Marker) {
+					if strings.Contains(lines[j], Mark) {
 						replace = j
 					} else {
 						// A locator somebody wrote, which is never touched.
@@ -290,7 +290,7 @@ func MarkInduced(document []byte, job string) map[string]bool {
 			item, property = quoted(trimmed), ""
 		case strings.HasPrefix(trimmed, `property "`):
 			property = quoted(trimmed)
-		case strings.Contains(line, Marker) && item != "" && property != "":
+		case strings.Contains(line, Mark) && item != "" && property != "":
 			induced[item+"."+property] = true
 		}
 	}

@@ -15,7 +15,7 @@ import (
 	"github.com/rangertaha/scour/internal/event"
 )
 
-// `scour service` is the only way to reach the entity graph and the event
+// `scour server` is the only way to reach the entity graph and the event
 // store, so if it does not start, they are built and unreachable: the class
 // this repository has retired three times and found a fourth instance of.
 //
@@ -23,12 +23,12 @@ import (
 // nothing else covers is that a document on disk turns into two services
 // answering on a bus that a separate process can talk to.
 
-// TestTheServiceAnswersOnTheBus.
+// TestTheServerAnswersOnTheBus.
 //
 // It starts the command, connects to the embedded bus it prints, and asks both
 // stores for something through the real clients. Nothing here reads a database
 // file: what matters is that a caller who knows only the address gets answers.
-func TestTheServiceAnswersOnTheBus(t *testing.T) {
+func TestTheServerAnswersOnTheBus(t *testing.T) {
 	dir := t.TempDir()
 
 	path := filepath.Join(dir, "service.hcl")
@@ -44,7 +44,7 @@ event {
 		t.Fatal(err)
 	}
 
-	cmd := start(t, dir, "service", path)
+	cmd := start(t, dir, "server", path)
 
 	address := waitFor(t, cmd, "listening on ")
 	conn, err := bus.Connect(bus.Options{URL: address, Name: "service-test"})
@@ -100,13 +100,13 @@ event {
 	}
 }
 
-// TestTheServiceKeepsWhatItWasGiven.
+// TestTheServerKeepsWhatItWasGiven.
 //
 // A store that vanished when the process did would be one every writer believed
 // it had written to, which is why `dir` is required. This asserts the promise
 // rather than the requirement: stop the service, start it again, and the graph
 // is still there.
-func TestTheServiceKeepsWhatItWasGiven(t *testing.T) {
+func TestTheServerKeepsWhatItWasGiven(t *testing.T) {
 	dir := t.TempDir()
 
 	path := filepath.Join(dir, "service.hcl")
@@ -118,7 +118,7 @@ entity {
 		t.Fatal(err)
 	}
 
-	first := start(t, dir, "service", path)
+	first := start(t, dir, "server", path)
 	address := waitFor(t, first, "listening on ")
 
 	conn, err := bus.Connect(bus.Options{URL: address, Name: "keeps-test"})
@@ -135,7 +135,7 @@ entity {
 	first.stop(t)
 
 	// Again, against the same directory.
-	second := start(t, dir, "service", path)
+	second := start(t, dir, "server", path)
 	address = waitFor(t, second, "listening on ")
 
 	conn, err = bus.Connect(bus.Options{URL: address, Name: "keeps-test-2"})
@@ -177,11 +177,24 @@ job "news" {
 		t.Fatal(err)
 	}
 
-	got := scour(t, dir, "service", path)
+	got := scour(t, dir, "server", path)
 	if got.code == 0 {
 		t.Fatalf("a job document was accepted as a service document:\n%s%s", got.stdout, got.stderr)
 	}
 	if !strings.Contains(got.stderr, "entity") && !strings.Contains(got.stderr, "event") {
 		t.Errorf("the message does not say what a service document holds: %s", got.stderr)
+	}
+}
+
+// TestServerTakesOneServiceDocumentAtMost holds the argument contract.
+//
+// `server` takes an optional service document, where `serve` took nothing at
+// all: what it runs is decided by what it is given. One is the document, none
+// is a node and the job service, and two is somebody meaning something this
+// cannot do. The last is a usage error rather than a silently ignored second
+// file.
+func TestServerTakesOneServiceDocumentAtMost(t *testing.T) {
+	if _, _, code := run(t, "server", "one.hcl", "two.hcl"); code != 2 {
+		t.Errorf("exit %d, want a usage error", code)
 	}
 }

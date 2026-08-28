@@ -38,7 +38,7 @@ func write(t *testing.T, name, body string) string {
 // TestInitProducesSomethingThatValidates is the promise init makes: what it
 // prints is a job, not a sketch of one.
 func TestInitProducesSomethingThatValidates(t *testing.T) {
-	sample, _, code := run(t, "init", "news")
+	sample, _, code := run(t, "job", "init", "news")
 	if code != cli.ExitOK {
 		t.Fatalf("init exited %d", code)
 	}
@@ -47,14 +47,14 @@ func TestInitProducesSomethingThatValidates(t *testing.T) {
 	}
 
 	path := write(t, "news.hcl", sample)
-	stdout, stderr, code := run(t, "validate", path)
+	stdout, stderr, code := run(t, "job", "valid", path)
 	if code != cli.ExitOK {
 		t.Fatalf("the sample does not validate: %d\n%s%s", code, stdout, stderr)
 	}
 }
 
 func TestInitDefaultsItsName(t *testing.T) {
-	sample, _, code := run(t, "init")
+	sample, _, code := run(t, "job", "init")
 	if code != cli.ExitOK {
 		t.Fatalf("exited %d", code)
 	}
@@ -66,7 +66,7 @@ func TestInitDefaultsItsName(t *testing.T) {
 func TestInitWritesAFileAndRefusesToClobberIt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "job.hcl")
 
-	if _, _, code := run(t, "init", "-o", path); code != cli.ExitOK {
+	if _, _, code := run(t, "job", "init", "-o", path); code != cli.ExitOK {
 		t.Fatalf("exited %d", code)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -75,10 +75,10 @@ func TestInitWritesAFileAndRefusesToClobberIt(t *testing.T) {
 
 	// Somebody running this twice in a directory they have been working in
 	// must not lose what they wrote the first time.
-	if _, _, code := run(t, "init", "-o", path); code != cli.ExitFailed {
+	if _, _, code := run(t, "job", "init", "-o", path); code != cli.ExitFailed {
 		t.Errorf("overwriting exited %d, want it refused", code)
 	}
-	if _, _, code := run(t, "init", "-o", path, "--force"); code != cli.ExitOK {
+	if _, _, code := run(t, "job", "init", "-o", path, "--force"); code != cli.ExitOK {
 		t.Errorf("--force exited %d", code)
 	}
 }
@@ -101,7 +101,7 @@ job "news" {
 }
 `)
 
-	_, stderr, code := run(t, "validate", path)
+	_, stderr, code := run(t, "job", "valid", path)
 	if code != cli.ExitInvalid {
 		t.Fatalf("exited %d, want %d", code, cli.ExitInvalid)
 	}
@@ -117,23 +117,23 @@ job "news" {
 func TestExitCodesTellTheCasesApart(t *testing.T) {
 	good := write(t, "good.hcl", string(mustInit(t)))
 
-	if _, _, code := run(t, "validate", good); code != cli.ExitOK {
+	if _, _, code := run(t, "job", "valid", good); code != cli.ExitOK {
 		t.Errorf("a good document exited %d", code)
 	}
 
 	bad := write(t, "bad.hcl", "job \"j\" {\n}\n")
-	if _, _, code := run(t, "validate", bad); code != cli.ExitInvalid {
+	if _, _, code := run(t, "job", "valid", bad); code != cli.ExitInvalid {
 		t.Errorf("a refused document exited %d, want %d", code, cli.ExitInvalid)
 	}
 
-	if _, _, code := run(t, "validate", filepath.Join(t.TempDir(), "absent.hcl")); code != cli.ExitFailed {
+	if _, _, code := run(t, "job", "valid", filepath.Join(t.TempDir(), "absent.hcl")); code != cli.ExitFailed {
 		t.Errorf("a missing file exited %d, want %d", code, cli.ExitFailed)
 	}
 
-	if _, _, code := run(t, "validate"); code != cli.ExitUsage {
+	if _, _, code := run(t, "job", "valid"); code != cli.ExitUsage {
 		t.Errorf("no argument exited %d, want %d", code, cli.ExitUsage)
 	}
-	if _, _, code := run(t, "validate", good, good); code != cli.ExitUsage {
+	if _, _, code := run(t, "job", "valid", good, good); code != cli.ExitUsage {
 		t.Errorf("two documents exited %d, want %d", code, cli.ExitUsage)
 	}
 }
@@ -168,7 +168,7 @@ job "news" {
 }
 `)
 
-	stdout, _, code := run(t, "show", path)
+	stdout, _, code := run(t, "job", "show", "--file", path)
 	if code != cli.ExitOK {
 		t.Fatalf("exited %d", code)
 	}
@@ -192,7 +192,7 @@ job "news" {
 func TestShowAsJSON(t *testing.T) {
 	path := write(t, "job.hcl", string(mustInit(t)))
 
-	stdout, _, code := run(t, "show", "--json", path)
+	stdout, _, code := run(t, "job", "show", "--json", "--file", path)
 	if code != cli.ExitOK {
 		t.Fatalf("exited %d", code)
 	}
@@ -201,12 +201,12 @@ func TestShowAsJSON(t *testing.T) {
 	}
 }
 
-// TestSpecGoesToStdoutAlone is what makes `scour spec job.hcl > spec.hcl`
+// TestSpecGoesToStdoutAlone is what makes `scour job spec job.hcl > spec.hcl`
 // produce a spec rather than a spec with a note in the middle of it.
 func TestSpecGoesToStdoutAlone(t *testing.T) {
 	path := write(t, "job.hcl", string(mustInit(t)))
 
-	stdout, stderr, code := run(t, "spec", path)
+	stdout, stderr, code := run(t, "job", "spec", "--file", path)
 	if code != cli.ExitOK {
 		t.Fatalf("exited %d", code)
 	}
@@ -248,7 +248,7 @@ job "products" {
 }
 `)
 
-	_, stderr, code := run(t, "show", path)
+	_, stderr, code := run(t, "job", "show", "--file", path)
 	if code != cli.ExitUsage {
 		t.Fatalf("exited %d, want a usage error", code)
 	}
@@ -256,10 +256,10 @@ job "products" {
 		t.Errorf("the error does not say what there is to choose from: %s", stderr)
 	}
 
-	if _, _, code := run(t, "show", "--job", "products", path); code != cli.ExitOK {
+	if _, _, code := run(t, "job", "show", "--file", path, "products"); code != cli.ExitOK {
 		t.Errorf("naming a job exited %d", code)
 	}
-	if _, _, code := run(t, "show", "--job", "absent", path); code != cli.ExitUsage {
+	if _, _, code := run(t, "job", "show", "--file", path, "absent"); code != cli.ExitUsage {
 		t.Errorf("naming a job that is not there exited %d", code)
 	}
 }
@@ -303,7 +303,7 @@ func TestVersion(t *testing.T) {
 
 func mustInit(t *testing.T) []byte {
 	t.Helper()
-	out, _, code := run(t, "init")
+	out, _, code := run(t, "job", "init")
 	if code != cli.ExitOK {
 		t.Fatalf("init exited %d", code)
 	}
@@ -313,7 +313,7 @@ func mustInit(t *testing.T) []byte {
 // Templates.
 
 func TestEveryTemplateInitsAndValidates(t *testing.T) {
-	listed, _, code := run(t, "init", "--list")
+	listed, _, code := run(t, "job", "init", "--list")
 	if code != cli.ExitOK {
 		t.Fatalf("--list exited %d", code)
 	}
@@ -325,7 +325,7 @@ func TestEveryTemplateInitsAndValidates(t *testing.T) {
 		name := strings.Fields(line)[0]
 
 		t.Run(name, func(t *testing.T) {
-			sample, _, code := run(t, "init", "crawl", "--template", name)
+			sample, _, code := run(t, "job", "init", "crawl", "--template", name)
 			if code != cli.ExitOK {
 				t.Fatalf("init exited %d", code)
 			}
@@ -334,12 +334,12 @@ func TestEveryTemplateInitsAndValidates(t *testing.T) {
 			}
 
 			path := write(t, name+".hcl", sample)
-			stdout, stderr, code := run(t, "validate", path)
+			stdout, stderr, code := run(t, "job", "valid", path)
 			if code != cli.ExitOK {
 				t.Fatalf("the %s template does not validate: %d\n%s%s", name, code, stdout, stderr)
 			}
 			// And it is a job somebody can immediately look at.
-			if _, _, code := run(t, "show", path); code != cli.ExitOK {
+			if _, _, code := run(t, "job", "show", "--file", path); code != cli.ExitOK {
 				t.Errorf("show exited %d on the %s template", code, name)
 			}
 		})
@@ -347,7 +347,7 @@ func TestEveryTemplateInitsAndValidates(t *testing.T) {
 }
 
 func TestUnknownTemplateIsAUsageError(t *testing.T) {
-	_, stderr, code := run(t, "init", "--template", "carrier-pigeon")
+	_, stderr, code := run(t, "job", "init", "--template", "carrier-pigeon")
 	if code != cli.ExitUsage {
 		t.Fatalf("exited %d, want a usage error", code)
 	}
@@ -358,8 +358,8 @@ func TestUnknownTemplateIsAUsageError(t *testing.T) {
 }
 
 func TestInitDefaultsToTheBasicTemplate(t *testing.T) {
-	byDefault, _, _ := run(t, "init", "j")
-	explicit, _, _ := run(t, "init", "j", "--template", "basic")
+	byDefault, _, _ := run(t, "job", "init", "j")
+	explicit, _, _ := run(t, "job", "init", "j", "--template", "basic")
 
 	if byDefault != explicit {
 		t.Error("init with no template is not the basic template")
@@ -386,9 +386,9 @@ job "news" {
 `)
 
 	for name, args := range map[string][]string{
-		"a flag that does not exist": {"validate", "--nope", path},
+		"a flag that does not exist": {"job", "valid", "--nope", path},
 		"a flag with no value":       {"spec", "--job"},
-		"too many arguments":         {"validate", path, path},
+		"too many arguments":         {"job", "valid", path, path},
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, errOut, code := run(t, args...)
@@ -401,7 +401,7 @@ job "news" {
 	// And a document that is merely wrong is still 1, so the fix did not turn
 	// every failure into a usage error.
 	bad := write(t, "bad.hcl", "job \"news\" {}\n")
-	if _, _, code := run(t, "validate", bad); code != cli.ExitInvalid {
+	if _, _, code := run(t, "job", "valid", bad); code != cli.ExitInvalid {
 		t.Errorf("a refused document exited %d, want %d", code, cli.ExitInvalid)
 	}
 }

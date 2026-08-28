@@ -9,15 +9,14 @@ import (
 	"path/filepath"
 	"sort"
 
-	ucli "github.com/urfave/cli/v3"
-
 	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/decode"
+	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/train"
 )
 
-// Train reads the cached pages, works out how to find each property, and writes
-// the locators back into the document.
+// Training locators: reading the cached pages, working out how to find each
+// property, and writing what it learned back into the document.
 //
 // # Why the locators go into the document
 //
@@ -32,58 +31,30 @@ import (
 // replaced, so a person who corrects a locator and deletes the marker has
 // corrected it for good. That rule is what makes the loop converge instead of
 // going in circles.
-func Train(a *App) *ucli.Command {
-	var (
-		jobName  string
-		itemName string
-		dir      string
-		min      float64
-		write    bool
-		limit    int
-	)
 
-	return &ucli.Command{
-		Name:      "train",
-		Usage:     "Read the cache, propose locators, write them back",
-		ArgsUsage: "<document.hcl>",
-		Description: "Works out how to find each property from the pages already fetched,\n" +
-			"and writes a CSS selector into the document for the ones it is sure\n" +
-			"enough about.\n\n" +
-			"It reads the cache and never the network, so training is free,\n" +
-			"repeatable and offline: the same corpus produces the same locators.\n\n" +
-			"What it writes is marked with a comment. Delete the comment to keep\n" +
-			"your own version of a locator, and it will never be replaced.",
-		Flags: []ucli.Flag{
-			&ucli.StringFlag{Name: "job", Usage: "which job, if the document holds several", Destination: &jobName},
-			&ucli.StringFlag{Name: "item", Usage: "only this shape", Destination: &itemName},
-			&ucli.StringFlag{Name: "dir", Usage: "where the cache is", Destination: &dir},
-			&ucli.FloatFlag{Name: "min", Value: train.DefaultLeast * 100, Usage: "ignore a locator matching fewer than this share of pages, as a percentage", Destination: &min},
-			&ucli.IntFlag{Name: "pages", Value: 200, Usage: "how many cached pages to learn from", Destination: &limit},
-			&ucli.BoolFlag{Name: "write", Usage: "edit the document instead of printing what would change", Destination: &write},
-		},
-		Action: oneFile(func(ctx context.Context, path string) error {
-			return runTrain(ctx, a, path, jobName, itemName, dir, min/100, limit, write)
-		}),
-	}
-}
-
-func runTrain(ctx context.Context, a *App, path, jobName, itemName, dir string, least float64, limit int, write bool) error {
-	document, err := os.ReadFile(path)
+// trainLocators learns locators for one job from the pages already cached.
+//
+// It works on the document's bytes rather than on a path, because the same
+// learning serves two callers that hold a document in different ways: a person
+// editing a file, and the cluster holding the copy it was submitted. Writing it
+// against a path meant the second had to invent a file to satisfy it.
+//
+// It prints what it found and returns the proposals. What to do with them is
+// the caller's: a file is rewritten in place, and a submitted job is updated
+// through the service that owns it.
+func trainLocators(ctx context.Context, a *App, document []byte, source, jobName, itemName, dir string,
+	least float64, limit int) ([]train.Proposal, *engine.Job, error) {
+	doc, err := AcceptBytes(document, source)
 	if err != nil {
-		return Failedf("%v", err)
-	}
-
-	doc, err := Accept(path)
-	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	job, err := OneJob(doc, jobName)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	// Which locators this wrote last time, which is the only thing it may
-	// replace. Read from the markers in the file rather than from anywhere
+	// replace. Read from the markers in the document rather than from anywhere
 	// else, so the document is the whole of the state.
 	induced := train.MarkInduced(document, job.Name)
 	for _, item := range job.Items {
@@ -92,20 +63,17 @@ func runTrain(ctx context.Context, a *App, path, jobName, itemName, dir string, 
 		}
 	}
 
-	if dir == "" {
-		dir = filepath.Join(filepath.Dir(path), ".scour", "cache")
-	}
 	pages, err := corpus(ctx, dir, limit)
 	if err != nil {
-		return Failedf("%v", err)
+		return nil, nil, Failedf("%v", err)
 	}
 	if len(pages) == 0 {
-		return Invalidf("no pages in %s to learn from. Run `scour run` or `scour try` first", dir)
+		return nil, nil, Invalidf("no pages in %s to learn from. Run `scour crawl` or `scour scrape` first", dir)
 	}
 
 	proposals, err := train.Learn(job, pages, train.Options{Least: least, Replace: true})
 	if err != nil {
-		return Failedf("%v", err)
+		return nil, nil, Failedf("%v", err)
 	}
 
 	a.Warnf("read %d cached pages\n", len(pages))
@@ -115,6 +83,7 @@ func runTrain(ctx context.Context, a *App, path, jobName, itemName, dir string, 
 		}
 		return proposals[i].Property < proposals[j].Property
 	})
+
 	kept := proposals[:0]
 	for _, proposal := range proposals {
 		if itemName != "" && proposal.Item != itemName {
@@ -132,6 +101,25 @@ func runTrain(ctx context.Context, a *App, path, jobName, itemName, dir string, 
 		a.Printf("  %-28s %-28s %d/%d pages  %s\n",
 			proposal.Item+"."+proposal.Property, proposal.Selector,
 			proposal.Pages, proposal.Total, short(proposal.Example))
+	}
+	return proposals, job, nil
+}
+
+// trainFile learns locators for a document on disk and writes them back into
+// it.
+func trainFile(ctx context.Context, a *App, path, jobName, itemName, dir string,
+	least float64, limit int, write bool) error {
+	document, err := os.ReadFile(path)
+	if err != nil {
+		return Failedf("%v", err)
+	}
+	if dir == "" {
+		dir = filepath.Join(filepath.Dir(path), ".scour", "cache")
+	}
+
+	proposals, job, err := trainLocators(ctx, a, document, path, jobName, itemName, dir, least, limit)
+	if err != nil {
+		return err
 	}
 
 	// Printing by default and editing only when asked. This edits somebody's

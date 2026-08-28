@@ -62,8 +62,8 @@ job "news" {
 `, host, server.URL))
 }
 
-// TestRunCrawlsAndSaysWhatItDid.
-func TestRunCrawlsAndSaysWhatItDid(t *testing.T) {
+// TestCrawlSaysAndSaysWhatItDid.
+func TestCrawlSaysAndSaysWhatItDid(t *testing.T) {
 	server, hits := linked(t)
 	path := crawlJob(t, server)
 
@@ -74,7 +74,7 @@ func TestRunCrawlsAndSaysWhatItDid(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chdir(back) })
 
-	out, errOut, code := run(t, "run", path)
+	out, errOut, code := run(t, "crawl", path)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
@@ -113,12 +113,12 @@ func TestASecondRunHasNothingLeftToDo(t *testing.T) {
 	os.Chdir(filepath.Dir(path))
 	t.Cleanup(func() { os.Chdir(back) })
 
-	if _, _, code := run(t, "run", path); code != 0 {
+	if _, _, code := run(t, "crawl", path); code != 0 {
 		t.Fatal("first run failed")
 	}
 	first := hits.Load()
 
-	out, _, code := run(t, "run", path)
+	out, _, code := run(t, "crawl", path)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
@@ -139,14 +139,14 @@ func TestFreshForgetsWhatWasQueued(t *testing.T) {
 	os.Chdir(filepath.Dir(path))
 	t.Cleanup(func() { os.Chdir(back) })
 
-	if _, _, code := run(t, "run", path); code != 0 {
+	if _, _, code := run(t, "crawl", path); code != 0 {
 		t.Fatal("first run failed")
 	}
 	first := hits.Load()
 
 	// The cache still holds the bodies, so the site is not asked again even
 	// though the frontier has forgotten them. That is the point of the cache.
-	out, _, code := run(t, "run", "--fresh", path)
+	out, _, code := run(t, "crawl", "--fresh", path)
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}

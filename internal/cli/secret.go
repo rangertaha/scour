@@ -42,8 +42,10 @@ func Secret(a *App) *ucli.Command {
 	}
 
 	return &ucli.Command{
-		Name:  "secret",
-		Usage: "Set, list and remove the credentials a job's plugins resolve",
+		Name:            "secret",
+		HideHelpCommand: true,
+		Category:        "Shared across jobs",
+		Usage:           "Set, list and remove the credentials a job's plugins resolve",
 		Description: "A job document holds secret(\"name\"), never a value. The value lives\n" +
 			"here, sealed with a key the cluster is given rather than one it keeps,\n" +
 			"and is resolved on the node that builds the plugin.\n\n" +
@@ -94,7 +96,7 @@ func Secret(a *App) *ucli.Command {
 				},
 			},
 			{
-				Name:  "ls",
+				Name:  "list",
 				Usage: "List the names that have been set",
 				Flags: shared,
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
@@ -115,7 +117,7 @@ func Secret(a *App) *ucli.Command {
 				},
 			},
 			{
-				Name:      "rm",
+				Name:      "delete",
 				Usage:     "Remove a secret",
 				ArgsUsage: "<name>",
 				Flags:     shared,
@@ -205,13 +207,25 @@ func Resolver(ctx context.Context, join, keyFile string) (*hcl.EvalContext, func
 }
 
 // server is where a client points: the flag, then the environment, then the
-// address a single node listens on.
+// cluster last joined, then the address a single node listens on.
+//
+// In that order because each is more deliberate than the next. A flag is what
+// somebody typed for this command, the environment is what their shell was set
+// up to mean, and the remembered cluster is what they last joined and have
+// probably forgotten. The default is the guess of last resort.
+//
+// One function, used by every command that reaches a cluster, so the rule
+// cannot differ between them. It differing between them is the failure this
+// shape exists to make impossible.
 func server(join string) string {
 	if join != "" {
 		return join
 	}
 	if fromEnv := strings.TrimSpace(os.Getenv(ServerVar)); fromEnv != "" {
 		return fromEnv
+	}
+	if joined := remembered(); joined != "" {
+		return joined
 	}
 	return DefaultServer
 }

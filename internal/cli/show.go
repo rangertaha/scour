@@ -3,63 +3,17 @@
 package cli
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
-
-	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/engine"
 )
 
-// Show prints what a document means once every default is filled in.
+// showJob prints a resolved job the way a person reads one.
 //
-// Deliberately not called plan. A plan is a comparison against something
-// running; this is what a document means on its own. Giving one name to both
-// would mean the command changed meaning the day the server arrived.
-func Show(a *App) *ucli.Command {
-	var asJSON bool
-	var jobName string
-
-	return &ucli.Command{
-		Name:      "show",
-		Usage:     "Print the resolved job: every default filled in",
-		ArgsUsage: "<document.hcl>",
-		Description: "Shows what the document actually says once defaults are applied, the\n" +
-			"chains in the order they will run, and the pipeline as the waves it\n" +
-			"will run in. This is the form that should be stored, so a job\n" +
-			"resubmitted next month behaves the way it does today.",
-		Flags: []ucli.Flag{
-			&ucli.BoolFlag{Name: "json", Usage: "print as JSON", Destination: &asJSON},
-			&ucli.StringFlag{Name: "job", Usage: "which job, if the document holds several", Destination: &jobName},
-		},
-		Action: oneFile(func(_ context.Context, path string) error {
-			doc, err := Accept(path)
-			if err != nil {
-				return err
-			}
-			job, err := OneJob(doc, jobName)
-			if err != nil {
-				return err
-			}
-			resolved := job.Resolved()
-
-			if asJSON {
-				out, err := json.MarshalIndent(resolved, "", "  ")
-				if err != nil {
-					return Failedf("render: %v", err)
-				}
-				a.Println(string(out))
-				return nil
-			}
-
-			a.showJob(resolved)
-			return nil
-		}),
-	}
-}
-
+// The printer, not the command: `scour job show` builds the command and this
+// renders what it fetched, because the same rendering serves a job read from a
+// file and one read from the cluster.
 func (a *App) showJob(j *engine.Job) {
 	a.Printf("job %q\n", j.Name)
 
