@@ -153,6 +153,22 @@ then waits the longer of what the job configured and what the site asked for: a
 crawl-delay belongs to the host and the rate belongs to the job, and honouring
 only the second is how a `Crawl-delay` comes to be parsed and ignored.
 
+**And whatever waits for that delay has to expect it.** A held host is the loop
+idling legitimately, and the crawl loop gives up when nothing has progressed for
+long enough that nothing is going to. That bound was computed from the job: a
+constant plus the job's `rate` plus its request timeout. A site serving
+`Crawl-delay: 600` parked every worker on a held host, and the run killed itself
+six and a half minutes in reporting that it had stalled, with an error blaming
+the store for zero refused writes. A crawl doing exactly what the site asked of
+it reported a failure and exited non-zero.
+
+The bound now also includes the longest delay any site has actually asked this
+run for, which has to be learned rather than configured for the reason above:
+the job document does not know it and cannot. Enumerating the reasons waiting is
+legitimate is still the wrong shape, though, and it is still the shape. The
+frontier knows when the next request comes due and nothing can ask it; a method
+that says so would let the loop measure from that instead of guessing at it.
+
 Two things about `Pace` are easy to get wrong and are worth stating, because
 both were.
 
@@ -169,6 +185,23 @@ took stands.
 **`next_at` only ever moves forward.** A host cooling for longer than this delay
 is a host somebody else is already being polite to, and the shorter of two
 politeness rules is never the answer.
+
+### A lease has to outlast the work it covers
+
+A lease is a hold with a timeout: take this URL, and if nothing is heard by then
+assume the worker died and hand it to somebody else. Getting that length wrong
+in either direction is expensive. Too long and a worker that really did die
+takes the URL with it for as long as the hold lasts. Too short and the URL comes
+due while the first worker is still fetching it, a second worker takes it, and
+both hit the same host at once - which is the politeness rule broken by the
+mechanism that exists to keep it, and it is silent: the first worker's report is
+then discarded by the attempt fence, correctly, so nothing counts or logs it.
+
+So the hold is computed from how long the work can actually take, and "the work"
+is not one request. A redirect chain is one lease and up to `max_redirects` + 1
+fetches, each with the job's full timeout, because the timeout applies per
+request and nothing budgets the chain. At the defaults that is eleven timeouts
+of thirty seconds inside a lease that used to be held for five minutes.
 
 ## Ordering is a plugin, at 500
 
