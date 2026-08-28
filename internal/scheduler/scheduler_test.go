@@ -91,7 +91,7 @@ func submit(t *testing.T, s *scheduler.Stage, urls ...string) int {
 	for _, u := range urls {
 		reqs = append(reqs, &scheduler.Request{URL: u, Discovered: origin})
 	}
-	added, err := s.Submit(context.Background(), reqs...)
+	added, _, err := s.Submit(context.Background(), reqs...)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -172,12 +172,12 @@ func TestTheBudgetIsEnforcedWithoutAPluginEither(t *testing.T) {
 		ctx := context.Background()
 
 		shallow := &scheduler.Request{URL: "https://example.com/a", Depth: 2, Discovered: origin}
-		if n, err := s.Submit(ctx, shallow); n != 1 || err != nil {
+		if n, _, err := s.Submit(ctx, shallow); n != 1 || err != nil {
 			t.Errorf("a URL at the limit was refused: %d, %v", n, err)
 		}
 
 		deep := &scheduler.Request{URL: "https://example.com/b", Depth: 3, Discovered: origin}
-		if n, err := s.Submit(ctx, deep); n != 0 || err != nil {
+		if n, _, err := s.Submit(ctx, deep); n != 0 || err != nil {
 			t.Errorf("a URL past the limit was queued: %d, %v", n, err)
 		}
 	})
@@ -205,7 +205,7 @@ func TestARefusalIsNotAFailure(t *testing.T) {
   domains = ["example.com"]
 `))
 
-	added, err := s.Submit(context.Background(),
+	added, _, err := s.Submit(context.Background(),
 		&scheduler.Request{URL: "https://elsewhere.example/a", Discovered: origin},
 		&scheduler.Request{URL: "https://example.com/a", Discovered: origin})
 	if err != nil {
@@ -220,7 +220,7 @@ func TestARefusalIsNotAFailure(t *testing.T) {
 func TestOneBadURLDoesNotTakeAPagesLinksWithIt(t *testing.T) {
 	s := stage(t, job(t, ""))
 
-	added, err := s.Submit(context.Background(),
+	added, _, err := s.Submit(context.Background(),
 		&scheduler.Request{URL: "mailto:somebody@example.com", Discovered: origin},
 		&scheduler.Request{URL: "https://example.com/real", Discovered: origin},
 		nil)
@@ -265,7 +265,7 @@ func TestThePolicyComesFromTheJob(t *testing.T) {
 			s := stage(t, job(t, "\n  scheduler {\n    policy = \""+policy+"\"\n  }\n"))
 			ctx := context.Background()
 
-			if _, err := s.Submit(ctx,
+			if _, _, err := s.Submit(ctx,
 				&scheduler.Request{URL: "https://example.com/shallow", Depth: 1, Score: 0.1, Discovered: origin},
 				&scheduler.Request{URL: "https://example.com/best", Depth: 4, Score: 0.9, Discovered: origin.Add(time.Second)},
 			); err != nil {
@@ -529,7 +529,7 @@ func TestAStoreThatFailsIsAFailure(t *testing.T) {
 	}
 	defer s.Close()
 
-	added, err := s.Submit(context.Background(),
+	added, _, err := s.Submit(context.Background(),
 		&scheduler.Request{URL: "https://example.com/a", Discovered: origin})
 	if err == nil {
 		t.Fatal("a store that would not write reported success")

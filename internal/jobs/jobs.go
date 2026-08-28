@@ -64,6 +64,13 @@ import (
 	"github.com/rangertaha/scour/internal/run"
 )
 
+// errNotRunning is asking a job that is not running to stop.
+//
+// A sentinel because one caller has to tell it from a real failure: a delete
+// races with a crawl ending on its own, and that race is the ordinary case
+// rather than a problem.
+var errNotRunning = errors.New("is not running")
+
 // Report is how often a running crawl says where it has got to.
 //
 // Often enough that `job watch` looks alive, rarely enough that a hundred jobs
@@ -398,7 +405,12 @@ func (m *Manager) Delete(ctx context.Context, name string) error {
 	m.mu.Unlock()
 
 	if live {
-		if _, err := m.halt(ctx, name, bus.PhaseStopped); err != nil {
+		// A crawl that ended between the check above and the stop below is not
+		// a failure: it is the thing being asked for, arriving early. Reported
+		// as one, `scour job delete` told the operator the job was not running,
+		// which they had not claimed, and then deleted nothing. List already
+		// treats this race as ordinary; this did not.
+		if _, err := m.halt(ctx, name, bus.PhaseStopped); err != nil && !errors.Is(err, errNotRunning) {
 			return err
 		}
 	}
@@ -545,8 +557,20 @@ func (m *Manager) begin(ctx context.Context, name string, fresh, seed bool) (bus
 		Driver:   m.opts.Name,
 	}); err != nil {
 		m.mu.Lock()
-		delete(m.running, name)
+		if m.running[name] == d {
+			delete(m.running, name)
+		}
 		m.mu.Unlock()
+
+		// Released, because something may already be waiting on it. This
+		// driver was in the map for as long as the write above took, which is
+		// a round trip to the cluster, and a stop or a delete arriving in that
+		// window takes a handle to it and waits for done. Only drive closes
+		// that channel, and drive is never going to run: the waiter sat until
+		// its own deadline and then reported that a job which had never
+		// started could not be stopped.
+		close(d.done)
+
 		cancel()
 		_ = crawl.Close()
 		return bus.JobStatus{}, err
@@ -582,10 +606,22 @@ func (m *Manager) drive(ctx context.Context, d *driver) {
 	// to put a callback in it. It stops before the crawl is closed, so nothing
 	// reads a run that is being torn down.
 	ticking := make(chan struct{})
-	go m.reporting(ctx, d, ticking)
+	reported := make(chan struct{})
+	go func() {
+		defer close(reported)
+		m.reporting(ctx, d, ticking)
+	}()
 
 	ending, err := d.crawl.Do(ctx)
+
+	// Told to stop, then waited for. Closing the channel is not a join, and the
+	// goroutine it stops may be inside a snapshot, reading the frontier that
+	// the close below is about to shut: the read then fails, the snapshot
+	// reports nothing queued, and the last progress line of a budget-stopped
+	// crawl announced "queued 0" to everyone watching. That is the same
+	// misreport the closing event was fixed for, arriving one line earlier.
 	close(ticking)
+	<-reported
 
 	// A context of its own, because the crawl's is very often the reason there
 	// is something to record: the state of a job stopped by ctrl-c would be
@@ -691,7 +727,7 @@ func (m *Manager) halt(ctx context.Context, name string, intent bus.Phase) (bus.
 		if _, _, err := m.jobs.Get(ctx, name); err != nil {
 			return bus.JobStatus{}, err
 		}
-		return bus.JobStatus{}, fmt.Errorf("jobs: %q is not running", name)
+		return bus.JobStatus{}, fmt.Errorf("jobs: %q %w", name, errNotRunning)
 	}
 	d.intent = intent
 	crawl, done := d.crawl, d.done

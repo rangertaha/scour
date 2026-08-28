@@ -1003,6 +1003,19 @@ func TestAPartialFailureLosesOnlyWhatWasLost(t *testing.T) {
 	if int(lost) >= len(indexLinks)+int(queued) {
 		t.Errorf("lost %d of a page whose links the frontier partly took (queued %d)", lost, queued)
 	}
+
+	// Exactly what the frontier refused, and nothing else.
+	//
+	// The bound above is loose enough to pass while every off-site link and
+	// every duplicate on the page was also counted lost, which is what used to
+	// happen: `run` computed losses as the number of links minus the number
+	// that were new, and a page of two hundred links with one refused write
+	// reported two hundred losses. That count is what turns into a failed run.
+	if refused := partial.refused.Load(); lost != refused {
+		t.Errorf("lost %d, and the frontier refused %d: the count includes links "+
+			"that were dropped or already known, not just the ones thrown away",
+			lost, refused)
+	}
 }
 
 // indexLinks is what the test site's index page offers, which is what a partial
@@ -1016,6 +1029,11 @@ type partialFrontier struct {
 	on     atomic.Bool
 	accept int
 	taken  atomic.Int64
+
+	// refused counts the writes this actually threw away, so a test can hold
+	// the run's own loss count to it rather than to a bound loose enough to
+	// pass while it counted the drops as well.
+	refused atomic.Int64
 }
 
 func (f *partialFrontier) Add(ctx context.Context, job string, reqs ...frontier.Request) (int, error) {
@@ -1026,6 +1044,7 @@ func (f *partialFrontier) Add(ctx context.Context, job string, reqs ...frontier.
 	var added int
 	for _, req := range reqs {
 		if int(f.taken.Load()) >= f.accept {
+			f.refused.Add(1)
 			return added, errors.New("database is locked")
 		}
 		n, err := f.Frontier.Add(ctx, job, req)

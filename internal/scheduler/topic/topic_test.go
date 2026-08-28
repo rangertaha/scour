@@ -117,7 +117,7 @@ func stage(t *testing.T, j *engine.Job) *scheduler.Stage {
 func submit(t *testing.T, s *scheduler.Stage, reqs ...*scheduler.Request) int {
 	t.Helper()
 
-	added, err := s.Submit(context.Background(), reqs...)
+	added, _, err := s.Submit(context.Background(), reqs...)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestLeastRefusesWhatIsClearlyOffTopic(t *testing.T) {
 
 	// And a refusal is a refusal rather than a failure, with the subject named,
 	// because a score of 0.02 means nothing without saying against what.
-	_, err := s.Submit(context.Background(), urls(offTopic)...)
+	_, _, err := s.Submit(context.Background(), urls(offTopic)...)
 	if err != nil {
 		t.Fatalf("a dropped URL was reported as an error: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestAScoreSomethingElseSetIsNotClobbered(t *testing.T) {
 
 	// An off-topic slug that something upstream was sure about. The topic
 	// score is near zero, and it must not pull the request down.
-	if _, err := s.Submit(ctx, &scheduler.Request{URL: offTopic, Score: 0.9, Discovered: origin}); err != nil {
+	if _, _, err := s.Submit(ctx, &scheduler.Request{URL: offTopic, Score: 0.9, Discovered: origin}); err != nil {
 		t.Fatal(err)
 	}
 

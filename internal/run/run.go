@@ -374,7 +374,7 @@ func (r *Run) Seed(ctx context.Context) (int, error) {
 		reqs = append(reqs, &scheduler.Request{URL: start, Depth: 0, Discovered: r.now().UTC()})
 	}
 
-	added, err := r.sched.Submit(ctx, reqs...)
+	added, _, err := r.sched.Submit(ctx, reqs...)
 	r.stats.Queued.Add(int64(added))
 	return added, err
 }
@@ -679,17 +679,17 @@ func (r *Run) one(ctx context.Context, req *scheduler.Request) {
 		return
 	}
 
-	added, err := r.sched.Submit(ctx, out.Links...)
+	added, lost, err := r.sched.Submit(ctx, out.Links...)
 
 	// What did land is counted whatever else happened, and only what did not
 	// is counted lost.
 	//
-	// Submit returns both, because a partial failure is the ordinary one: most
-	// of a page's links are usually dropped as out of scope, which is not a
-	// failure at all. Counting the whole page as lost on any error meant a page
-	// with a hundred links, ninety-nine of them off-site and one write that
-	// failed, reported a hundred urls thrown away and failed the run, while the
-	// summary said nothing had been queued from a page that queued one.
+	// Submit returns all three, because a partial failure is the ordinary one:
+	// most of a page's links are usually dropped as out of scope, which is not
+	// a failure at all. This used to subtract `added` from the number of links
+	// and call the rest lost, which counted every off-site link and every
+	// duplicate as thrown away: one refused write on a page of two hundred
+	// links reported two hundred losses and failed the run.
 	r.stats.Queued.Add(int64(added))
 
 	if err != nil {
@@ -697,7 +697,7 @@ func (r *Run) one(ctx context.Context, req *scheduler.Request) {
 		// is not a quiet crawl: every link found from here on is thrown away,
 		// the frontier drains, and the run reports that it finished the site.
 		// The count is what [Run.Do] turns into a failure at the end.
-		if lost := len(out.Links) - added; lost > 0 {
+		if lost > 0 {
 			r.stats.Lost.Add(int64(lost))
 		}
 		r.log.WarnContext(ctx, "could not queue what a page found", "url", req.URL, "error", err)

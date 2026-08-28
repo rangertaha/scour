@@ -182,15 +182,28 @@ func New(ctx context.Context, job *engine.Job, opts Options, open func(frontier.
 	return s, nil
 }
 
-// Submit offers URLs to the frontier and reports how many were new.
+// Submit offers URLs to the frontier and reports how many were new and how many
+// were thrown away.
 //
 // Each goes through the chain on its own, so one refusal does not take the rest
-// of a page's links with it. A drop is not an error and is not counted.
-func (s *Stage) Submit(ctx context.Context, reqs ...*Request) (int, error) {
-	var (
-		added    int
-		problems []error
-	)
+// of a page's links with it. A drop is not an error and is neither added nor
+// lost.
+//
+// # Why the losses are counted here
+//
+// Because only this loop can tell them apart, and the caller kept guessing.
+// `run` computed them as `len(links) - added`, which is every drop and every
+// duplicate as well: a page with two hundred links, a hundred and ninety-five
+// off-site, four already queued and one write the frontier refused reported two
+// hundred URLs thrown away, and [Run.Do] turns that count into a failed run.
+//
+// The comment at that call site already described this over-count and a fix for
+// it, and the fix subtracted the wrong number: `added` excludes the off-site
+// links too, so a hundred and ninety-nine of the two hundred were still counted
+// as lost. A caller cannot compute this from what it can see, which is why it
+// is returned rather than inferred.
+func (s *Stage) Submit(ctx context.Context, reqs ...*Request) (added, lost int, err error) {
+	var problems []error
 
 	for _, req := range reqs {
 		if req == nil {
@@ -202,6 +215,7 @@ func (s *Stage) Submit(ctx context.Context, reqs ...*Request) (int, error) {
 			continue
 		case err != nil:
 			problems = append(problems, err)
+			lost++
 			continue
 		case queued == nil:
 			// Already known, which is the most ordinary thing a crawl finds.
@@ -209,7 +223,7 @@ func (s *Stage) Submit(ctx context.Context, reqs ...*Request) (int, error) {
 		}
 		added++
 	}
-	return added, errors.Join(problems...)
+	return added, lost, errors.Join(problems...)
 }
 
 // enqueue is the core the chain wraps: what a request means once every link has
