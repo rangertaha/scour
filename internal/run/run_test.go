@@ -483,6 +483,63 @@ func TestPolitenessIsHonouredAcrossWorkers(t *testing.T) {
 // A unit test could not have found that. Each layer did its part: the parser
 // returned the number, the frontier paced the host, and nothing carried the
 // first to the second.
+// TestASlowSiteIsNotMistakenForAStalledCrawl.
+//
+// The stall bound exists to tell "waiting politely" from "waiting forever", and
+// it was enumerating the reasons waiting is legitimate: [Stall]'s comment
+// records it killing a crawl whose job set `rate = "10m"`, fixed by adding the
+// rate as a term. The site's own Crawl-delay is the same thing arriving by the
+// other route, and it was not a term, because the job document does not know it
+// and cannot.
+//
+// A site serving `Crawl-delay: 600` parked every worker on a held host, and the
+// run killed itself six and a half minutes in reporting Stalled with an error
+// blaming the store for zero refused writes: a crawl doing exactly what it was
+// asked to do, reporting a failure and exiting non-zero.
+//
+// The bound here is deliberately shorter than the delay, which is what makes
+// this run in seconds rather than in minutes.
+func TestASlowSiteIsNotMistakenForAStalledCrawl(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			fmt.Fprint(w, "User-agent: *\nCrawl-delay: 3\n")
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.URL.Path == "/" {
+			fmt.Fprint(w, `<html><body><a href="/a">a</a><a href="/b">b</a></body></html>`)
+			return
+		}
+		fmt.Fprint(w, `<html><head><meta property="og:title" content="P"></head></html>`)
+	}))
+	defer server.Close()
+
+	r, err := run.New(context.Background(), document(t, server, ""), run.Options{
+		Dir:   t.TempDir(),
+		Open:  func(cfg frontier.Config) (frontier.Frontier, error) { return sqlite.Open(cfg) },
+		Stall: 500 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	defer r.Close()
+
+	if _, err := r.Seed(context.Background()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	ending, err := r.Do(context.Background())
+	if err != nil {
+		t.Fatalf("the crawl failed: %v", err)
+	}
+	if ending == run.Stalled {
+		t.Errorf("a crawl obeying the site's own Crawl-delay was reported as stalled")
+	}
+	if got := r.Stats().Fetched.Load(); got < 3 {
+		t.Errorf("fetched %d, so it gave up before crawling what it was waiting for", got)
+	}
+}
+
 func TestASiteThatAsksToBeCrawledSlowlyIs(t *testing.T) {
 	const delay = time.Second
 

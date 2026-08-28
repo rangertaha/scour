@@ -131,6 +131,10 @@ type Manager struct {
 	// wg counts the drivers, so Close can wait for the crawls rather than
 	// merely cancelling them and returning while they are still writing.
 	wg sync.WaitGroup
+
+	// shut makes Close idempotent by making a second caller wait for the
+	// first, rather than by making it return early. See [Manager.Close].
+	shut sync.Once
 }
 
 // driver is one crawl being run.
@@ -791,12 +795,29 @@ func (m *Manager) event(event bus.JobEvent) {
 }
 
 // Close stops every crawl and waits for them.
+//
+// # Closing twice waits twice, and that is the point
+//
+// A second caller blocks until the first has finished, rather than seeing the
+// closed flag and returning at once. That is what [sync.Once] buys here and it
+// is not a nicety: this manager has two closers on the ordinary path. [New]
+// starts a watchdog that closes when its context ends, and `scour server` also
+// closes it from its shutdown list, so a SIGTERM fires both.
+//
+// Returning early left the second one believing the crawls were over while the
+// first was still waiting for them. Its caller then carried on down the
+// shutdown list and closed the shared cache the drivers were still flushing
+// their exporters into. [run.Run.Close] carries the same guarantee for the same
+// reason, and its comment records what that failure looks like when it happens:
+// an object-store backend answering "Bucket has been closed" on work the
+// operator had already been told was finished.
 func (m *Manager) Close() error {
+	m.shut.Do(m.close)
+	return nil
+}
+
+func (m *Manager) close() {
 	m.mu.Lock()
-	if m.closed {
-		m.mu.Unlock()
-		return nil
-	}
 	m.closed = true
 	for _, d := range m.running {
 		// Stopped rather than paused. A manager going away has not been told
@@ -812,7 +833,6 @@ func (m *Manager) Close() error {
 	// out. Holding it here is a deadlock rather than a slow close.
 	m.wg.Wait()
 	m.stop()
-	return nil
 }
 
 // only is the single job a submitted document holds.

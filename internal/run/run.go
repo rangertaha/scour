@@ -226,6 +226,10 @@ type Run struct {
 	// is holding. See [Run.Drain].
 	drain atomic.Bool
 
+	// asked is the longest crawl delay any site has asked this run for, in
+	// nanoseconds. It widens the stall bound: see [Run.patience].
+	asked atomic.Int64
+
 	// shut makes Close idempotent, and shutErr is what the one real close
 	// reported, so a second caller is told the same thing rather than a
 	// cheerful nil. See [Run.Close].
@@ -497,7 +501,7 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 				// going to. A frontier that cannot record a page as finished
 				// leaves every URL leased, so nothing is ever due again and
 				// the loop below waits forever.
-				if r.now().Sub(time.Unix(0, progress.Load())) > stall {
+				if r.now().Sub(time.Unix(0, progress.Load())) > r.patience(stall) {
 					ending.Store(Stalled)
 					return
 				}
@@ -610,7 +614,7 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 	if ending.Load().(Ending) == Stalled {
 		return Stalled, fmt.Errorf(
 			"run: job %q: nothing progressed for %s, with %d frontier writes refused",
-			r.job.Name, stall, r.stats.Store.Load())
+			r.job.Name, r.patience(stall), r.stats.Store.Load())
 	}
 	return ending.Load().(Ending), nil
 }
@@ -727,8 +731,41 @@ func (r *Run) done(ctx context.Context, req *scheduler.Request) {
 // rather than stopped. The cost of losing one is that the host stays at the
 // job's own rate, which is the behaviour this whole path exists to replace, so
 // it must be visible rather than silent.
+// patience is how long the loop may idle before it decides nothing is coming.
+//
+// The configured bound plus the longest delay a site has actually asked for.
+// That second term is learned rather than configured, and it has to be: the
+// bound is trying to tell "waiting politely" from "waiting forever", and a
+// crawl waits politely for whatever robots.txt says, which the job document
+// does not know and cannot.
+//
+// [Stall]'s own comment records this going wrong once already, for the job's
+// `rate`, and the fix then was to add a term. This is the same failure by the
+// other route: a site serving `Crawl-delay: 600` had every worker parked on a
+// held host, and the run killed itself six and a half minutes in reporting
+// Stalled with an error blaming the store for zero refused writes. A crawl
+// doing exactly what it was asked to do reported a failure and exited non-zero.
+//
+// Enumerating the reasons waiting is legitimate is still the wrong shape, and
+// it is still the shape: the frontier knows when the next request comes due and
+// nothing asks it. Retiring that properly needs a way to ask, which is an
+// interface every frontier implements, so it is tracked rather than smuggled in
+// here.
+func (r *Run) patience(stall time.Duration) time.Duration {
+	return stall + time.Duration(r.asked.Load())
+}
+
 func (r *Run) pace(ctx context.Context, resp *downloader.Response) {
 	for _, asked := range resp.Delays {
+		// Remembered before it is recorded, because the stall bound has to
+		// cover a wait this long whether or not the frontier accepted it.
+		for {
+			was := r.asked.Load()
+			if int64(asked.Delay) <= was || r.asked.CompareAndSwap(was, int64(asked.Delay)) {
+				break
+			}
+		}
+
 		r.report(ctx, "record a host's crawl-delay", asked.Host, func(ctx context.Context) error {
 			// r.now rather than time.Now, because the frontier is paced and
 			// leased against one clock and a hold taken on a different one is a
