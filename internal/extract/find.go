@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/antchfx/htmlquery"
+	"github.com/antchfx/xpath"
 	"golang.org/x/net/html"
 
 	"github.com/rangertaha/scour/internal/engine"
@@ -82,6 +83,28 @@ func merge(item *Item, name string, from *Value) {
 	}
 }
 
+// query runs one XPath expression, treating a panic as no match.
+//
+// The XPath library panics rather than erroring when a comparison meets
+// something that is not a number: `//div[@data-score > 0.5]` against
+// `data-score="n/a"` calls ParseFloat and panics on the error. Nothing in this
+// process recovers, so one page with an unexpected attribute killed the crawler
+// mid-crawl - and the input here is the open web, where a page holding
+// something unexpected is the ordinary case rather than the exception.
+//
+// No match is also the answer XPath itself specifies: a comparison against NaN
+// is false, so the node set is empty. Recovering here gives the right answer
+// and keeps the promise this package makes, which is that extraction does not
+// panic on anything a page can contain.
+func query(within *html.Node, expr *xpath.Expr) (node *html.Node) {
+	defer func() {
+		if recover() != nil {
+			node = nil
+		}
+	}()
+	return htmlquery.QuerySelector(within, expr)
+}
+
 // find looks for one property's value, taught locators first.
 func (p *propPlan) find(page *page, within *html.Node) *Value {
 	for _, selector := range p.css {
@@ -91,7 +114,7 @@ func (p *propPlan) find(page *page, within *html.Node) *Value {
 	}
 
 	for _, expr := range p.xpath {
-		if node := htmlquery.QuerySelector(within, expr); node != nil {
+		if node := query(within, expr); node != nil {
 			return p.value(page, nodeValue(node), describe(node), ByXPath, node)
 		}
 	}
@@ -196,9 +219,19 @@ func (p *propPlan) semantic(page *page, within *html.Node) *Value {
 				where += ">"
 			}
 			found := p.value(page, one.from[name], where, BySemantics, nil)
-			if found != nil {
-				found.outside = scoped
+			if found == nil {
+				// Empty, which is not an answer. Returning here ended the
+				// whole search: the remaining vocabularies and the
+				// well-known-element and class-or-id fallbacks below were
+				// never reached, so `<span itemprop="author"></span>` beside
+				// `<div class="author">Alex Doe</div>` reported nothing at all
+				// and a required property was falsely called missing. An
+				// element that declares a name and holds nothing is a page
+				// that has not filled it in, which is exactly when the
+				// fallbacks are worth trying.
+				continue
 			}
+			found.outside = scoped
 			return found
 		}
 	}
@@ -328,7 +361,7 @@ func (p *propPlan) value(page *page, raw, from, how string, node *html.Node) *Va
 	}
 
 	v := &Value{Raw: raw, From: from, How: how}
-	v.Text = transform(raw, p.prop, page.url)
+	v.Text = transform(raw, p.prop, page.against())
 
 	// An object property's fields are looked for inside the node that produced
 	// it, so an author's name comes from the byline rather than from whichever
