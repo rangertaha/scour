@@ -119,6 +119,18 @@ func remoteError(msg, sentinel string) error {
 	return &remote{msg: msg, is: sentinels[sentinel]}
 }
 
+// Answered reports whether an error is one a service replied with, rather than
+// a failure to reach one.
+//
+// The distinction the reply envelope exists to keep, made usable by a caller.
+// "The service refused this" and "nothing is listening" are different things to
+// do about, and a command line that conflated them would exit the same way for
+// a job document the cluster rejected and for a cluster that is not running.
+func Answered(err error) bool {
+	var r *remote
+	return errors.As(err, &r)
+}
+
 // serve subscribes one operation, in a queue group so that starting a second
 // service does not double every write.
 func serve[Req, Res any](c *Conn, subject, queue string, wait time.Duration, handle func(context.Context, Req) (Res, error)) (*nats.Subscription, error) {
@@ -260,7 +272,7 @@ func (s *Service) ready(c *Conn) error {
 // minutes, by default, for a write the cluster had already accepted.
 //
 // It also returned while a handler was still running, which is worse, because
-// `scour service` closes the store immediately afterwards: the handler finished
+// `scour server` closes the store immediately afterwards: the handler finished
 // against a closed database and reported a failure for work that had been
 // accepted.
 //
