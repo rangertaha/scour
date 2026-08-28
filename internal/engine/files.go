@@ -3,9 +3,11 @@
 package engine
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/hashicorp/hcl/v2"
@@ -123,94 +125,171 @@ func Lines(src []byte) []string {
 // on which machine is holding it. So the reference is resolved once, here,
 // before the document is submitted.
 //
-// Only the attributes that use the function are touched. The rest of the file
-// is returned byte for byte, comments, spacing and all, because what a client
-// submitted is what a later reader should see and the diff between two
-// submissions is the whole of what a resubmission is reviewed by. Reformatting
-// somebody's document on the way through would make that diff unreadable.
+// # Only the calls are replaced, and the replacement is spliced
+//
+// Everything else comes back byte for byte: the same indentation, the same
+// comments, the same blank lines. That is a hard requirement rather than a
+// nicety, and getting it wrong is not cosmetic.
+//
+// The first version of this rebuilt the document with hclwrite, whose Bytes
+// reformats every token it holds. A document indented with four spaces came
+// back indented with two, which changed the raw text of every plugin body, and
+// plugin bodies are fingerprinted by exactly that text: [Job.snapshot] keeps
+// the source of each block so that [Diff] can tell a configuration that changed
+// from one that was merely moved. So expanding a list made `Diff` report that
+// every plugin's config had changed, `effectOfPlugin` classified the cache
+// plugin's as [EffectCacheMoved], and a job whose only edit was
+// `domains = lines("domains.txt")` was refused on resubmission as though the
+// operator had pointed the crawl at a different bucket.
+//
+// Splicing the expression's own byte range leaves everything it did not read
+// exactly as it was, which is also what the diff between two submissions needs:
+// the diff is the whole of what a resubmission is reviewed by.
 //
 // A document that does not use the function is returned unchanged, so this is
 // safe to call on the way to every submission rather than only when somebody
 // remembers to.
 func ExpandFiles(src []byte, filename, dir string) ([]byte, error) {
-	file, diags := hclwrite.ParseConfig(src, filename, hcl.InitialPos)
+	file, diags := hclsyntax.ParseConfig(src, filename, hcl.InitialPos)
 	if diags.HasErrors() {
 		return nil, diagError(diags)
 	}
 
-	expanded, err := expandBody(file.Body(), filename, dir)
-	if err != nil {
+	body, ok := file.Body.(*hclsyntax.Body)
+	if !ok {
+		// Unreachable with this parser, and an assertion rather than a panic
+		// because a wrong guess here would silently submit an unexpanded job.
+		return nil, fmt.Errorf("%s: the document is not HCL syntax", filename)
+	}
+
+	var splices []splice
+	if err := collect(body, src, dir, &splices); err != nil {
 		return nil, err
 	}
-	if !expanded {
-		// Byte for byte, rather than hclwrite's rendering of a file it did not
-		// change. They are usually the same and "usually" is not good enough
-		// for something every submission passes through.
+	if len(splices) == 0 {
 		return src, nil
 	}
-	return file.Bytes(), nil
+
+	// Applied last-first, so an earlier splice's offsets are still the offsets
+	// of the bytes it was measured against.
+	sort.Slice(splices, func(i, j int) bool { return splices[i].start > splices[j].start })
+
+	out := src
+	for _, s := range splices {
+		rewritten := make([]byte, 0, len(out)+len(s.with)-(s.end-s.start))
+		rewritten = append(rewritten, out[:s.start]...)
+		rewritten = append(rewritten, s.with...)
+		rewritten = append(rewritten, out[s.end:]...)
+		out = rewritten
+	}
+	return out, nil
 }
 
-// expandBody rewrites one body and everything nested in it, reporting whether
-// anything changed.
-func expandBody(body *hclwrite.Body, filename, dir string) (bool, error) {
-	var expanded bool
+// splice is one expression's byte range and what replaces it.
+type splice struct {
+	start, end int
+	with       []byte
+}
 
-	for name, attr := range body.Attributes() {
-		tokens := attr.Expr().BuildTokens(nil)
-		if !calls(tokens, linesFunc) {
+// collect finds every expression that reads a file, in one body and everything
+// nested in it.
+func collect(body *hclsyntax.Body, src []byte, dir string, into *[]splice) error {
+	for name, attr := range body.Attributes {
+		span := attr.Expr.Range()
+		if !calls(src[span.Start.Byte:span.End.Byte], linesFunc) {
 			continue
 		}
 
-		value, err := evaluate(tokens.Bytes(), filename, dir)
-		if err != nil {
-			return false, fmt.Errorf("%s: %w", name, err)
+		value, diags := attr.Expr.Value(evalContext(dir))
+		if diags.HasErrors() {
+			return fmt.Errorf("%s: %w", name, diagError(diags))
 		}
-		body.SetAttributeValue(name, value)
-		expanded = true
+
+		*into = append(*into, splice{
+			start: span.Start.Byte,
+			end:   span.End.Byte,
+			with:  render(value, indentOf(src, attr.SrcRange.Start.Byte)),
+		})
 	}
 
-	// Sorted by nothing in particular: the blocks are rewritten in place and
-	// the order they are visited cannot change the result.
-	for _, block := range body.Blocks() {
-		nested, err := expandBody(block.Body(), filename, dir)
-		if err != nil {
-			return false, err
+	for _, block := range body.Blocks {
+		if err := collect(block.Body, src, dir, into); err != nil {
+			return err
 		}
-		expanded = expanded || nested
 	}
-	return expanded, nil
+	return nil
 }
 
-// calls reports whether an expression mentions a function by name.
+// calls reports whether an expression's source mentions a function by name.
 //
-// A token scan rather than a parse, because this runs over every attribute of
-// every document submitted and the answer is no for almost all of them. What it
-// costs to be wrong is nothing: a false positive is parsed and evaluated below,
-// and an expression that turns out not to need expanding evaluates to what it
-// already was.
-func calls(tokens hclwrite.Tokens, name string) bool {
-	for i, token := range tokens {
-		if token.Type != hclsyntax.TokenIdent || string(token.Bytes) != name {
-			continue
+// A scan of the expression's own bytes rather than a walk of its AST, because
+// the answer is no for almost every attribute of almost every document and the
+// cost of being wrong is nothing: a false positive is evaluated below and
+// evaluates to what it already was.
+func calls(src []byte, name string) bool {
+	rest := src
+	for {
+		at := bytes.Index(rest, []byte(name))
+		if at < 0 {
+			return false
 		}
-		if i+1 < len(tokens) && tokens[i+1].Type == hclsyntax.TokenOParen {
+		after := rest[at+len(name):]
+		// A call, not a longer identifier that happens to start with it.
+		before := byte(' ')
+		if at > 0 {
+			before = rest[at-1]
+		}
+		if !isWord(before) && len(bytes.TrimLeft(after, " \t")) > 0 &&
+			bytes.TrimLeft(after, " \t")[0] == '(' {
 			return true
 		}
+		rest = after
 	}
-	return false
 }
 
-// evaluate resolves one expression against the vocabulary.
-func evaluate(src []byte, filename, dir string) (cty.Value, error) {
-	expr, diags := hclsyntax.ParseExpression(src, filename, hcl.InitialPos)
-	if diags.HasErrors() {
-		return cty.NilVal, diagError(diags)
+func isWord(c byte) bool {
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
+// indentOf is the whitespace the line at an offset begins with.
+func indentOf(src []byte, at int) string {
+	start := bytes.LastIndexByte(src[:at], '\n') + 1
+	line := src[start:at]
+	return string(line[:len(line)-len(bytes.TrimLeft(line, " \t"))])
+}
+
+// render writes a list value as HCL.
+//
+// One entry per line once there are more than a handful, because these lists
+// are the long ones by definition: the whole reason a document reads them from
+// a file is that there are thousands, and thousands on one line is a diff
+// nobody can review. Short lists stay inline, where a line break would be
+// noise.
+func render(value cty.Value, indent string) []byte {
+	if value.IsNull() || !value.CanIterateElements() {
+		return hclwrite.TokensForValue(value).Bytes()
 	}
 
-	value, diags := expr.Value(evalContext(dir))
-	if diags.HasErrors() {
-		return cty.NilVal, diagError(diags)
+	entries := value.AsValueSlice()
+	if len(entries) == 0 {
+		return []byte("[]")
 	}
-	return value, nil
+	if len(entries) <= inlineEntries {
+		return hclwrite.TokensForValue(value).Bytes()
+	}
+
+	var b bytes.Buffer
+	b.WriteString("[\n")
+	for _, entry := range entries {
+		b.WriteString(indent)
+		b.WriteString("  ")
+		b.Write(hclwrite.TokensForValue(entry).Bytes())
+		b.WriteString(",\n")
+	}
+	b.WriteString(indent)
+	b.WriteString("]")
+	return b.Bytes()
 }
+
+// inlineEntries is how many a list may hold before it is written one per line.
+const inlineEntries = 3

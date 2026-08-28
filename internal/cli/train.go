@@ -5,7 +5,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 
@@ -42,9 +41,9 @@ import (
 // It prints what it found and returns the proposals. What to do with them is
 // the caller's: a file is rewritten in place, and a submitted job is updated
 // through the service that owns it.
-func trainLocators(ctx context.Context, a *App, document []byte, source, jobName, itemName, dir string,
+func trainLocators(ctx context.Context, a *App, src Source, jobName, itemName, dir string,
 	least float64, limit int) ([]train.Proposal, *engine.Job, error) {
-	doc, err := AcceptBytes(document, source)
+	doc, err := src.Accept()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -56,7 +55,7 @@ func trainLocators(ctx context.Context, a *App, document []byte, source, jobName
 	// Which locators this wrote last time, which is the only thing it may
 	// replace. Read from the markers in the document rather than from anywhere
 	// else, so the document is the whole of the state.
-	induced := train.MarkInduced(document, job.Name)
+	induced := train.MarkInduced(src.Bytes, job.Name)
 	for _, item := range job.Items {
 		for _, prop := range item.Properties {
 			prop.Induced = induced[item.Name+"."+prop.Name]
@@ -109,15 +108,15 @@ func trainLocators(ctx context.Context, a *App, document []byte, source, jobName
 // it.
 func trainFile(ctx context.Context, a *App, path, jobName, itemName, dir string,
 	least float64, limit int, write bool) error {
-	document, err := os.ReadFile(path)
+	src, err := FromFile(path)
 	if err != nil {
-		return Failedf("%v", err)
+		return err
 	}
 	if dir == "" {
 		dir = filepath.Join(filepath.Dir(path), ".scour", "cache")
 	}
 
-	proposals, job, err := trainLocators(ctx, a, document, path, jobName, itemName, dir, least, limit)
+	proposals, job, err := trainLocators(ctx, a, src, jobName, itemName, dir, least, limit)
 	if err != nil {
 		return err
 	}

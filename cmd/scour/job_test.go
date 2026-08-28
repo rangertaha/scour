@@ -224,6 +224,66 @@ job "news" {
 	}
 }
 
+// TestEveryFileCommandReadsAListBesideTheDocument.
+//
+// One test over every command that takes --file, because the defect it guards
+// is an omission and omissions arrive one command at a time. Reading a path and
+// parsing the bytes alone loses the directory, so `lines("domains.txt")` is
+// refused for a document that plainly came from a file: `scour job valid`
+// accepted a document that `scour job show --file` then rejected. Three
+// commands had it wrong and one had it right, which is what a rule held by
+// remembering looks like.
+//
+// A fourth --file command that forgets fails here rather than shipping. If you
+// are adding one, add it to this list.
+func TestEveryFileCommandReadsAListBesideTheDocument(t *testing.T) {
+	dir := t.TempDir()
+
+	for name, body := range map[string]string{
+		"domains.txt": "example.com\n",
+		"seeds.txt":   "https://example.com/\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	path := filepath.Join(dir, "news.hcl")
+	if err := os.WriteFile(path, []byte(`
+job "news" {
+  domains = lines("domains.txt")
+  start   = lines("seeds.txt")
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{
+		{"job", "valid", path},
+		{"job", "show", "--file", path},
+		{"job", "spec", "--file", path},
+		{"job", "train", "--file", path, "--dir", dir},
+	} {
+		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
+			got := scour(t, dir, args...)
+
+			// train has nothing to learn from here, which is a different
+			// complaint and a legitimate one. What must not happen is the
+			// document being refused for reading a file beside it.
+			if strings.Contains(got.stderr, "needs a document read from a file") {
+				t.Errorf("exit %d: a document read from a file was parsed as though it were not:\n%s",
+					got.code, got.stderr)
+			}
+		})
+	}
+}
+
 // TestCreateRefusesTwiceAndUpdateRefusesWhatIsNotThere.
 //
 // The exit codes are the point. A refusal is the cluster answering, which is

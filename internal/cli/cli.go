@@ -145,31 +145,21 @@ func usage(err error) bool {
 // Reading a file and accepting a submission are different decisions, so this
 // does only the first. A command that needs the second calls [Accept].
 func Load(path string) (*engine.Document, error) {
-	src, err := os.ReadFile(path)
+	src, err := FromFile(path)
 	if err != nil {
-		return nil, Failedf("%v", err)
+		return nil, err
 	}
-
-	// Parsed in the document's own directory, so `lines("seeds.txt")` means the
-	// file beside the job rather than one beside whoever ran the command.
-	doc, err := engine.ParseIn(src, path, filepath.Dir(path))
-	if err != nil {
-		return nil, Invalidf("%v", err)
-	}
-	return doc, nil
+	return src.Read()
 }
 
 // Accept reads, parses and validates a job document, which is what everything
 // that acts on one needs.
 func Accept(path string) (*engine.Document, error) {
-	doc, err := Load(path)
+	src, err := FromFile(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := doc.Validate(); err != nil {
-		return nil, Invalidf("%s", Problems(err))
-	}
-	return doc, nil
+	return src.Accept()
 }
 
 // Problems renders joined errors one per line, indented.
@@ -240,20 +230,82 @@ func Run(ctx context.Context, a *App, root *ucli.Command, args []string) int {
 	return CodeOf(err)
 }
 
-// AcceptBytes parses and validates a document that did not come from a file.
+// Source is a job document and where it came from.
 //
-// The cluster's copy of a job arrives as bytes, and every command that shows or
-// edits one has to do this. The name is what a parse error is reported against,
-// so it should be something a reader recognises: a path, or a job's name.
-func AcceptBytes(src []byte, name string) (*engine.Document, error) {
-	doc, err := engine.Parse(src, name)
+// # Why the bytes are not enough
+//
+// Because a document that reads a list from a file beside it, with
+// `domains = lines("domains.txt")`, means something only in the directory it
+// came from. Parsing it anywhere else refuses the call by name, which is
+// correct for the cluster's stored copy and wrong for a file somebody named on
+// the command line.
+//
+// Carrying the two together is what stops that being a thing to remember. It
+// was one, and three commands forgot: `job show --file`, `job spec --file` and
+// `job train --file` each read a path with os.ReadFile and parsed the bytes
+// alone, so `scour job valid news.hcl` accepted a document that
+// `scour job show --file news.hcl` then refused. There is now no way to hold a
+// document without also holding where it came from.
+type Source struct {
+	// Bytes is the document.
+	Bytes []byte
+
+	// Name is what a parse error is reported against: a path, or a job's name.
+	Name string
+
+	// Dir is the directory to resolve `lines()` against. Empty means the
+	// document did not come from a file, which is what the cluster's copy is
+	// and why it carries its lists rather than a reference to them.
+	Dir string
+}
+
+// FromFile reads a document from disk, remembering where it was.
+func FromFile(path string) (Source, error) {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return Source{}, Failedf("%v", err)
+	}
+	return Source{Bytes: src, Name: path, Dir: filepath.Dir(path)}, nil
+}
+
+// FromCluster is a document the cluster stored.
+//
+// It has no directory on purpose: a stored job carries its lists rather than a
+// reference to a file no node can see, so a `lines()` call surviving in one is
+// a job that was submitted without being expanded and should be refused rather
+// than resolved against whatever directory this process happens to be in.
+func FromCluster(name string, document []byte) Source {
+	return Source{Bytes: document, Name: name}
+}
+
+// Read parses a document without validating it.
+func (s Source) Read() (*engine.Document, error) {
+	doc, err := engine.ParseIn(s.Bytes, s.Name, s.Dir)
 	if err != nil {
 		return nil, Invalidf("%v", err)
+	}
+	return doc, nil
+}
+
+// Accept parses and validates, which is what everything that acts on a document
+// needs.
+func (s Source) Accept() (*engine.Document, error) {
+	doc, err := s.Read()
+	if err != nil {
+		return nil, err
 	}
 	if err := doc.Validate(); err != nil {
 		return nil, Invalidf("%s", Problems(err))
 	}
 	return doc, nil
+}
+
+// AcceptBytes parses and validates a document that did not come from a file.
+//
+// A thin way of saying [FromCluster] followed by [Source.Accept], kept because
+// several callers hold bytes that genuinely have no directory.
+func AcceptBytes(src []byte, name string) (*engine.Document, error) {
+	return FromCluster(name, src).Accept()
 }
 
 // oneName adapts an action that takes exactly one job name.

@@ -5,8 +5,6 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -171,11 +169,11 @@ func Job(a *App) *ucli.Command {
 					&ucli.StringFlag{Name: "file", Usage: "read a document instead of asking the cluster", Destination: &file},
 					&ucli.BoolFlag{Name: "json", Usage: "print as JSON", Destination: &asJSON}),
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
-					document, source, err := documentOf(ctx, join, file, cmd.Args().First())
+					src, err := documentOf(ctx, join, file, cmd.Args().First())
 					if err != nil {
 						return err
 					}
-					doc, err := AcceptBytes(document, source)
+					doc, err := src.Accept()
 					if err != nil {
 						return err
 					}
@@ -209,11 +207,11 @@ func Job(a *App) *ucli.Command {
 				Flags: append(cluster(),
 					&ucli.StringFlag{Name: "file", Usage: "read a document instead of asking the cluster", Destination: &file}),
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
-					document, source, err := documentOf(ctx, join, file, cmd.Args().First())
+					src, err := documentOf(ctx, join, file, cmd.Args().First())
 					if err != nil {
 						return err
 					}
-					doc, err := AcceptBytes(document, source)
+					doc, err := src.Accept()
 					if err != nil {
 						return err
 					}
@@ -392,19 +390,24 @@ func submit(ctx context.Context, a *App, join, path string, update bool) error {
 	// without a cluster and with the file's own name in the message, which is
 	// what somebody writing one wants. The service checks again because it
 	// cannot trust a client to have.
-	document, err := os.ReadFile(path)
+	src, err := FromFile(path)
 	if err != nil {
-		return Failedf("%v", err)
+		return err
 	}
+	document := src.Bytes
 
 	// The lists a document reads from files beside it are resolved here, before
 	// it goes anywhere. What the cluster stores has to carry everything the
 	// crawl needs: nothing on the far side can see the author's files, and a
 	// job whose meaning depended on which machine held it would be the one
 	// thing the document format exists to prevent. See [engine.ExpandFiles].
-	if document, err = engine.ExpandFiles(document, path, filepath.Dir(path)); err != nil {
+	if document, err = engine.ExpandFiles(document, src.Name, src.Dir); err != nil {
 		return Invalidf("%v", err)
 	}
+
+	// Validated as the cluster will read it: expanded, with no directory. A
+	// `lines()` call surviving expansion would be a job every node refused, and
+	// this is where that is caught rather than on the far side.
 	if _, err := AcceptBytes(document, path); err != nil {
 		return err
 	}
@@ -436,16 +439,17 @@ func submit(ctx context.Context, a *App, join, path string, update bool) error {
 
 // documentOf is the document a command should work on: a file when one was
 // named, and the cluster's copy otherwise.
-func documentOf(ctx context.Context, join, file, name string) ([]byte, string, error) {
+//
+// It returns a [Source] rather than bytes, so a caller cannot lose track of
+// which of the two it has. A file resolves `lines()` against its own directory
+// and the cluster's copy does not, and the commands here used to get that wrong
+// by reading a path and parsing the bytes alone.
+func documentOf(ctx context.Context, join, file, name string) (Source, error) {
 	if file != "" {
-		document, err := os.ReadFile(file)
-		if err != nil {
-			return nil, "", Failedf("%v", err)
-		}
-		return document, file, nil
+		return FromFile(file)
 	}
 	if name == "" {
-		return nil, "", Usagef("no job named, and no --file given")
+		return Source{}, Usagef("no job named, and no --file given")
 	}
 
 	var document []byte
@@ -457,7 +461,7 @@ func documentOf(ctx context.Context, join, file, name string) ([]byte, string, e
 		document = got
 		return nil
 	})
-	return document, name, err
+	return FromCluster(name, document), err
 }
 
 // trainJob learns locators for a submitted job and, with --write, resubmits it.
@@ -470,12 +474,12 @@ func trainJob(ctx context.Context, a *App, join, name, itemName, dir string,
 		dir = ".scour/cache"
 	}
 
-	document, _, err := documentOf(ctx, join, "", name)
+	src, err := documentOf(ctx, join, "", name)
 	if err != nil {
 		return err
 	}
 
-	proposals, job, err := trainLocators(ctx, a, document, name, name, itemName, dir, least, limit)
+	proposals, job, err := trainLocators(ctx, a, src, name, itemName, dir, least, limit)
 	if err != nil {
 		return err
 	}
@@ -485,7 +489,7 @@ func trainJob(ctx context.Context, a *App, join, name, itemName, dir string,
 		return nil
 	}
 
-	edited, written, err := train.Write(document, job.Name, proposals)
+	edited, written, err := train.Write(src.Bytes, job.Name, proposals)
 	if err != nil {
 		return Failedf("%v", err)
 	}
