@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -425,6 +426,92 @@ func TestStartRefusesAJobAlreadyRunning(t *testing.T) {
 	}
 }
 
+// TestOnlyOneStartWinsWhenTheyRace.
+//
+// One driver per job is the politeness rule, not a simplification: two
+// schedulers handing out the same host cannot honour a crawl delay between
+// them. It was enforced by a check that released the lock before building the
+// stages and seeding, which takes long enough for every concurrent caller to
+// walk straight through it. Eight simultaneous starts produced eight drivers on
+// one job, seven of them unreachable, because only the last reached the map.
+//
+// The control service answers each request on its own goroutine, so two `scour
+// job start` at the same moment was all it took.
+//
+// The site blocks until the test lets it go, because the point is that the
+// starts race while a crawl is definitely still running. Against a site that
+// answers immediately the first crawl finishes mid-burst and a later start
+// succeeds legitimately, which is not the bug and would make this test lie.
+func TestOnlyOneStartWinsWhenTheyRace(t *testing.T) {
+	manager, _ := cluster(t)
+	ctx := context.Background()
+
+	release := make(chan struct{})
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+
+	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		<-release
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<html><head><title>Held</title></head><body></body></html>`)
+	}))
+	t.Cleanup(held.Close)
+
+	if _, err := manager.Create(ctx, document(held, "news")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		won     int
+		refused int
+	)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := manager.Start(ctx, "news", false)
+
+			mu.Lock()
+			defer mu.Unlock()
+			if err == nil {
+				won++
+				return
+			}
+			if strings.Contains(err.Error(), "already running") {
+				refused++
+			}
+		}()
+	}
+	wg.Wait()
+
+	if won != 1 {
+		t.Errorf("%d of 8 racing starts won, want exactly 1: any more is two crawls on one frontier", won)
+	}
+	if refused != 7 {
+		t.Errorf("%d starts were refused as already running, want 7", refused)
+	}
+
+	// And the one that won is the one the manager can still reach, which is the
+	// half that made the losers dangerous: a driver nothing has a handle on
+	// cannot be stopped, reported, or made to leave the site alone.
+	status, err := manager.Status(ctx, "news")
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.State.Phase != bus.PhaseRunning {
+		t.Errorf("after a start that won, the job is %s", status.State.Phase)
+	}
+
+	once.Do(func() { close(release) })
+	waitFor(t, manager, "news", bus.PhaseDone, bus.PhaseFailed)
+}
+
 // TestDeleteStopsARunningJob.
 //
 // Deleting a job whose crawl is still going would leave a driver working on
@@ -527,6 +614,95 @@ func TestAJobStartedFromTheServiceIsWatchable(t *testing.T) {
 			}
 			if event.Stats.Fetched == 0 {
 				t.Error("the closing event carries no counters, so a watcher learns nothing from it")
+			}
+			return
+		}
+	}
+}
+
+// TestTheClosingReportSaysWhatIsStillQueued.
+//
+// A crawl that finished a site and one that hit its page budget look identical
+// unless the numbers say otherwise, which is what Ending exists to prevent and
+// what this used to undo by another route. The closing snapshot was taken after
+// the crawl was closed, and closing shuts the frontier, so asking how much was
+// left failed and the report said zero. A crawl stopped at three pages with
+// forty-one URLs queued announced "queued 0" to every watcher.
+func TestTheClosingReportSaysWhatIsStillQueued(t *testing.T) {
+	manager, conn := cluster(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// More links than the budget allows, so the crawl has to stop with work
+	// left rather than running the site dry.
+	wide := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+		if r.URL.Path == "/" {
+			for i := range 40 {
+				fmt.Fprintf(w, `<a href="/p%d">p%d</a>`, i, i)
+			}
+			return
+		}
+		fmt.Fprintf(w,
+			`<html><head><meta property="og:title" content="Page %s"></head><body></body></html>`,
+			strings.TrimPrefix(r.URL.Path, "/"))
+	}))
+	t.Cleanup(wide.Close)
+
+	budgeted := fmt.Appendf(nil, `
+job "news" {
+  domains = ["%s"]
+  start   = ["%s/"]
+
+  item "article" {
+    property "title" {
+      type     = str
+      required = true
+    }
+  }
+
+  scheduler {
+    rate        = "1ms"
+    concurrency = 1
+    max_pages   = 3
+  }
+}
+`, strings.TrimPrefix(wide.URL, "http://"), wide.URL)
+
+	events, stop, err := conn.WatchJob(ctx, "news")
+	if err != nil {
+		t.Fatalf("watch: %v", err)
+	}
+	defer func() { _ = stop() }()
+
+	if _, err := manager.Create(ctx, budgeted); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := manager.Start(ctx, "news", false); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	deadline := time.After(30 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("no closing event arrived")
+		case event := <-events:
+			if event.Phase.Live() {
+				continue
+			}
+			if event.Stats.Waiting == 0 {
+				t.Errorf("the closing report says nothing is queued after a budget stop, "+
+					"so a watcher is told the site was finished: %+v", event.Stats)
+			}
+			if event.Stats.Exported == 0 {
+				t.Errorf("the closing report says nothing was exported, so reading the "+
+					"counters before the close lost the flush: %+v", event.Stats)
 			}
 			return
 		}

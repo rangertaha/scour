@@ -502,12 +502,34 @@ func (m *Manager) begin(ctx context.Context, name string, fresh, seed bool) (bus
 
 	// Registered before the state is written and before the goroutine starts,
 	// so there is no window in which a crawl is running and nothing says so.
+	//
+	// The check for a driver already running is made again here, and it is not
+	// belt and braces. The one at the top of this function releases the lock
+	// before building the stages and seeding, which takes long enough for
+	// every concurrent caller to walk through it: eight simultaneous starts
+	// produced eight drivers on one job, seven of them unreachable because
+	// only the last reached the map. Eight schedulers on one frontier is the
+	// politeness rule broken exactly as the single-driver design exists to
+	// prevent, and the site would have been the first to notice.
+	//
+	// The control service answers each request on its own goroutine, so two
+	// `scour job start` at the same moment is all it took.
 	m.mu.Lock()
-	if m.closed {
+	switch {
+	case m.closed:
 		m.mu.Unlock()
 		cancel()
 		_ = crawl.Close()
 		return bus.JobStatus{}, errors.New("jobs: the manager is closing")
+
+	case m.running[name] != nil:
+		// Somebody else won the race while this one was building. What it
+		// built is closed rather than left running, which is the whole point:
+		// the loser must not be a second crawl nobody can stop.
+		m.mu.Unlock()
+		cancel()
+		_ = crawl.Close()
+		return bus.JobStatus{}, fmt.Errorf("jobs: %q is already running", name)
 	}
 	m.running[name] = d
 	m.mu.Unlock()
@@ -544,6 +566,13 @@ func (m *Manager) drive(ctx context.Context, d *driver) {
 	defer m.wg.Done()
 	defer close(d.done)
 
+	// The crawl's own context is released here whatever ended it. Stopping and
+	// pausing drain rather than cancel, so nothing else ever calls this: a
+	// manager left running while jobs were started and stopped accumulated one
+	// live context per cycle, each holding a timer and a parent's child list
+	// until the process ended.
+	defer d.cancel()
+
 	// Progress is reported from a goroutine of its own rather than from the
 	// loop, because the loop is in [run.Run.Do] and this package does not get
 	// to put a callback in it. It stops before the crawl is closed, so nothing
@@ -554,11 +583,6 @@ func (m *Manager) drive(ctx context.Context, d *driver) {
 	ending, err := d.crawl.Do(ctx)
 	close(ticking)
 
-	// Closed before the state is written, for the reason `scour crawl` closes
-	// before printing its summary: the exporters flush here, and a flush that
-	// failed must not be contradicted by a phase saying the job is done.
-	closeErr := d.crawl.Close()
-
 	// A context of its own, because the crawl's is very often the reason there
 	// is something to record: the state of a job stopped by ctrl-c would be
 	// written with the context that stopping cancelled, and so would not be
@@ -566,14 +590,34 @@ func (m *Manager) drive(ctx context.Context, d *driver) {
 	after, done := context.WithTimeout(context.WithoutCancel(ctx), Settle)
 	defer done()
 
+	// The counters are read before the crawl is closed, and that ordering is
+	// the whole of whether the last number is true. Closing shuts the frontier,
+	// so asking afterwards how much is left fails and the snapshot reports
+	// zero: a crawl that stopped at its page budget with forty-one URLs still
+	// queued announced "queued 0", telling every watcher the site was finished.
+	// That is the confusion Ending exists to prevent, arriving by another route.
+	//
+	// Reading them here loses nothing, because [run.Run.Do] flushes its
+	// exporters before it returns. Close flushes what the exporters themselves
+	// buffer and does not change these counts.
+	final := m.snapshot(after, d)
+
+	// Closed before the state is written, for the reason `scour crawl` closes
+	// before printing its summary: a flush that failed must not be contradicted
+	// by a phase saying the job is done.
+	closeErr := d.crawl.Close()
+
 	m.mu.Lock()
 	intent := d.intent
-	delete(m.running, d.name)
+	// Only this driver's own entry, never whatever is in the map under its
+	// name. They are the same thing now that starting twice is refused, and
+	// this is what stops them silently diverging again: a driver that deleted
+	// its successor's entry would leave a crawl running that nothing could
+	// find, report or stop.
+	if m.running[d.name] == d {
+		delete(m.running, d.name)
+	}
 	m.mu.Unlock()
-
-	// Read before the state is written, because writing it is the last thing
-	// that happens and the driver is dropped straight afterwards.
-	final := m.snapshot(after, d)
 
 	state := bus.JobState{
 		Since:    time.Now().UTC(),

@@ -519,6 +519,15 @@ func watchJob(ctx context.Context, a *App, join, name string) error {
 	}
 	a.printJobStatus(status)
 
+	// Said out loud, because the alternative looks like a hang. A watch on a
+	// job that is not running is legitimate: it is how somebody watches from
+	// one terminal a job they are about to start from another. Printing the
+	// phase and then going silent gave no way to tell that from a command that
+	// had stopped working.
+	if !status.State.Phase.Live() {
+		a.Warnf("waiting for it to start. Interrupt to stop watching\n")
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
