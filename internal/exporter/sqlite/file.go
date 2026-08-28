@@ -89,7 +89,21 @@ func (f *file) exec(ctx context.Context, statement string, args ...any) error {
 	defer f.mu.Unlock()
 
 	if f.tx == nil {
-		tx, err := f.db.BeginTx(ctx, nil)
+		// Detached from this call's context, because the transaction outlives
+		// it: a batch spans many writes and is committed from Close, which is
+		// a different caller with a different context.
+		//
+		// Begun on the caller's, database/sql rolled it back the moment that
+		// context ended, and the crawl's last flush runs on a context it
+		// cancels as it finishes: `scour crawl` then closed the exporters
+		// afterwards, the commit failed with "context canceled", and a crawl
+		// that had reported forty items exported wrote no rows at all. Any
+		// count that is not a whole number of batches lost its tail the same
+		// way, which is almost every crawl.
+		//
+		// The statements below still run on the caller's context, so one slow
+		// write is still bounded by whoever asked for it.
+		tx, err := f.db.BeginTx(context.WithoutCancel(ctx), nil)
 		if err != nil {
 			return fmt.Errorf("exporter/sqlite: %s: %w", f.path, err)
 		}

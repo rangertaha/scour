@@ -469,3 +469,53 @@ func TestContract(t *testing.T) {
 		return exportertest.Only(t, set)
 	})
 }
+
+// TestTheLastBatchSurvivesTheWriteContextEnding.
+//
+// The wiring this reproduces is the real one. A crawl's final flush runs on a
+// context it cancels as it finishes, and `scour crawl` closes the exporters
+// afterwards, deliberately, so that a flush which failed is reported rather
+// than contradicted by a summary claiming what was written.
+//
+// The batch transaction was begun on whichever write started it, so database/sql
+// rolled it back the moment that context ended. The commit from Close then
+// failed with "context canceled", the file was left locked, and a crawl that had
+// just reported forty items exported had written no rows at all. Any record
+// count that is not a whole number of batches lost its tail the same way, which
+// is almost every crawl.
+func TestTheLastBatchSurvivesTheWriteContextEnding(t *testing.T) {
+	dir := t.TempDir()
+
+	set, err := exporter.New(context.Background(), job(t, `
+  exporter "sqlite" "article" {
+    dir = "`+dir+`"
+  }
+`), nil)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	writing, done := context.WithCancel(context.Background())
+	if err := set.Write(writing, rec("https://example.com/a", "A", "Alex")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	done()
+
+	if err := set.Close(); err != nil {
+		t.Fatalf("closing after the write's context ended: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", filepath.Join(dir, "records.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM article`).Scan(&n); err != nil {
+		t.Fatalf("counting what was written: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("%d rows in the database, want 1: the crawl reported the record and wrote nothing", n)
+	}
+}

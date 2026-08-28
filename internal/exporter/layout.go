@@ -95,7 +95,25 @@ func (l *Layout) Columns() []string { return l.columns }
 // The format's own columns are answered from the record's provenance and
 // everything else from its values, so a format cannot accidentally render the
 // fetch time one way while another renders it a second way.
+//
+// # Only the columns this format actually claimed
+//
+// The check against l.builtin is what keeps that sentence true. The switch
+// below used to answer for four names whatever the format had registered, and
+// the formats register different sets: csv claims url and fetched, parquet and
+// sqlite also claim spec, and none of them claims item.
+//
+// So a job declaring `property "spec"` was accepted by csv - it collides with
+// nothing csv owns - given a column, and then filled with the shape
+// fingerprint on every row, identical everywhere, while the extracted value
+// never reached the file and nothing errored. A property named `item` did the
+// same in all three formats. The one list that says which names are the
+// format's own was in NewLayout, and this second list disagreed with it.
 func (l *Layout) Value(r *record.Record, column string) string {
+	if !l.builtin[column] {
+		return r.Values[column]
+	}
+
 	switch column {
 	case "url":
 		return r.URL

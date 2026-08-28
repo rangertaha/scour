@@ -80,6 +80,7 @@ func Run(t *testing.T, open Open) {
 	t.Run("AMergeIsProposedRecordedAndUndoable", func(t *testing.T) { testResolution(t, open) })
 	t.Run("AProposedMergeIsAcceptedByTheStore", func(t *testing.T) { testAProposedMergeIsAcceptedByTheStore(t, open) })
 	t.Run("RetractKeepsWhatIsStillAsserted", func(t *testing.T) { testRetractKeepsWhatIsStillAsserted(t, open) })
+	t.Run("RetractSweepsTheEvidenceWithTheFact", func(t *testing.T) { testRetractSweepsTheEvidenceWithTheFact(t, open) })
 	t.Run("AKindIsTheSameKindWhoeverSpelledIt", func(t *testing.T) { testAKindIsTheSameKindWhoeverSpelledIt(t, open) })
 	t.Run("AMergeGoesToTheNameTheRuleActuallyFound", func(t *testing.T) { testAMergeGoesToTheNameTheRuleFound(t, open) })
 }
@@ -548,6 +549,71 @@ func testResolution(t *testing.T, open Open) {
 // same name was asserted again, since ids come from the name. And a merge the
 // store had proposed itself was refused, because the proposal counted people
 // and the check counted spellings.
+// testRetractSweepsTheEvidenceWithTheFact.
+//
+// A property whose subject disappears is swept, and the assertions that stated
+// it were left behind: the delete that removes evidence removes it by job, and
+// the job that described a thing is usually not the job that was retracted.
+// Nothing else removed them, and the recount at the top of Retract reads them.
+//
+// An id is derived from kind and name, so asserting the same name again is the
+// same id, and the old evidence was waiting. The next Retract of any job at all
+// - including one of a job that does not exist, which is meant to be a no-op -
+// then counted the property as stated twice when one job had stated it once.
+// Retracting that one job left the count standing on the orphan alone, so the
+// store went on serving a fact with no live asserter, which is the one thing
+// the provenance trail exists to make impossible.
+//
+// In the conformance suite because it is a promise every backend makes.
+func testRetractSweepsTheEvidenceWithTheFact(t *testing.T, open Open) {
+	s := open(t)
+	ctx := context.Background()
+
+	// One job asserts the company; another describes it.
+	ghost, err := s.Assert(ctx, "company", "Ghost", said("drop", "https://a.example/1"))
+	if err != nil {
+		t.Fatalf("assert: %v", err)
+	}
+	if err := s.Describe(ctx, ghost, "domain", "ghost.example", 0, said("keep", "https://b.example/1")); err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+
+	// The only job asserting the company goes, so the company goes and its
+	// properties go with it.
+	if _, err := s.Retract(ctx, "drop"); err != nil {
+		t.Fatalf("retract: %v", err)
+	}
+
+	// The same name asserted again is the same id, and one job states the
+	// property once.
+	again, err := s.Assert(ctx, "company", "Ghost", said("again", "https://c.example/1"))
+	if err != nil {
+		t.Fatalf("assert: %v", err)
+	}
+	if err := s.Describe(ctx, again, "domain", "ghost.example", 0, said("again", "https://c.example/1")); err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+
+	// A no-op retract recounts everything, which is where the orphan surfaced.
+	if _, err := s.Retract(ctx, "nosuchjob"); err != nil {
+		t.Fatalf("retract: %v", err)
+	}
+
+	props, err := s.Properties(ctx, again)
+	if err != nil {
+		t.Fatalf("properties: %v", err)
+	}
+	if len(props) == 0 {
+		t.Fatal("the property is gone, though a job asserted it after the sweep")
+	}
+	for _, p := range props {
+		if p.Assertions != 1 {
+			t.Errorf("%s = %s is stated by one job and counts %d: the evidence for a "+
+				"swept property outlived it", p.Name, p.Value, p.Assertions)
+		}
+	}
+}
+
 func testRetractKeepsWhatIsStillAsserted(t *testing.T, open Open) {
 	ctx := context.Background()
 	g := open(t)

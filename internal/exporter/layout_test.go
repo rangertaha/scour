@@ -142,3 +142,63 @@ func when(t *testing.T) time.Time {
 	t.Helper()
 	return time.Date(2026, 8, 5, 14, 23, 45, 123456789, time.FixedZone("CEST", 2*60*60))
 }
+
+// TestAPropertyIsNeverWrittenAsProvenance.
+//
+// One list says which columns are the format's own, and Value used to hold a
+// second one that disagreed with it: it answered for url, spec, item and
+// fetched whatever the format had registered. The formats register different
+// sets - csv claims url and fetched, parquet and sqlite also claim spec, and
+// none of them claims item.
+//
+// So a job declaring `property "spec"` collided with nothing csv owns, was
+// accepted, was given a column, and was then filled with the shape fingerprint
+// on every row while the extracted value never reached the file. Nothing
+// errored. A property named `item` did it in all three formats.
+//
+// Walked over every format and every name Value knows, because the defect was
+// the two lists disagreeing and a spot check only ever finds one pair.
+func TestAPropertyIsNeverWrittenAsProvenance(t *testing.T) {
+	formats := map[string][]string{
+		"csv":     {"url", "fetched"},
+		"parquet": {"url", "fetched", "spec"},
+		"sqlite":  {"url", "fetched", "spec"},
+	}
+
+	for kind, own := range formats {
+		for _, name := range []string{"url", "spec", "item", "fetched"} {
+			t.Run(kind+"/"+name, func(t *testing.T) {
+				src := `
+job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/"]
+
+  item "article" {
+    property "` + name + `" {
+      type = str
+    }
+  }
+}
+`
+				l, err := exporter.NewLayout(kind, shape(t, src), own)
+				if err != nil {
+					// Refused because it collides with a column this format
+					// owns, which is the other right answer and the one the
+					// operator can act on.
+					return
+				}
+
+				r := &record.Record{
+					Item:   "article",
+					URL:    "https://example.com/a",
+					Spec:   "abc123",
+					Values: map[string]string{name: "what was extracted"},
+				}
+				if got := l.Value(r, name); got != "what was extracted" {
+					t.Errorf("a property named %q was accepted and then written as %q, "+
+						"so the extracted value never reaches the file", name, got)
+				}
+			})
+		}
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rangertaha/scour/internal/engine"
 	"github.com/rangertaha/scour/internal/mocksite"
 )
 
@@ -270,8 +271,26 @@ func TestMaxPagesStopsAndLeavesTheRestQueued(t *testing.T) {
 	if !strings.Contains(out, "still waiting") {
 		t.Errorf("the summary does not say what is left for the next run:\n%s", out)
 	}
-	if got := site.Total(); got != 3 {
-		t.Errorf("fetched %d pages under a budget of 3%s", got, site.asking())
+	// At the budget, and at most one page per worker over it.
+	//
+	// Not exactly three. A budget is checked rather than enforced by
+	// cancelling, deliberately: cancelling would stop a page already in flight
+	// from queueing what it had just found, so a crawl that hit its budget
+	// would leave nothing for a later run to resume from. Work already started
+	// finishes and workers simply stop taking more, so every worker that had
+	// passed the check can add one.
+	//
+	// Asserting exactly three said something the engine does not promise, and
+	// it held only while the machine was quiet: under the load of the full
+	// suite both workers passed the check at two and fetched, making four. The
+	// bound is what is worth holding - a budget that could be overrun by an
+	// unbounded amount would not be a budget.
+	const budget = 3
+	workers := engine.DefaultConcurrency
+
+	if got := site.Total(); got < budget || got > budget+workers-1 {
+		t.Errorf("fetched %d pages under a budget of %d with %d workers, want between %d and %d%s",
+			got, budget, workers, budget, budget+workers-1, site.asking())
 	}
 }
 

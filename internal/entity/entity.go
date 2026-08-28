@@ -729,6 +729,26 @@ func (s *graph) Retract(ctx context.Context, job string) (int64, error) {
 		`DELETE FROM properties
 		  WHERE subject NOT IN (SELECT id FROM entities UNION SELECT id FROM relations)
 		    AND subject NOT IN (SELECT ` + "'" + KindPrefix + `' || kind FROM entities)`,
+		// And the evidence for it, on the same terms.
+		//
+		// A property was swept when its subject disappeared and the assertions
+		// that stated it were left behind, because the delete above this one
+		// removes rows by job and the job that described the thing is usually
+		// not the job that was retracted. Nothing else ever removes them, and
+		// the recount at the top of this list reads them, so they came back.
+		//
+		// An id is derived from kind and name, so asserting the same name again
+		// produces the same id: a company retracted and re-asserted found its
+		// old evidence waiting, and the next Retract of any job at all - one of
+		// a job that does not exist, which is meant to be a no-op - recounted
+		// the property as stated twice when one job had stated it once. Worse,
+		// retracting that one job left the count standing on the orphan alone,
+		// so the store went on serving a fact whose every asserter was gone.
+		// A count with no live asserter is exactly what the provenance trail
+		// exists to make impossible.
+		`DELETE FROM property_assertions
+		  WHERE subject NOT IN (SELECT id FROM entities UNION SELECT id FROM relations)
+		    AND subject NOT IN (SELECT ` + "'" + KindPrefix + `' || kind FROM entities)`,
 	} {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return 0, fmt.Errorf("entity: retract %s: %w", job, err)
