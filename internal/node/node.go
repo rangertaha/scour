@@ -180,7 +180,7 @@ func Join(ctx context.Context, conn *bus.Conn, opts Options) (*Node, error) {
 	// A stage nobody serves is refused here, before the node announces itself.
 	//
 	// It was checked once per job instead, deep inside serve, which meant
-	// `scour serve --stages downlaod` connected, announced ["downlaod"] into
+	// `scour server --stages downlaod` connected, announced ["downlaod"] into
 	// the registry, printed that it was serving, and then answered nothing for
 	// the rest of its life while logging one warning per job. The registry said
 	// the capacity was there. A typo is the likeliest thing to be wrong with
@@ -254,7 +254,7 @@ func (n *Node) Watch(ctx context.Context) error {
 				// this node being asked to leave: jetstream closes it when the
 				// connection drops or the consumer fails, so the node has
 				// stopped noticing jobs and nothing said so. Returning nil made
-				// `scour serve` print "has left" and exit zero, so a supervisor
+				// `scour server` print "has left" and exit zero, so a supervisor
 				// set to restart on failure never restarted it and the machine
 				// sat there serving whatever it happened to have.
 				if err := ctx.Err(); err == nil {
@@ -323,7 +323,7 @@ func (n *Node) serve(ctx context.Context, change bus.Change) error {
 	// this node has no key to resolve. When it did, the working stages were
 	// already gone. The node served nothing for that job from then on, logged
 	// one warning, and went on advertising both stages in the registry, so
-	// `scour nodes` showed capacity that answered nothing and the driving
+	// `scour cluster list` showed capacity that answered nothing and the driving
 	// node's requests timed out.
 	var subscribe []func() (*nats.Subscription, error)
 	for _, stage := range n.opts.Serve {

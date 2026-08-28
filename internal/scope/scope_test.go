@@ -117,7 +117,7 @@ func TestPatternsMatchTheHostToo(t *testing.T) {
 	}
 }
 
-// TestNoScopeAllowsEverything, which is what `scour try` on one URL needs: it
+// TestNoScopeAllowsEverything, which is what `scour scrape` on one URL needs: it
 // has nothing to be outside of.
 func TestNoScopeAllowsEverything(t *testing.T) {
 	s := build(t, nil, nil, nil)

@@ -339,7 +339,7 @@ func (p *Pipeline) IsExternal() bool { return p != nil && p.External }
 // decode. It exists because the block was being skipped entirely:
 // `external_timeout = "eventually"` in a pipeline validated clean, where the
 // same mistake in a downloader or a spider was refused with a named field.
-// Resolved() then swallowed the parse error, so `scour show` printed a pipeline
+// Resolved() then swallowed the parse error, so `scour job show` printed a pipeline
 // with no timeout and the stored job quietly lost the setting.
 func (p *Pipeline) validate() []error {
 	if p == nil {

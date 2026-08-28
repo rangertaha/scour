@@ -9,7 +9,7 @@
 //
 // # Four ways to find a value, tried in order
 //
-//  1. **CSS selectors**, which a person wrote or `scour train` induced.
+//  1. **CSS selectors**, which a person wrote or `scour job train` induced.
 //  2. **XPath**, for the cases CSS cannot express.
 //  3. **Regexes**, over the page's text, for what is written rather than
 //     marked up.
@@ -27,7 +27,7 @@
 //
 // A value on its own does not tell you whether the locator will hold on the
 // next page. [Value.From] carries the node it was read out of, which is what
-// makes `scour try` worth running and what `scour train` compares against when
+// makes `scour scrape` worth running and what `scour job train` compares against when
 // it proposes a locator.
 package extract
 

@@ -70,7 +70,7 @@ func testClose(t *testing.T, open Open) {
 
 // testCloseTwice: Close is idempotent.
 //
-// Not hypothetical, and not tidiness. `scour run` closes its crawl explicitly so
+// Not hypothetical, and not tidiness. `scour crawl` closes its crawl explicitly so
 // that a failure to flush is reported before the summary claims what was
 // written, and it also closes it from a deferred call that covers the paths
 // returning earlier. The successful path therefore closes twice, and the second

@@ -197,7 +197,7 @@ type Downloader struct {
 // time for an answer.
 //
 // The wait is a parameter rather than [Timeout] because the job document has a
-// field for it, `external_timeout`, and it was read by nothing: `scour show`
+// field for it, `external_timeout`, and it was read by nothing: `scour job show`
 // told an operator their job waited ten minutes while the bound was a
 // two-minute constant. A setting the document accepts and the code ignores is
 // worse than one that does not exist, because the operator has been told

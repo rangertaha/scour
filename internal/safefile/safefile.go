@@ -14,7 +14,7 @@
 // trained model and opened the live file with O_TRUNC, so the contents were
 // destroyed before the new ones were written.
 //
-// That third one had a reader. `scour service` subscribes `load` and `replace`
+// That third one had a reader. `scour server` subscribes `load` and `replace`
 // for the topic store on one connection, and NATS dispatches each request on
 // its own goroutine, so a node asking for a model while an operator corrects it
 // read a file that had been truncated and not yet rewritten. The node's chain

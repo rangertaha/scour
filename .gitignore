@@ -56,3 +56,14 @@ PLAN.md
 
 # The documentation site MkDocs builds, published by .github/workflows/docs.yml
 site/
+
+# What running scour in a directory leaves behind: `--dir` defaults to .scour,
+# which holds the cache, the frontier and an embedded broker's state, and the
+# file exporters write under out/ unless a job says otherwise.
+#
+# Ignored because a crawl run inside a checkout offers its whole corpus for
+# commit, and `git add -A` takes it. A stray database has reached this
+# repository before. A job document is not here on purpose: that is somebody's
+# source and belongs in the history.
+.scour/
+out/

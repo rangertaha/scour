@@ -197,7 +197,7 @@ func (s *Store) Keys(ctx context.Context) iter.Seq2[string, error] {
 // perfectly healthy store and left the driver open: a process opening one cache
 // per job leaked a bucket per job, and the store went on serving reads after
 // Close because the wrapper had never been told.
-// Closing twice is not an error. `scour run` closes its crawl explicitly, so a
+// Closing twice is not an error. `scour crawl` closes its crawl explicitly, so a
 // failure to flush is reported before the summary says what was written, and
 // again from a deferred call covering the paths that return earlier. The
 // successful path therefore closes every store twice, and a deferred Close has

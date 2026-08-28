@@ -6,7 +6,7 @@
 // debug against by hand and what the suite runs against cannot drift apart.
 //
 //	go run ./cmd/mocksite
-//	scour try --url http://127.0.0.1:842/article/jsonld job.hcl
+//	scour scrape --url http://127.0.0.1:842/article/jsonld job.hcl
 //
 // It prints every path as it is asked for, which is usually the fastest way to
 // see what a crawl is really doing: a URL fetched twice, a redirect followed
@@ -50,7 +50,7 @@ func main() {
 	}
 
 	fmt.Printf("mocksite listening on http://%s\n", listener.Addr())
-	fmt.Printf("try: scour try --url http://%s/article/jsonld job.hcl\n", listener.Addr())
+	fmt.Printf("try: scour scrape --url http://%s/article/jsonld job.hcl\n", listener.Addr())
 
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 

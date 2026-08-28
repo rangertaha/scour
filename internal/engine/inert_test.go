@@ -34,12 +34,12 @@ const (
 //
 // Because the class came back. It was retired once, after `external_timeout`
 // turned out to be parsed, defaulted, validated, carried into the resolved job,
-// documented in the command-line reference, reported by `scour show` as "yes,
+// documented in the command-line reference, reported by `scour job show` as "yes,
 // waiting 5m0s", and
 // read by no running crawl. Then the service document's `url` arrived with the
 // same shape: a service told to answer on nats://10.0.0.5:4222 started an
 // embedded broker on an ephemeral port, said it was ready, and answered nobody.
-// Then `monitoring.level`, which `scour show` reported while every run logged at
+// Then `monitoring.level`, which `scour job show` reported while every run logged at
 // warn.
 //
 // Three instances is not a coincidence, and none of them failed anything. That
@@ -121,7 +121,7 @@ func TestNoSettingIsAcceptedAndIgnored(t *testing.T) {
 		// never the length of time anything waits. That is the oldest instance
 		// of this class and the one the test was written for, which is worth
 		// saying plainly: it was retired, and it came back, because the fix
-		// wired the value into `scour show` rather than into a crawl.
+		// wired the value into `scour job show` rather than into a crawl.
 		//
 		// `external` itself does act, so it is not on this list: a run that
 		// cannot reach the stage refuses rather than crawling locally.
@@ -260,9 +260,9 @@ func owner(field *types.Var) string {
 // paths that read a setting without acting on it, and every instance of the
 // class so far had both:
 //
-//   - `scour show` prints the document back, so it reads nearly every setting,
+//   - `scour job show` prints the document back, so it reads nearly every setting,
 //     and through Job.Resolved it reaches nearly every one it does not read
-//     directly. All three instances were reported correctly by `scour show`
+//     directly. All three instances were reported correctly by `scour job show`
 //     and acted on by nothing, which is what made them so hard to see.
 //   - The validators check a value is allowed and then drop it. `external`,
 //     `url` and `level` were all validated, and a job that failed validation

@@ -12,7 +12,7 @@ were argued out one at a time; the map is the thing worth being able to read
 at once.
 
 <figure>
-<img src="../img/storage.svg" alt="The four stages above the stores they touch. The scheduler holds the frontier in SQLite and the pipeline holds records in SQLite, and they share no file. The downloader and the spider touch no database at all, only the shared cache. The entity graph and the event log sit behind one process, `scour service`, because two stages need them and a file cannot have two owners. Jobs, run state, secrets and nodes live in NATS key-value buckets, which is the one store every node already has.">
+<img src="../img/storage.svg" alt="The four stages above the stores they touch. The scheduler holds the frontier in SQLite and the pipeline holds records in SQLite, and they share no file. The downloader and the spider touch no database at all, only the shared cache. The entity graph and the event log sit behind one process, `scour server`, because two stages need them and a file cannot have two owners. Jobs, run state, secrets and nodes live in NATS key-value buckets, which is the one store every node already has.">
 <figcaption>The two stages that touch a database touch different ones, and they share no file. The two in the middle touch none: a fetching node needs the network and the cache, and a parsing node needs the cache and the spec.</figcaption>
 </figure>
 
@@ -20,7 +20,7 @@ at once.
 | --- | --- | --- |
 | Page bodies | The cache: a directory, S3 or GCS | Large, immutable, shared between machines |
 | Jobs, as desired state | NATS KV, `SCOUR_JOBS` | The only store every node already has |
-| Run state | NATS KV, `SCOUR_RUNS`, no history | Changes constantly and must not churn a job's revisions |
+| Run state | NATS KV, `SCOUR_RUNS`, shallow history | A phase, kept apart so a resubmission's diff stays readable. Progress is published rather than stored, so a crawl of a thousand pages is not a thousand writes |
 | Secrets | NATS KV, `SCOUR_SECRETS`, sealed | Per job, so the environment cannot carry them |
 | Nodes | NATS KV, `SCOUR_NODES`, with a TTL | Not durable state. A row outliving its process is a lie |
 | Frontier and hosts | SQLite, one shared database | Politeness is shared, so this cannot be partitioned. The hosts half also keeps what each site asked for |
@@ -68,7 +68,7 @@ is no `scour secret get`.
 | The spider: four ways to find a value, link discovery | Built, tested |
 | The pipeline: waves, concurrency, five step kinds | Built, tested |
 | Exporters: json, jsonlines, csv, parquet, nats, sqlite | Built, tested |
-| A whole crawl, and `scour try`, `run`, `train` | Built, tested |
+| A whole crawl, and `scour scrape`, `crawl`, `job train` | Built, tested |
 | The bus: same job, same records, either wiring | Built, tested |
 | The cluster: two nodes, one job, work on both | Built, tested |
 | Secrets, sealed, resolved where a plugin is built | Built, tested |
@@ -76,10 +76,11 @@ is no `scour secret get`.
 | `scour topic`: propose, correct, train, versioned | Built, tested |
 | The entity store: typed entities, relations, provenance | Built, tested |
 | Entity identity resolution: recorded merges, one rule, nothing fuzzy | Built, tested |
-| The event log, and `scour service` serving both stores | Built, tested |
+| The event log, and `scour server` serving both stores | Built, tested |
 | Entity recognition and linking | Designed, not started |
-| A crawl driven over the bus | The seam exists and only its own tests use it |
-| Applying a change to a running job | The diff and every effect are built, and nothing calls them |
+| `plan`: printing the diff before anything happens | The diff is built and applied, and nothing prints it |
+| A crawl driven over the bus | Built, tested. The job service holds the frontier and the nodes fetch and read |
+| Applying a change to a running job | Built, tested. `job update` reads the diff through the job's `mutation` policy and refuses what it says to refuse |
 | Fill rates measured against a real corpus | 54.7% over fifteen hand-written pages, held to a floor. The real number is not yet taken |
 
 Two questions are still open, and both are worth stating rather than quietly

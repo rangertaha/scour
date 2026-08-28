@@ -244,7 +244,7 @@ type Property struct {
 	Transforms []string `hcl:"transforms,optional" json:"transforms,omitempty"`
 
 	// XPath and CSS are locators. They may be taught or induced, and which one
-	// they are decides whether `scour train` may replace them.
+	// they are decides whether `scour job train` may replace them.
 	XPath []string `hcl:"xpath,optional" json:"xpath,omitempty"`
 	CSS   []string `hcl:"css,optional" json:"css,omitempty"`
 

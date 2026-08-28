@@ -254,7 +254,7 @@ func (s *Store) Replace(kind string, cfg classify.Config) error {
 
 	// Renamed into place rather than written over. Opening the live file with
 	// O_TRUNC destroys the model before the replacement is written, and this
-	// store has readers: `scour service` subscribes `load` and `replace` on one
+	// store has readers: `scour server` subscribes `load` and `replace` on one
 	// connection and NATS dispatches each on its own goroutine, so a node
 	// asking for a model while an operator corrects it got a truncated file and
 	// failed to build its chain, reporting "unexpected end of JSON input" for a

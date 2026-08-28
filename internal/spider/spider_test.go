@@ -341,7 +341,7 @@ func TestLinksAreNormalisedTheWayTheSchedulerWillDedupeThem(t *testing.T) {
 //
 // Falling back to semantics keeps a crawl working when a site changes one
 // class, which is worth having. What must not happen is it being invisible:
-// the value says it was found by a guess, so `scour try` shows the selector is
+// the value says it was found by a guess, so `scour scrape` shows the selector is
 // no longer doing the work.
 func TestATaughtLocatorThatStopsMatchingFallsBackAndSaysSo(t *testing.T) {
 	j := job(t, "")

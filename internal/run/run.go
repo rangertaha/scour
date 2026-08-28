@@ -312,7 +312,7 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Run, error) {
 
 	// A job that says its downloader is external and a caller that supplied no
 	// handler for it do not agree, and crawling locally is the wrong way to
-	// resolve that. `scour show` reports the setting back to the operator as
+	// resolve that. `scour job show` reports the setting back to the operator as
 	// "yes, waiting 5m0s", so a run that quietly ignored it left them believing
 	// their pages were being fetched somewhere they were not. Refused by name,
 	// which is what the whole engine does with a job it cannot honour.
@@ -792,7 +792,7 @@ func (r *Run) Waiting(ctx context.Context) (int, error) { return r.sched.Waiting
 // # Closing twice is safe, and that is this function's job rather than a
 // property of what it closes
 //
-// `scour run` closes explicitly before printing its summary, so a flush that
+// `scour crawl` closes explicitly before printing its summary, so a flush that
 // failed is reported rather than contradicted by a line claiming what was
 // written, and it also closes from a deferred call covering the paths that
 // return earlier. The successful path therefore closes twice.

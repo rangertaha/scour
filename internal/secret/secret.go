@@ -7,7 +7,7 @@
 //
 // `secret("acme-s3-key")` is an unevaluated function call everywhere the job
 // travels: the document somebody wrote, the copy stored in KV, the diff shown
-// when it is resubmitted, the output of `scour show`. It becomes a credential
+// when it is resubmitted, the output of `scour job show`. It becomes a credential
 // exactly once, on the node building the plugin that needs it, and nowhere it
 // could be written down.
 //

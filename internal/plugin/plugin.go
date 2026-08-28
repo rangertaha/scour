@@ -10,7 +10,7 @@
 //
 // This is where that is answered, and it is the first place a job naming a
 // plugin nothing implements is refused rather than validated. Validation
-// deliberately does not do it: `scour validate` runs offline and in CI, so it
+// deliberately does not do it: `scour job valid` runs offline and in CI, so it
 // cannot know what a node somewhere else has registered. Building the chain
 // can, because by then there is a process with the implementations compiled in.
 //
@@ -22,7 +22,7 @@
 // and a column rather than being silently ignored.
 //
 // It is also why a secret is safe. `secret("acme-s3-key")` is an unevaluated
-// expression everywhere it travels: the stored job, the diff, `scour show`. It
+// expression everywhere it travels: the stored job, the diff, `scour job show`. It
 // is only resolved here, on the node that builds the plugin, against the
 // evaluation context handed in.
 package plugin

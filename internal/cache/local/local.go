@@ -3,7 +3,7 @@
 // Package local stores page bodies in a directory.
 //
 // It is the default backend and the only one with no dependencies, which is
-// what lets scour run on a laptop with nothing installed and nothing
+// what lets scour crawl on a laptop with nothing installed and nothing
 // configured. Import it for its side effect to make "local" available:
 //
 //	import _ "github.com/rangertaha/scour/internal/cache/local"

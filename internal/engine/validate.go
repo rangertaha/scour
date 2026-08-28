@@ -135,7 +135,7 @@ func (j *Job) validate() []error {
 // meaning "this site and below it", which is what `domains` already says. As an
 // inclusion pattern it means something else: if any are given a URL has to
 // match one, and `*.example.com` matches the subdomains and refuses the apex.
-// So `scour init news > news.hcl && scour run news.hcl`, which is the first
+// So `scour job init news > news.hcl && scour crawl news.hcl`, which is the first
 // thing anybody does, crawled nothing and said it was fine. The book's own
 // example had it too.
 //

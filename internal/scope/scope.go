@@ -45,7 +45,7 @@ import (
 // Scope is a job's boundary.
 //
 // The zero value allows everything, which is what a job with no scope at all
-// means: `scour try` on one URL has nothing to be outside of.
+// means: `scour scrape` on one URL has nothing to be outside of.
 type Scope struct {
 	domains  []string
 	included []string

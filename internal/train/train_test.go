@@ -288,7 +288,7 @@ func TestRunningItTwiceReplacesItsOwnGuess(t *testing.T) {
 	}
 
 	// The document now carries induced locators, which the next run is told
-	// about the way `scour train` tells it: by reading the markers.
+	// about the way `scour job train` tells it: by reading the markers.
 	next := job(t, string(edited))
 	for _, item := range next.Items {
 		for _, prop := range item.Properties {
@@ -375,7 +375,7 @@ func TestReportReadsAsALine(t *testing.T) {
 // property written on one line has no body to insert a locator into, and the
 // scan for the block's closing brace latched onto the closing brace of whatever
 // came next: the locator landed outside the property, the file stopped
-// decoding, and every later `scour validate`, `show` or `run` on it failed with
+// decoding, and every later `scour job valid`, `show` or `run` on it failed with
 // "Unsupported argument". A tool that edits a file people keep in a repository
 // has to fail to act rather than act wrongly.
 func TestAOneLinePropertyIsLeftAloneRatherThanCorrupted(t *testing.T) {

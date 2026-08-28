@@ -10,7 +10,7 @@ import "testing"
 // count and length left better returning false in both directions, and the
 // winner of the tie was whichever selector Go's randomised map iteration reached
 // first. `<span class="author byline">` is an ordinary thing to write and offers
-// exactly that pair, so `scour train --write` on an unchanged corpus produced a
+// exactly that pair, so `scour job train --write` on an unchanged corpus produced a
 // different document on alternate runs, and a diff on every run, against the
 // promise this package makes that the same corpus induces the same locators.
 //

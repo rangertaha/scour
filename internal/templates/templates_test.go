@@ -75,7 +75,7 @@ func TestEveryTemplateExtractsSomething(t *testing.T) {
 
 // TestEveryTemplateCanFetchItsOwnStart.
 //
-// The first thing anybody does is `scour init news > news.hcl` and then `scour
+// The first thing anybody does is `scour job init news > news.hcl` and then `scour
 // run news.hcl`. Three of the four templates could not fetch the URL they
 // themselves name: `included = ["*.example.com"]` was written meaning "this
 // site and below it", which is what `domains` already says, and as an

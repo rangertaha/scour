@@ -530,7 +530,7 @@ func TestAClosedNodeTakesOnNothingFurther(t *testing.T) {
 // build does not have, or a `secret()` this node has no key to resolve. When it
 // did, the working stages were already gone. The node served nothing for that
 // job from then on, logged one warning, and went on advertising both stages in
-// the registry, so `scour nodes` showed capacity that answered nothing and the
+// the registry, so `scour cluster list` showed capacity that answered nothing and the
 // driving node's requests timed out until somebody noticed.
 func TestAResubmissionThisNodeCannotBuildLeavesItServingWhatItHad(t *testing.T) {
 	server, _ := site(t)

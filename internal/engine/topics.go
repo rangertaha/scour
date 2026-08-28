@@ -22,7 +22,7 @@ import (
 //
 // So this is a file beside the job document, the same as everything else here.
 // `scour topic propose` writes into it and a person edits it, which is exactly
-// the loop `scour train` already uses for locators: propose, review, write
+// the loop `scour job train` already uses for locators: propose, review, write
 // back. The tool is never the author of what it learns from.
 //
 // # Why seed terms are a bootstrap and not the classifier

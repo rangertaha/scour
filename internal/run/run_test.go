@@ -725,7 +725,7 @@ func TestAPoliteCrawlIsNotMistakenForAStalledOne(t *testing.T) {
 // TestAJobWhoseStageIsElsewhereIsRefusedRatherThanRunLocally.
 //
 // `external = true` was accepted by the parser, validated, carried into the
-// resolved job, and reported back to the operator by `scour show` as "yes,
+// resolved job, and reported back to the operator by `scour job show` as "yes,
 // waiting 5m0s". Nothing in a running crawl read it. So a job that said its
 // downloader was somewhere else was crawled locally, in full, while the tool
 // told the operator otherwise: the pages were fetched from this machine, with
@@ -983,7 +983,7 @@ func (f *partialFrontier) Add(ctx context.Context, job string, reqs ...frontier.
 
 // TestClosingACrawlTwiceIsSafeAndSaysTheSameThing.
 //
-// `scour run` closes explicitly so a failed flush is reported before the summary
+// `scour crawl` closes explicitly so a failed flush is reported before the summary
 // claims what was written, and closes again from a deferred call covering the
 // paths that return earlier. The successful path therefore closes twice.
 //
@@ -1009,7 +1009,7 @@ func (f *partialFrontier) Add(ctx context.Context, job string, reqs ...frontier.
 // CloseIsIdempotent in [cachetest] is what catches that class, at the level
 // where it can actually fail, and it did fail there before the backend was
 // fixed. This is the regression guard for the run's own contract: that Close
-// may be called twice at all, which is what the deferred call in `scour run`
+// may be called twice at all, which is what the deferred call in `scour crawl`
 // depends on.
 func TestClosingACrawlTwiceIsSafeAndSaysTheSameThing(t *testing.T) {
 	server, _ := site(t)
