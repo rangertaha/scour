@@ -156,7 +156,21 @@ func (s *Scope) Domains() []string {
 // people who want to exclude `*/print/*`, and a regular expression is a way to
 // be wrong about that at three in the morning.
 func matches(pattern, normalised string) bool {
-	if glob(pattern, normalised) || glob(pattern, urls.Host(normalised)) {
+	host := urls.Host(normalised)
+
+	// Against the host with its port and without it, because a port is not
+	// part of a site's name and a pattern written by a person never carries
+	// one. [Scope.host] has stripped it from `domains` since the day that was
+	// noticed; `included` and `excluded` were left comparing against a host
+	// that still had it.
+	//
+	// Both directions were wrong and one of them dangerously. A site served on
+	// :8080 matched no `included` pattern, so a crawl of it included nothing.
+	// And `excluded = ["*.internal.example.com"]` did not exclude
+	// `https://db.internal.example.com:8443/x`, so a crawl fetched the thing it
+	// had been told never to touch - while the same URL on the default port was
+	// correctly refused.
+	if glob(pattern, normalised) || glob(pattern, host) || glob(pattern, urls.WithoutPort(host)) {
 		return true
 	}
 

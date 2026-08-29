@@ -174,3 +174,44 @@ func TestAPortIsNotPartOfASitesName(t *testing.T) {
 		t.Error("another host was allowed")
 	}
 }
+
+// TestAPortDoesNotDefeatAPattern.
+//
+// A port is not part of a site's name, and a pattern written by a person never
+// carries one. Scope.host has stripped it from `domains` since the day that was
+// noticed; `included` and `excluded` were left globbing against a host that
+// still had it, and no test put a port in front of a pattern.
+//
+// Both directions were wrong and one of them dangerously. A site served on :8080
+// matched no `included` pattern, so a crawl of it included nothing. And an
+// `excluded` pattern did not exclude the same host on a non-default port, so the
+// crawl fetched the thing it had been told never to touch, while the identical
+// URL on :443 was correctly refused.
+func TestAPortDoesNotDefeatAPattern(t *testing.T) {
+	included, err := scope.New(nil, []string{"*.example.com"}, nil)
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	for _, u := range []string{
+		"https://news.example.com/a",
+		"https://news.example.com:8080/a",
+	} {
+		if !included.Allows(u) {
+			t.Errorf("%q is outside a scope that includes *.example.com", u)
+		}
+	}
+
+	excluded, err := scope.New([]string{"example.com"}, nil, []string{"*.internal.example.com"})
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	for _, u := range []string{
+		"https://db.internal.example.com/x",
+		"https://db.internal.example.com:8443/x",
+	} {
+		if excluded.Allows(u) {
+			t.Errorf("%q is allowed by a scope that excludes *.internal.example.com, "+
+				"so the crawl fetches what it was told never to", u)
+		}
+	}
+}

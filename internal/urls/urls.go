@@ -114,33 +114,49 @@ func normalise(u *url.URL, opts Options) (string, error) {
 		// be queueing.
 		return "", fmt.Errorf("urls: %q: scheme %q is not one this fetches", u.String(), u.Scheme)
 	}
-	if u.Host == "" {
-		return "", fmt.Errorf("urls: %q has no host", u.String())
-	}
-
 	// A default port is what the scheme already means.
+	//
+	// Stripped before the host is checked, not after. url.Parse accepts ":80"
+	// as a host - it validates the port and is content for the name to be
+	// empty - so stripping afterwards turned "http://:80/a" into "http:///a"
+	// and returned it as a success. That is a URL nothing can fetch, queued
+	// with a real hash, and normalising it a second time fails: the one
+	// function every URL passes through was neither idempotent nor closed over
+	// its own output.
 	if (u.Scheme == "http" && strings.HasSuffix(u.Host, ":80")) ||
 		(u.Scheme == "https" && strings.HasSuffix(u.Host, ":443")) {
 		u.Host = u.Host[:strings.LastIndex(u.Host, ":")]
+	}
+
+	if u.Host == "" {
+		return "", fmt.Errorf("urls: %q has no host", u.String())
 	}
 
 	// Never sent to the server, so it cannot identify a page.
 	u.Fragment = ""
 	u.RawFragment = ""
 
-	// Dot segments, resolved the way a server resolves them. url.Parse does not
-	// do this: it only happens when one URL is resolved against another, and a
-	// URL that arrived already absolute never was.
-	u.Path = clean(u.Path)
+	// Every path rewrite below runs on the escaped form, and that is what keeps
+	// an encoded separator encoded.
+	//
+	// u.Path is decoded, so `%2F` is an ordinary slash in it, and Go only keeps
+	// u.RawPath while it still unescapes to u.Path: changing u.Path alone
+	// invalidates RawPath, and the URL is then rebuilt by escaping u.Path,
+	// which does not escape a slash. So `/a/./b%2Fc` came out as `/a/b/c` -
+	// one path segment turned into two, and a resource with a slash in its
+	// name collapsed onto a different resource entirely. Two pages, one hash,
+	// and the dupefilter fetched one of them.
+	escaped := clean(u.EscapedPath())
 	if opts.LowerPath {
-		u.Path = strings.ToLower(u.Path)
+		escaped = strings.ToLower(escaped)
 	}
-	if opts.StripTrailingSlash && len(u.Path) > 1 {
-		u.Path = strings.TrimRight(u.Path, "/")
-		if u.Path == "" {
-			u.Path = "/"
+	if opts.StripTrailingSlash && len(escaped) > 1 {
+		escaped = strings.TrimRight(escaped, "/")
+		if escaped == "" {
+			escaped = "/"
 		}
 	}
+	setPath(u, escaped)
 
 	if u.RawQuery != "" {
 		u.RawQuery = query(u.RawQuery, opts)
@@ -152,6 +168,19 @@ func normalise(u *url.URL, opts Options) (string, error) {
 	u.User = nil
 
 	return u.String(), nil
+}
+
+// setPath writes an escaped path back, keeping the decoded and raw forms in
+// step so that what was encoded stays encoded.
+func setPath(u *url.URL, escaped string) {
+	// Parsed as a reference, which is how the standard library builds the two
+	// halves: Path decoded, RawPath kept only when it says something the
+	// decoded form does not.
+	if ref, err := url.Parse(escaped); err == nil {
+		u.Path, u.RawPath = ref.Path, ref.RawPath
+		return
+	}
+	u.Path, u.RawPath = escaped, ""
 }
 
 // clean applies RFC 3986's remove_dot_segments, keeping the trailing slash that

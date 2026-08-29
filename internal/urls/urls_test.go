@@ -268,3 +268,69 @@ func TestTwoPagesDifferingOnlyInAnEncodedParameterAreTwoPages(t *testing.T) {
 		t.Errorf("%q and %q hashed the same, so one of them would never be fetched", news, sport)
 	}
 }
+
+// TestNormalisingIsClosedOverItsOwnOutput.
+//
+// url.Parse accepts ":80" as a host: it validates the port and is content for
+// the name to be empty. The default-port strip ran after the empty-host check,
+// so "http://:80/a" became "http:///a" and was returned as a success - a URL
+// nothing can fetch, queued with a real hash, and one that fails the very check
+// it had just passed. The one function every URL in the crawler goes through
+// was neither idempotent nor closed over its own output.
+func TestNormalisingIsClosedOverItsOwnOutput(t *testing.T) {
+	for _, raw := range []string{
+		"http://:80/a",
+		"https://:443/a",
+		"https://example.com/a/./b",
+		"https://example.com:8080/a",
+		"HTTPS://Example.COM/A",
+	} {
+		got, err := urls.Normalise(raw, urls.Options{})
+		if err != nil {
+			// Refusing is a fine answer; returning something unusable is not.
+			continue
+		}
+
+		again, err := urls.Normalise(got, urls.Options{})
+		if err != nil {
+			t.Errorf("%q normalised to %q, which does not normalise: %v", raw, got, err)
+			continue
+		}
+		if again != got {
+			t.Errorf("%q is not idempotent: %q then %q", raw, got, again)
+		}
+	}
+}
+
+// TestAnEncodedSeparatorIsNotASeparator.
+//
+// u.Path is decoded, so %2F is an ordinary slash in it, and Go keeps u.RawPath
+// only while it still unescapes to u.Path. Rewriting u.Path alone invalidated
+// RawPath, and the URL was then rebuilt by escaping u.Path, which does not
+// escape a slash: one path segment became two.
+//
+// Two genuinely different resources therefore produced one hash, and the
+// dupefilter fetched one of them. The same shape as the encoded-bracket
+// regression this package already pins, on the path rather than the query.
+func TestAnEncodedSeparatorIsNotASeparator(t *testing.T) {
+	for _, tc := range []struct{ encoded, plain string }{
+		{"https://example.com/a/./b%2Fc", "https://example.com/a/b/c"},
+		{"https://example.com/./x%2Fy", "https://example.com/x/y"},
+	} {
+		a, err := urls.Normalise(tc.encoded, urls.Options{})
+		if err != nil {
+			t.Fatalf("%q: %v", tc.encoded, err)
+		}
+		b, err := urls.Normalise(tc.plain, urls.Options{})
+		if err != nil {
+			t.Fatalf("%q: %v", tc.plain, err)
+		}
+		if a == b {
+			t.Errorf("%q and %q both normalise to %q, so one of the two is never fetched",
+				tc.encoded, tc.plain, a)
+		}
+		if urls.Hash(a) == urls.Hash(b) {
+			t.Errorf("%q and %q hash the same", a, b)
+		}
+	}
+}
