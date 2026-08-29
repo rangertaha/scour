@@ -237,8 +237,17 @@ func (p *propPlan) semantic(page *page, within *html.Node) *Value {
 	}
 
 	if !scoped {
+		// Each fallback answers only if it found something. An element that is
+		// there and empty is not an answer, and returning one ended the search
+		// at the same place the vocabulary loop above used to end it: a page
+		// with an empty <title>, an empty itemprop and a filled <div
+		// class="title"> reported no title at all. That is the commonest
+		// arrangement there is, because <title> is the element a template
+		// leaves for last.
 		if node := p.byWellKnownElement(within); node != nil {
-			return p.value(page, nodeValue(node), describe(node), BySemantics, node)
+			if found := p.value(page, nodeValue(node), describe(node), BySemantics, node); found != nil {
+				return found
+			}
 		}
 		if node := p.byClassOrID(within); node != nil {
 			return p.value(page, nodeValue(node), describe(node), BySemantics, node)

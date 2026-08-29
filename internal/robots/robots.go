@@ -313,6 +313,50 @@ func Token(agent string) string {
 // already written percent-encoded is unescaped first, so encoding it again does
 // not turn %C3%BC into %25C3%25BC.
 func encodePattern(pattern string) string {
+	return upperEscapes(encodeBytes(pattern))
+}
+
+// upperEscapes puts every percent-escape into one case.
+//
+// RFC 3986 says a percent-encoding compares case-insensitively, and both sides
+// of this comparison carry escapes written by somebody else: the publisher's,
+// in the rule, and the site's own links, in the path. They were compared byte
+// for byte, so `Disallow: /m%C3%BCll/` did not match a link written
+// `/m%c3%bcll/page` and the crawler fetched a path the site had refused. The
+// mirror case, a lowercase rule and a normally-encoded link, failed the same
+// way.
+//
+// Only the two hex digits after a `%` are touched, so nothing else in a pattern
+// or a path changes case: a robots.txt path is case-sensitive everywhere else.
+func upperEscapes(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) && isHex(s[i+1]) && isHex(s[i+2]) {
+			b.WriteByte('%')
+			b.WriteByte(upperHex(s[i+1]))
+			b.WriteByte(upperHex(s[i+2]))
+			i += 2
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+func isHex(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+func upperHex(c byte) byte {
+	if c >= 'a' && c <= 'f' {
+		return c - 'a' + 'A'
+	}
+	return c
+}
+
+func encodeBytes(pattern string) string {
 	var b strings.Builder
 
 	for i := range len(pattern) {
@@ -341,6 +385,10 @@ func matches(pattern, path string) bool {
 	if pattern == "" {
 		return false
 	}
+
+	// The path's escapes are brought into the same case the patterns were
+	// stored in. See [upperEscapes].
+	path = upperEscapes(path)
 
 	anchored := strings.HasSuffix(pattern, "$")
 	if anchored {

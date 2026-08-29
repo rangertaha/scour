@@ -930,3 +930,58 @@ func register(t *testing.T, name string, f cache.Factory) {
 	cache.Register(name, f)
 	t.Cleanup(func() { cache.Unregister(name) })
 }
+
+// TestTwoPostsToOneURLAreTwoPages.
+//
+// The key was the URL alone, and the key is what decides whether a request is
+// answered from disk. Two posts of the same form with different terms shared an
+// entry, so the second was answered with the first's results, marked as a hit
+// and never sent to the site: a search for one thing returning another thing's
+// answer, with nothing to say so. Posting a form is a supported thing for a job
+// to do, and the package's own tests say so.
+func TestTwoPostsToOneURLAreTwoPages(t *testing.T) {
+	var asked []string
+	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		body := make([]byte, r.ContentLength)
+		if r.ContentLength > 0 {
+			_, _ = io.ReadFull(r.Body, body)
+		}
+		asked = append(asked, string(body))
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, "<h1>results for %s</h1>", body)
+	})
+
+	s := stage(t, t.TempDir(), "")
+
+	post := func(term string) *downloader.Response {
+		t.Helper()
+		resp, err := s.Handle(context.Background(), &downloader.Request{
+			URL:    server.URL + "/search",
+			Method: http.MethodPost,
+			Body:   []byte("q=" + term),
+		})
+		if err != nil {
+			t.Fatalf("post %s: %v", term, err)
+		}
+		return resp
+	}
+
+	first := post("crawling")
+	second := post("robots")
+
+	if string(first.Body) == string(second.Body) {
+		t.Errorf("two posts with different bodies came back with one answer: %q", first.Body)
+	}
+	if second.Cached {
+		t.Error("the second post was answered from the cache entry the first one wrote")
+	}
+	if len(asked) != 2 {
+		t.Errorf("the site was asked %d times for two different searches: %v", len(asked), asked)
+	}
+
+	// The same post twice is still a hit, which is what the cache is for.
+	if again := post("crawling"); !again.Cached {
+		t.Error("repeating a post did not hit the cache")
+	}
+}

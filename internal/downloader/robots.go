@@ -67,7 +67,7 @@ func newGuard(fetch Handler, agent string) *guard {
 
 func (g *guard) wrap(next Handler) Handler {
 	return HandlerFunc(func(ctx context.Context, req *Request) (*Response, error) {
-		asked, err := g.check(ctx, req.URL)
+		asked, err := g.check(ctx, req.URL, g.agentFor(req))
 		if err != nil {
 			return nil, err
 		}
@@ -106,7 +106,27 @@ func (g *guard) wrap(next Handler) Handler {
 // The delay comes back from here because this is the one place that already has
 // the rules in hand. Reading the file a second time to ask it a second question
 // would be a second fetch of somebody's robots.txt per page.
-func (g *guard) check(ctx context.Context, rawURL string) (time.Duration, error) {
+// agentFor is the user agent this request will actually be sent under.
+//
+// The job's, unless the request carries its own. A middleware may set one -
+// that is a supported thing to do, and rotating them is why - and the guard was
+// checking the job's agent against the rules while the wire carried another. A
+// site that disallows `acmebot` and allows everybody else was read as allowing,
+// and then asked for the disallowed path with `User-Agent: acmebot`: refused by
+// name, fetched anyway.
+//
+// The parsed rules are agent-independent and cached per host, so asking about a
+// different agent costs nothing and does not re-fetch anything.
+func (g *guard) agentFor(req *Request) string {
+	if req != nil && req.Header != nil {
+		if sending := req.Header.Get("User-Agent"); sending != "" {
+			return sending
+		}
+	}
+	return g.agent
+}
+
+func (g *guard) check(ctx context.Context, rawURL, agent string) (time.Duration, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		// Not a drop: a URL that will not parse is a bug upstream, and the
@@ -123,14 +143,14 @@ func (g *guard) check(ctx context.Context, rawURL string) (time.Duration, error)
 	if err != nil {
 		return 0, fmt.Errorf("%s: %w", rawURL, errors.Join(ErrNoRobots, err))
 	}
-	if !rules.Allowed(g.agent, parsed.RequestURI()) {
+	if !rules.Allowed(agent, parsed.RequestURI()) {
 		return 0, fmt.Errorf("%s: %w", rawURL, ErrDisallowed)
 	}
 
 	// A file with no `Crawl-delay` and a file asking for none are both reported
 	// as zero, and both are worth telling the scheduler: what it must not do is
 	// go on applying a delay a site has stopped asking for.
-	delay, _ := rules.Delay(g.agent)
+	delay, _ := rules.Delay(agent)
 	return delay, nil
 }
 

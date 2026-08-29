@@ -112,8 +112,16 @@ func (p *page) walk(n *html.Node) {
 		}
 
 		if prop := attr(n, "itemprop"); prop != "" {
-			if _, seen := p.micro[strings.ToLower(prop)]; !seen {
-				p.micro[strings.ToLower(prop)] = nodeValue(n)
+			// The first one that says anything, rather than the first one at
+			// all. A page may carry an empty placeholder for a name and then
+			// the filled element later - a template's slot and the hydrated
+			// byline, or a masthead widget above the article - and keeping the
+			// placeholder meant the page stated the value in microdata and
+			// nothing could read it. Later non-empty values still do not
+			// displace an earlier non-empty one: the first real answer wins.
+			name := strings.ToLower(prop)
+			if value := nodeValue(n); strings.TrimSpace(p.micro[name]) == "" {
+				p.micro[name] = value
 			}
 		}
 	}

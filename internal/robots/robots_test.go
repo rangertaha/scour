@@ -531,3 +531,36 @@ func TestANonASCIIRuleIsObeyed(t *testing.T) {
 		t.Error("a path no rule names was refused")
 	}
 }
+
+// TestAnEscapeMatchesWhateverCaseItIsWrittenIn.
+//
+// RFC 3986 says a percent-encoding compares case-insensitively, and both sides
+// of this comparison are written by somebody else: the publisher's escapes in
+// the rule, and the site's own links in the path. They were compared byte for
+// byte, so `Disallow: /müll/` - stored as /m%C3%BCll/ - did not match a link
+// written /m%c3%bcll/page, and the crawler fetched a path the site had refused.
+// The mirror case, a lowercase rule and a normally-encoded link, failed the
+// same way.
+func TestAnEscapeMatchesWhateverCaseItIsWrittenIn(t *testing.T) {
+	for name, file := range map[string]string{
+		"a rule written in unicode": "User-agent: *\nDisallow: /müll/\n",
+		"a rule written uppercase":  "User-agent: *\nDisallow: /m%C3%BCll/\n",
+		"a rule written lowercase":  "User-agent: *\nDisallow: /m%c3%bcll/\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rules := robots.Parse([]byte(file))
+			for _, path := range []string{"/m%C3%BCll/page", "/m%c3%bcll/page"} {
+				if rules.Allowed("scour", path) {
+					t.Errorf("%q is allowed, though the site disallowed that directory", path)
+				}
+			}
+		})
+	}
+
+	// And the case of everything else still matters: a robots.txt path is
+	// case-sensitive apart from its escapes.
+	rules := robots.Parse([]byte("User-agent: *\nDisallow: /Private\n"))
+	if !rules.Allowed("scour", "/private") {
+		t.Error("/private was refused by a rule written /Private, so path case stopped mattering")
+	}
+}

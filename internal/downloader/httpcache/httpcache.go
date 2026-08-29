@@ -159,9 +159,28 @@ type middleware struct {
 	log      *slog.Logger
 }
 
+// keyFor is where one request's response is kept.
+//
+// The URL alone for an ordinary GET, which is every fetch a crawl makes and
+// every entry already on disk: the cache is the corpus, and a key that changed
+// would make every corpus anybody has unreadable overnight.
+//
+// The method and body join it for anything else. They were left out, and the
+// key is what decides whether a request is answered from disk: two POSTs to one
+// URL with different bodies shared an entry, so a form search for one term was
+// answered with the results for another, marked as a hit and never sent to the
+// site. A HEAD was answered with a GET's body the same way. Posting a form is a
+// supported, tested thing for a job to do.
+func keyFor(req *downloader.Request) string {
+	if (req.Method == "" || req.Method == http.MethodGet) && len(req.Body) == 0 {
+		return cache.Key(req.URL)
+	}
+	return cache.Key(req.Method + " " + req.URL + "\n" + string(req.Body))
+}
+
 func (m *middleware) wrap(next downloader.Handler) downloader.Handler {
 	return downloader.HandlerFunc(func(ctx context.Context, req *downloader.Request) (*downloader.Response, error) {
-		key := cache.Key(req.URL)
+		key := keyFor(req)
 
 		if resp := m.hit(ctx, key, req); resp != nil {
 			return resp, nil

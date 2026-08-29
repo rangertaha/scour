@@ -790,3 +790,49 @@ func TestTheStageSaysHowLongOneFetchCanTake(t *testing.T) {
 		})
 	}
 }
+
+// TestRobotsIsCheckedForTheAgentActuallySent.
+//
+// A request may carry its own User-Agent - that is a supported thing for a
+// middleware to do, and rotating them is why - and the guard was checking the
+// job's agent against the rules while the wire carried another. A site that
+// disallows one bot and allows everybody else was read as allowing, and the
+// disallowed path was then asked for under the disallowed name: refused by
+// name, fetched anyway.
+func TestRobotsIsCheckedForTheAgentActuallySent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			fmt.Fprint(w, "User-agent: acmebot\nDisallow: /private\n\nUser-agent: *\nDisallow:\n")
+			return
+		}
+		fmt.Fprint(w, "<html><body>secret</body></html>")
+	}))
+	defer server.Close()
+
+	stage, err := downloader.New(context.Background(), job(t, `
+  downloader {
+    robots     = true
+    user_agent = "scour"
+  }
+`), downloader.Options{})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	defer stage.Close()
+
+	// The job's own agent is allowed everywhere by this file.
+	if _, err := stage.Handle(context.Background(), &downloader.Request{
+		URL: server.URL + "/private",
+	}); err != nil {
+		t.Fatalf("the job's own agent is allowed and was refused: %v", err)
+	}
+
+	// A middleware rotating the agent must be held to that agent's rules.
+	_, err = stage.Handle(context.Background(), &downloader.Request{
+		URL:    server.URL + "/private",
+		Header: http.Header{"User-Agent": []string{"acmebot/1.0"}},
+	})
+	if err == nil {
+		t.Error("fetched a path disallowed for the agent the request was sent under")
+	}
+}

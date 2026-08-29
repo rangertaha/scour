@@ -44,6 +44,69 @@ func TestAnEmptyDeclaredValueDoesNotHideTheRealOne(t *testing.T) {
 	}
 }
 
+// TestAnEmptyWellKnownElementDoesNotEndTheSearchEither.
+//
+// The fix above stopped an empty declared value ending the search, and stopped
+// one fallback too early: byWellKnownElement returned the node it found
+// whatever was in it, so an empty <title> ended the search just as the empty
+// itemprop had. The test written with it used `author`, which is the one name
+// byWellKnownElement does not claim, so it could not see this.
+//
+// <title> is the element a template leaves for last, which makes this the
+// commonest arrangement there is rather than an exotic one.
+func TestAnEmptyWellKnownElementDoesNotEndTheSearchEither(t *testing.T) {
+	item := one(t, `
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+`, `<html><head><title></title></head><body>
+  <span itemprop="title"></span>
+  <div class="title">A story</div>
+</body></html>`)
+
+	got, ok := item.Values["title"]
+	if !ok {
+		t.Fatalf("title found nothing, though the page says it: %v", item.Values)
+	}
+	if got.Text != "A story" {
+		t.Errorf("title is %q", got.Text)
+	}
+}
+
+// TestAPlaceholderDoesNotShadowTheValueBesideIt.
+//
+// A page may carry an empty element for a name and the filled one later: a
+// template's slot and the hydrated byline, or a masthead widget above the
+// article. The first itemprop for a name won whatever it held, so the page
+// stated the value in microdata and nothing could read it - and no fallback
+// could recover it, because the real value was never recorded anywhere.
+func TestAPlaceholderDoesNotShadowTheValueBesideIt(t *testing.T) {
+	item := one(t, `
+  item "article" {
+    property "title" {
+      type = str
+    }
+
+    property "author" {
+      type = str
+    }
+  }
+`, `<html><head><title>A story</title></head><body>
+  <span itemprop="author"></span>
+  <article><span itemprop="author">Alex Doe</span></article>
+</body></html>`)
+
+	got, ok := item.Values["author"]
+	if !ok {
+		t.Fatalf("author found nothing, though the page states it in microdata: %v", item.Values)
+	}
+	if got.Text != "Alex Doe" {
+		t.Errorf("author is %q", got.Text)
+	}
+}
+
 // TestAnXPathComparisonAgainstNonsenseDoesNotPanic.
 //
 // The XPath library panics rather than erroring when a comparison meets
