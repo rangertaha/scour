@@ -866,3 +866,71 @@ func TestABuiltStepIsClosedWhenALaterOneIsRefused(t *testing.T) {
 		t.Error("the step that was built kept whatever it opened, and nothing can close it now")
 	}
 }
+
+// TestTwoRanksInOneWaveBothKeepTheirOrder.
+//
+// A rank is declared per item, so a job with two items has two ranks with no
+// requires between them and they run in one wave. Each was handed every record
+// and returned every record, with its own item moved to the front, so each
+// asserted an order over records it had never looked at. The wave applied the
+// first and discarded the rest: the second item came out in crawl order, with
+// nothing logged, and a step whose whole purpose is ordering had silently not
+// run.
+//
+// A rank now reorders in place, so it says only what it means, and the wave
+// applies what each step actually moved.
+func TestTwoRanksInOneWaveBothKeepTheirOrder(t *testing.T) {
+	p, err := pipeline.New(context.Background(), job(t, `
+  item "price" {
+    property "value" {
+      type = str
+    }
+  }
+
+  pipeline {
+    step "rank" "article" {
+      by         = "score"
+      descending = true
+    }
+    step "rank" "price" {
+      by         = "value"
+      descending = true
+    }
+  }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	price := func(url, value string) *record.Record {
+		r := rec(url, map[string]string{"value": value})
+		r.Item = "price"
+		return r
+	}
+
+	out, err := p.Run(context.Background(), []*record.Record{
+		rec("https://example.com/a1", map[string]string{"title": "A1", "score": "2"}),
+		price("https://example.com/p1", "1"),
+		rec("https://example.com/a2", map[string]string{"title": "A2", "score": "9"}),
+		price("https://example.com/p2", "5"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var scores, values []string
+	for _, r := range out {
+		if r.Item == "price" {
+			values = append(values, r.Values["value"])
+			continue
+		}
+		scores = append(scores, r.Values["score"])
+	}
+
+	if want := []string{"9", "2"}; !slices.Equal(scores, want) {
+		t.Errorf("article scores = %v, want %v", scores, want)
+	}
+	if want := []string{"5", "1"}; !slices.Equal(values, want) {
+		t.Errorf("price values = %v, want %v: the second rank in the wave was undone", values, want)
+	}
+}

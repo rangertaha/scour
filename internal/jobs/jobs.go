@@ -135,6 +135,18 @@ type Manager struct {
 	running map[string]*driver
 	closed  bool
 
+	// starting is the names somebody is in the middle of starting.
+	//
+	// A driver is only in `running` once its stages are built and its frontier
+	// is open, which takes long enough for every concurrent caller to get past
+	// the check that looks there. They all then built a crawl of their own and
+	// threw it away, and building one opens the job's SQLite frontier: a loser
+	// could fail with "database is locked" rather than being told plainly that
+	// somebody else had started it.
+	//
+	// Reserving the name first makes the losers cheap and their message true.
+	starting map[string]bool
+
 	// wg counts the drivers, so Close can wait for the crawls rather than
 	// merely cancelling them and returning while they are still writing.
 	wg sync.WaitGroup
@@ -199,14 +211,15 @@ func New(ctx context.Context, conn *bus.Conn, opts Options) (*Manager, error) {
 	own, stop := context.WithCancel(context.WithoutCancel(ctx))
 
 	m := &Manager{
-		conn:    conn,
-		opts:    opts,
-		log:     opts.Log.With("service", opts.Name),
-		jobs:    jobsKV,
-		states:  states,
-		ctx:     own,
-		stop:    stop,
-		running: map[string]*driver{},
+		conn:     conn,
+		opts:     opts,
+		log:      opts.Log.With("service", opts.Name),
+		jobs:     jobsKV,
+		states:   states,
+		ctx:      own,
+		stop:     stop,
+		running:  map[string]*driver{},
+		starting: map[string]bool{},
 	}
 
 	// The manager still dies with the process. Close is what a caller should
@@ -469,15 +482,26 @@ func (m *Manager) begin(ctx context.Context, name string, fresh, seed bool) (bus
 	}
 
 	m.mu.Lock()
-	if m.closed {
+	switch {
+	case m.closed:
 		m.mu.Unlock()
 		return bus.JobStatus{}, errors.New("jobs: the manager is closing")
-	}
-	if d := m.running[name]; d != nil {
+
+	case m.running[name] != nil, m.starting[name]:
 		m.mu.Unlock()
 		return bus.JobStatus{}, fmt.Errorf("jobs: %q is already running", name)
 	}
+
+	// Reserved before anything is built, so a caller that has lost stops here
+	// rather than opening a frontier it is about to discard.
+	m.starting[name] = true
 	m.mu.Unlock()
+
+	defer func() {
+		m.mu.Lock()
+		delete(m.starting, name)
+		m.mu.Unlock()
+	}()
 
 	dir := m.dir(name)
 	if fresh {

@@ -227,12 +227,9 @@ func newRank(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
 
 	return pipeline.Func(func(_ context.Context, records []*record.Record) ([]*record.Record, error) {
 		mineOnly := make([]*record.Record, 0, len(records))
-		others := make([]*record.Record, 0, len(records))
 		for _, r := range records {
 			if mine(cfg, r) {
 				mineOnly = append(mineOnly, r)
-			} else {
-				others = append(others, r)
 			}
 		}
 
@@ -247,7 +244,36 @@ func newRank(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
 		if c.Limit > 0 && len(mineOnly) > c.Limit {
 			mineOnly = mineOnly[:c.Limit]
 		}
-		return append(mineOnly, others...), nil
+
+		// Back into the positions this step's own records occupied, rather
+		// than in front of everything else.
+		//
+		// A rank is declared per item, so a job with two items has two ranks
+		// with no requires between them and they run in one wave. Returning
+		// mine-then-others meant each of them asserted an order over every
+		// record in the batch, including the ones it had not looked at, so the
+		// wave could not tell what either step had actually decided and only
+		// the first was applied: the second item came out in crawl order, with
+		// nothing logged, and a step whose whole purpose is ordering had
+		// silently not run.
+		//
+		// In place, a rank says only what it means. For a job with one item
+		// this is the same answer as before, because then every slot is mine.
+		out := make([]*record.Record, 0, len(records))
+		next := 0
+		for _, r := range records {
+			if !mine(cfg, r) {
+				out = append(out, r)
+				continue
+			}
+			if next < len(mineOnly) {
+				out = append(out, mineOnly[next])
+				next++
+			}
+			// Past the limit, so the slot closes up: what that means for the
+			// record is the wave's keep rule to say, not this.
+		}
+		return out, nil
 	}), nil
 }
 

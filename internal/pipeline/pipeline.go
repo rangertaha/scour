@@ -347,14 +347,27 @@ func merge(before []*record.Record, results [][]*record.Record) []*record.Record
 		wasThere[r.Identity()] = true
 	}
 
-	// The order to return them in: the input's, unless a step reordered, in
-	// which case the earliest such step in wave order says what the order is.
-	order := identities(before)
+	// The order to return them in: the input's, with every step that reordered
+	// applying what it actually moved and leaving the rest alone.
+	//
+	// The first such step used to decide for the whole wave and the others were
+	// discarded. That is defensible for two steps ordering the same records -
+	// somebody has to win - and wrong for two ordering different ones, which is
+	// the ordinary case: a rank is declared per item, so two ranks on two items
+	// have no requires between them and land in one wave. The second item came
+	// out in crawl order with nothing logged.
+	//
+	// What a step moved is read from its output against the wave's input, not
+	// against the running order, because a step that returned its records
+	// untouched must not be read as undoing the step before it.
+	input := identities(before)
+	order := input
 	for _, list := range results {
-		if !subsequence(order, list) {
-			order = identities(list)
-			break
+		claimed := moved(input, identities(list))
+		if len(claimed) == 0 {
+			continue
 		}
+		order = reorder(order, claimed)
 	}
 	// Anything the ordering step did not mention still needs a place, so that
 	// the kept rule below is what decides its fate and not the ordering.
@@ -433,6 +446,61 @@ func same(before, after *record.Record) bool {
 		before.Spec == after.Spec && before.Fetched.Equal(after.Fetched)
 }
 
+// moved is the records a step actually reordered, in the order it put them.
+//
+// A step is handed every record in the wave and returns every record it kept,
+// so its output asserts an order over records it never looked at. Comparing
+// against the wave's input says which ones it really moved: an id whose place
+// changed, and nothing else. A step that reordered nothing claims nothing, so
+// it cannot undo the step beside it.
+func moved(input, output []string) []string {
+	was := make(map[string]int, len(input))
+	for i, id := range input {
+		was[id] = i
+	}
+
+	var claimed []string
+	for i, id := range output {
+		at, known := was[id]
+		if !known {
+			// Invented by this step. Where it sits is not a reordering of
+			// anything, and the wave's keep rule decides whether it survives.
+			continue
+		}
+		if at != i {
+			claimed = append(claimed, id)
+		}
+	}
+	return claimed
+}
+
+// reorder puts one step's records back into the places they occupy now,
+// leaving every other record exactly where it was.
+//
+// Two steps that moved different records therefore compose, and neither undoes
+// the other. Two that moved the same records still means the later one wins,
+// which is the rule the rest of the merge keeps.
+func reorder(order, claimed []string) []string {
+	place := make(map[string]bool, len(claimed))
+	for _, id := range claimed {
+		place[id] = true
+	}
+
+	out := make([]string, 0, len(order))
+	next := 0
+	for _, id := range order {
+		if !place[id] {
+			out = append(out, id)
+			continue
+		}
+		if next < len(claimed) {
+			out = append(out, claimed[next])
+			next++
+		}
+	}
+	return out
+}
+
 // identities is the identity of each record, in order.
 func identities(records []*record.Record) []string {
 	out := make([]string, len(records))
@@ -440,35 +508,6 @@ func identities(records []*record.Record) []string {
 		out[i] = r.Identity()
 	}
 	return out
-}
-
-// subsequence reports whether the records appear in the given order, possibly
-// with gaps. Dropping records keeps a subsequence; moving one does not, which
-// is the difference between a step that filtered and a step that reordered.
-//
-// Records the order does not mention at all are ignored here: they are ones the
-// step added, and the caller decides where those go.
-func subsequence(order []string, records []*record.Record) bool {
-	known := make(map[string]bool, len(order))
-	for _, id := range order {
-		known[id] = true
-	}
-
-	at := 0
-	for _, r := range records {
-		id := r.Identity()
-		if !known[id] {
-			continue
-		}
-		for at < len(order) && order[at] != id {
-			at++
-		}
-		if at == len(order) {
-			return false
-		}
-		at++
-	}
-	return true
 }
 
 // unique refuses a set of records in which two share an identity.

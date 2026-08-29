@@ -536,6 +536,8 @@ func TestOnlyOneStartWinsWhenTheyRace(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), "already running") {
 				refused++
+			} else {
+				t.Errorf("a losing start failed for another reason: %v", err)
 			}
 		}()
 	}
