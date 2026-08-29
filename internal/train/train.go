@@ -169,11 +169,33 @@ func Learn(job *engine.Job, pages []Page, opts Options) ([]Proposal, error) {
 	return out, nil
 }
 
+// written is the locators a person put on a property, if any.
+//
+// In the order extraction tries them, so what comes back is what would actually
+// be used and what an induced CSS selector would therefore displace.
+func written(prop *engine.Property) []string {
+	switch {
+	case len(prop.CSS) > 0:
+		return prop.CSS
+	case len(prop.XPath) > 0:
+		return prop.XPath
+	case len(prop.Regexes) > 0:
+		return prop.Regexes
+	}
+	return nil
+}
+
 func learnOne(reader *extract.Extractor, item *engine.Item, prop *engine.Property, pages []*document, opts Options) *Proposal {
 	// A locator somebody wrote is a correction, and a correction is never
 	// overwritten. That is the rule that makes this converge.
-	if len(prop.CSS) > 0 && !prop.Induced {
-		return &Proposal{Item: item.Name, Property: prop.Name, Replaces: prop.CSS, Kept: true}
+	//
+	// Any locator, not only a CSS one. Extraction tries CSS before XPath before
+	// a regex, so writing an induced `css` beside a hand-written `xpath` does
+	// not sit next to it - it replaces it, silently, and the XPath was written
+	// precisely because CSS could not express what the person meant. It was not
+	// even reported as kept, because nothing looked.
+	if hand := written(prop); len(hand) > 0 && !prop.Induced {
+		return &Proposal{Item: item.Name, Property: prop.Name, Replaces: hand, Kept: true}
 	}
 	if len(prop.CSS) > 0 && !opts.Replace {
 		return &Proposal{Item: item.Name, Property: prop.Name, Replaces: prop.CSS, Kept: true}

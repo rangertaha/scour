@@ -124,10 +124,20 @@ func submit(t *testing.T, s *scheduler.Stage, reqs ...*scheduler.Request) int {
 	return added
 }
 
+// urls builds the requests a spider produces for links it found on a page.
+//
+// With a parent, because that is what the spider sets on every link it reports
+// and because it is what tells a discovered URL from a seed: a seed is never
+// judged by a classifier, so a fixture with no parent would be testing the
+// exemption rather than the scoring.
 func urls(us ...string) []*scheduler.Request {
 	reqs := make([]*scheduler.Request, 0, len(us))
 	for _, u := range us {
-		reqs = append(reqs, &scheduler.Request{URL: u, Discovered: origin})
+		reqs = append(reqs, &scheduler.Request{
+			URL:        u,
+			Parent:     "https://example.com/",
+			Discovered: origin,
+		})
 	}
 	return reqs
 }
@@ -241,7 +251,12 @@ func TestADropSaysWhatItWasScoredAgainst(t *testing.T) {
 	handler := built(scheduler.HandlerFunc(
 		func(_ context.Context, req *scheduler.Request) (*scheduler.Request, error) { return req, nil }))
 
-	_, err = handler.Handle(context.Background(), &scheduler.Request{URL: offTopic})
+	// With a parent, because a seed is exempt: what is under test here is what
+	// a drop says, and only a discovered URL can be dropped.
+	_, err = handler.Handle(context.Background(), &scheduler.Request{
+		URL:    offTopic,
+		Parent: "https://example.com/",
+	})
 	if !chain.Dropped(err) {
 		t.Fatalf("err = %v, want the off-topic URL dropped", err)
 	}
@@ -421,5 +436,47 @@ func TestAURLIsScoredOnItsSlug(t *testing.T) {
 				t.Errorf("Text(%q, %q) = %q, want %q", c.raw, c.parent, got, c.want)
 			}
 		})
+	}
+}
+
+// TestASeedIsNeverJudged.
+//
+// A start URL is usually a bare host, so there is no slug to read and no parent
+// page to borrow words from: the text scored is the empty string, which every
+// scorer answers zero for. A job with `least` above zero therefore dropped its
+// own seed - and a drop is not an error, so Seed reported nothing queued, the
+// frontier was empty, and the run finished having fetched no pages with nothing
+// anywhere saying why.
+//
+// Nobody linked to a seed. The operator wrote it down, which is a stronger
+// statement about what the crawl is for than anything a classifier can infer
+// from a URL with no words in it.
+func TestASeedIsNeverJudged(t *testing.T) {
+	dir := trained(t, "climate", "emissions", "renewable")
+
+	built, err := topic.New(context.Background(), config(t, dir, 0.3))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	handler := built(scheduler.HandlerFunc(
+		func(_ context.Context, req *scheduler.Request) (*scheduler.Request, error) { return req, nil }))
+
+	for _, seed := range []string{"https://example.com/", "https://example.com"} {
+		out, err := handler.Handle(context.Background(), &scheduler.Request{URL: seed})
+		if err != nil {
+			t.Errorf("a start URL was dropped by the classifier: %v", err)
+			continue
+		}
+		if out == nil {
+			t.Errorf("%q came back as nothing", seed)
+		}
+	}
+
+	// And a URL somebody's page linked to is still judged.
+	if _, err := handler.Handle(context.Background(), &scheduler.Request{
+		URL:    offTopic,
+		Parent: "https://example.com/",
+	}); !chain.Dropped(err) {
+		t.Errorf("an off-topic discovered URL was not dropped: %v", err)
 	}
 }

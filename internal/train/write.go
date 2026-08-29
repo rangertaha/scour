@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/rangertaha/scour/internal/safefile"
+
+	"github.com/rangertaha/scour/internal/engine"
 )
 
 // Write puts proposals back into a job document.
@@ -50,7 +52,11 @@ func Write(document []byte, job string, proposals []Proposal) ([]byte, int, erro
 		}
 
 		replacement := []string{
-			fmt.Sprintf("%scss = [%q] %s", indent, proposal.Selector, Marker),
+			// HCL quoting, not Go's. A selector induced from a page carrying
+			// an unrendered template attribute contains `${`, which HCL reads
+			// as an interpolation: written with %q it went into somebody's job
+			// document and the document stopped parsing.
+			fmt.Sprintf("%scss = [%s] %s", indent, engine.HCLString(proposal.Selector), Marker),
 		}
 		if existing >= 0 {
 			lines = append(lines[:existing], append(replacement, lines[existing+1:]...)...)

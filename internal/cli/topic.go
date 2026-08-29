@@ -11,9 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hashicorp/hcl/v2/hclwrite"
 	ucli "github.com/urfave/cli/v3"
-	"github.com/zclconf/go-cty/cty"
 
 	"github.com/rangertaha/scour/internal/cache"
 	"github.com/rangertaha/scour/internal/classify"
@@ -405,9 +403,7 @@ func proposeLabels(ctx context.Context, a *App, path, corpusDir string, limit in
 //
 // hclwrite is the library that knows the answer, and it was already in the
 // module and imported nowhere.
-func hclString(value string) string {
-	return string(hclwrite.TokensForValue(cty.StringVal(value)).Bytes())
-}
+func hclString(value string) string { return engine.HCLString(value) }
 
 // writeLabels rewrites a labels document.
 //

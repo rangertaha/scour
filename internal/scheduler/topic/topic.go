@@ -128,6 +128,21 @@ func New(ctx context.Context, cfg plugin.Config) (scheduler.Wrapper, error) {
 
 	return func(next scheduler.Handler) scheduler.Handler {
 		return scheduler.HandlerFunc(func(ctx context.Context, req *scheduler.Request) (*scheduler.Request, error) {
+			// A seed is never judged. Nobody linked to it: the operator wrote
+			// it down, which is a stronger statement about what this crawl is
+			// for than anything a classifier can infer from a URL.
+			//
+			// It also could not be judged fairly. A start URL is usually a bare
+			// host, so there is no slug to read and no parent page to borrow
+			// words from, and the text scored is the empty string - which every
+			// scorer answers zero for. A job with `least` above zero therefore
+			// dropped its own seed, and a drop is not an error: Seed returned
+			// nothing queued, the frontier was empty, and the run finished
+			// having fetched no pages with nothing anywhere saying why.
+			if req.Parent == "" {
+				return next.Handle(ctx, req)
+			}
+
 			score, err := scorer.Score(ctx, Text(req.URL, req.Parent))
 			if err != nil {
 				return nil, fmt.Errorf("topic: %s: %w", req.URL, err)

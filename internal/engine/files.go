@@ -293,3 +293,19 @@ func render(value cty.Value, indent string) []byte {
 
 // inlineEntries is how many a list may hold before it is written one per line.
 const inlineEntries = 3
+
+// HCLString renders a Go string as an HCL quoted string.
+//
+// Not %q, which is Go's syntax and not HCL's. The two agree until a value
+// contains `${` or `%{`, which HCL reads as the start of an interpolation: a
+// selector induced from a page carrying an unrendered template attribute, say
+// `meta[name="og:title-${id}"]`, went into somebody's job document as a %q
+// literal and the document stopped parsing. Every later command on it then
+// failed with a diagnostic about an unknown variable, naming nothing that would
+// lead anybody back to the selector.
+//
+// Here rather than in each writer, because there are two - the labels document
+// and the job document - and one of them had it right while the other did not.
+func HCLString(value string) string {
+	return string(hclwrite.TokensForValue(cty.StringVal(value)).Bytes())
+}

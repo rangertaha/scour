@@ -606,3 +606,90 @@ job "news" {
 			"so the hand-written locator on the item would be replaced: %v", induced)
 	}
 }
+
+// TestAHandWrittenXPathIsACorrection.
+//
+// A locator somebody wrote is never overwritten, and the guard only looked at
+// CSS. Extraction tries CSS before XPath, so writing an induced `css` beside a
+// hand-written `xpath` does not sit next to it: it replaces it, and the XPath
+// was written precisely because CSS could not express what the person meant.
+// Nothing even reported it as kept, because nothing looked.
+func TestAHandWrittenXPathIsACorrection(t *testing.T) {
+	doc := `
+job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/"]
+
+  item "article" {
+    property "headline" {
+      type  = str
+      xpath = ["//h2[contains(.,'Price')]/following-sibling::span"]
+    }
+  }
+}
+`
+	parsed, err := engine.Parse([]byte(doc), "job.hcl")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := parsed.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+
+	proposals, err := train.Learn(parsed.Jobs[0], []train.Page{
+		{URL: "https://example.com/a", Body: []byte("<html><body><h1>A story</h1></body></html>")},
+		{URL: "https://example.com/b", Body: []byte("<html><body><h1>Another</h1></body></html>")},
+	}, train.Options{Replace: true})
+	if err != nil {
+		t.Fatalf("learn: %v", err)
+	}
+
+	for _, p := range proposals {
+		if p.Property != "headline" {
+			continue
+		}
+		if !p.Kept {
+			t.Errorf("a hand-written xpath was replaced by an induced css %q, "+
+				"and extraction prefers css so the xpath would never run again", p.Selector)
+		}
+	}
+}
+
+// TestAnInducedSelectorIsQuotedAsHCL.
+//
+// The selector is written into somebody's job document, and %q is Go's syntax
+// rather than HCL's. They agree until a value contains `${`, which HCL reads as
+// the start of an interpolation: a page carrying an unrendered template
+// attribute yields a selector like meta[name="og:title-${id}"], and writing it
+// with %q left a document that no longer parses, failing every later command
+// with a diagnostic about an unknown variable that named nothing useful.
+func TestAnInducedSelectorIsQuotedAsHCL(t *testing.T) {
+	doc := []byte(`
+job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/"]
+
+  item "article" {
+    property "headline" {
+      type = str
+    }
+  }
+}
+`)
+
+	edited, written, err := train.Write(doc, "news", []train.Proposal{{
+		Item:     "article",
+		Property: "headline",
+		Selector: `meta[name="og:title-${id}"]`,
+	}})
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if written != 1 {
+		t.Fatalf("wrote %d locators", written)
+	}
+
+	if _, err := engine.Parse(edited, "job.hcl"); err != nil {
+		t.Errorf("the edited document no longer parses: %v\n%s", err, edited)
+	}
+}
