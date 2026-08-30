@@ -211,14 +211,23 @@ CREATE TABLE IF NOT EXISTS hosts (
 -- the unit of scheduling rather than the URL, which is a bigger change than an
 -- index.
 --
--- The rowid the orderings tie-break on is not named here: SQLite appends it to
--- every index entry already, and naming it is an error.
+-- The rowid the priority and breadth orderings tie-break on is not named here:
+-- SQLite appends it to every index entry already, and naming it is an error.
+--
+-- The depth ordering ties on hash instead, so that it hands out the same URL
+-- the memory frontier does, and hash is an ordinary column that SQLite does
+-- not append: it has to be in the index or the last term of the ORDER BY falls
+-- out of the walk. Left out, a depth-first crawl reaching a page of 500 links -
+-- all sharing that page's depth and its single discovered stamp, so the whole
+-- tie block is the leading block of the ordering - read all 500 index entries,
+-- joined each to hosts and fed them to a temp B-tree, once per page, inside the
+-- lease's write transaction.
 CREATE INDEX IF NOT EXISTS urls_priority
 	ON urls (job, status, score DESC, discovered);
 CREATE INDEX IF NOT EXISTS urls_breadth
 	ON urls (job, status, depth, discovered);
 CREATE INDEX IF NOT EXISTS urls_depth
-	ON urls (job, status, depth DESC, discovered DESC);
+	ON urls (job, status, depth DESC, discovered DESC, hash DESC);
 
 -- Hosts by when they are next free, so that "is anything due at all" is a seek
 -- rather than a walk. See the guard at the top of [Frontier.Lease] for what
@@ -233,7 +242,12 @@ CREATE INDEX IF NOT EXISTS hosts_next_at ON hosts (next_at);
 
 // schemaVersion is what the DDL above builds. A database recording anything
 // lower is brought up to it by [migrate], and one recording this is left alone.
-const schemaVersion = 1
+//
+// 2 adds `hash` to urls_depth. `CREATE INDEX IF NOT EXISTS` under a name that
+// already exists is a no-op whatever the columns say, so an index whose
+// definition changes has to be dropped, which is why this is a version rather
+// than another idempotent ask.
+const schemaVersion = 2
 
 // migrate brings a database made by an older build up to the schema above.
 //
@@ -278,6 +292,17 @@ func migrate(db *sql.DB) error {
 		if _, err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", add.table, add.column, add.spec)); err != nil {
 			return fmt.Errorf("frontier/sqlite: add %s.%s: %w", add.table, add.column, err)
 		}
+	}
+
+	// urls_depth as the DDL above now writes it. Dropped rather than asked
+	// for, because CREATE INDEX IF NOT EXISTS matches on the name alone and an
+	// existing database would keep the old columns forever. Rebuilding one
+	// index is cheap next to the sort it removes, and the statement above has
+	// already recreated it by the time this runs.
+	if _, err := db.Exec(`
+DROP INDEX IF EXISTS urls_depth;
+CREATE INDEX urls_depth ON urls (job, status, depth DESC, discovered DESC, hash DESC)`); err != nil {
+		return fmt.Errorf("frontier/sqlite: rebuild urls_depth: %w", err)
 	}
 
 	// A row per host already in the frontier. Zero means free, which is what a

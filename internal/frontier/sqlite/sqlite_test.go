@@ -69,6 +69,54 @@ INSERT INTO hosts (host, next_at) VALUES ('example.com', 0);`); err != nil {
 	}
 }
 
+// TestAnOlderDepthIndexIsRebuilt.
+//
+// CREATE INDEX IF NOT EXISTS matches on the name alone, so an index whose
+// columns change in the DDL reaches new databases and no existing one. The
+// database opens cleanly and nothing fails; the depth lease just sorts the
+// frontier on every call for the rest of that crawl's life.
+func TestAnOlderDepthIndexIsRebuilt(t *testing.T) {
+	dir := t.TempDir()
+
+	// A database as the previous version left it: the index without hash, and
+	// the version that says it is up to date.
+	f, err := sqlite.Open(frontier.Config{Dir: dir, Policy: "depth"})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	old, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "frontier.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := old.Exec(`
+DROP INDEX urls_depth;
+CREATE INDEX urls_depth ON urls (job, status, depth DESC, discovered DESC);
+PRAGMA user_version = 1;`); err != nil {
+		t.Fatalf("build the old index: %v", err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	again, err := sqlite.Open(frontier.Config{Dir: dir, Policy: "depth"})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer again.Close()
+
+	plan, err := again.Plan(context.Background(), "news")
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if joined := strings.Join(plan, "\n"); strings.Contains(joined, "TEMP B-TREE") {
+		t.Errorf("a resumed crawl sorts the frontier on every lease:\n%s", joined)
+	}
+}
+
 // The contract, run against the store a crawl actually uses. It is the same
 // suite the memory implementation runs, which is what stops the contract from
 // being a description of whichever store happened to be written first.
@@ -302,7 +350,14 @@ func TestTheLeaseIsServedByAnIndex(t *testing.T) {
 			}
 
 			joined := strings.Join(plan, "\n")
-			if strings.Contains(joined, "USE TEMP B-TREE FOR ORDER BY") {
+			// "TEMP B-TREE" alone, because SQLite has several spellings for
+			// the same cost and this asserted the one it happens not to use
+			// when only part of the ordering is indexed. A lease whose last
+			// term fell out of its index reported "USE TEMP B-TREE FOR RIGHT
+			// PART OF ORDER BY", which is not a substring of "USE TEMP B-TREE
+			// FOR ORDER BY", and the test that exists to catch exactly that
+			// passed.
+			if strings.Contains(joined, "TEMP B-TREE") {
 				t.Errorf("the lease sorts the frontier instead of walking it:\n%s", joined)
 			}
 			if !strings.Contains(joined, "USING INDEX urls_") {
