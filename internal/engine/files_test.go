@@ -312,6 +312,53 @@ func TestADocumentThatReadsNoFilesIsUntouched(t *testing.T) {
 	}
 }
 
+// TestTextThatMerelyMentionsTheFunctionIsNotACall.
+//
+// Whether an attribute reads a file was decided by scanning its source bytes
+// for `lines(`, so anything containing those characters counted - a comment
+// inside a list saying `# replaced lines(2) of the old seed file` was enough.
+// The attribute was then re-rendered from its value, which deleted the comment
+// from somebody's document on its way to the cluster; in a plugin body the same
+// re-render changed the raw text the diff is keyed on, so a resubmission that
+// changed nothing was refused as a cache move.
+func TestTextThatMerelyMentionsTheFunctionIsNotACall(t *testing.T) {
+	for name, src := range map[string]string{
+		"in a comment inside a list": `job "news" {
+  domains = ["example.com"]
+  start = [
+    "https://example.com/",   # replaced lines(2) of the old seed file
+  ]
+}
+`,
+		"in a string": `job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/search?q=lines(2)"]
+}
+`,
+		"as part of a longer word": `job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/"]
+
+  downloader {
+    plugin "cache" {
+      backend = "head-lines(1)"
+    }
+  }
+}
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := engine.ExpandFiles([]byte(src), "job.hcl", t.TempDir())
+			if err != nil {
+				t.Fatalf("expand: %v", err)
+			}
+			if string(out) != src {
+				t.Errorf("a document that reads no files was rewritten:\nwant %q\ngot  %q", src, out)
+			}
+		})
+	}
+}
+
 // TestExpandingReportsAMissingFile.
 func TestExpandingReportsAMissingFile(t *testing.T) {
 	_, err := engine.ExpandFiles([]byte(`

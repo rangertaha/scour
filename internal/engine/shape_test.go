@@ -260,3 +260,101 @@ job "news" {
 		t.Errorf("the description came back as %q", got.Description)
 	}
 }
+
+// TestAnEntityReferenceKeepsAColumnOfItsOwn.
+//
+// A reference is a name that refers to something, and its children describe the
+// thing referred to: `author` is the person's name and `author.role` is their
+// role. Flattening treated any property with children as a container with no
+// value of its own - true of an object, false of a reference - so the item was
+// given a column for the role and none for the name, and the name is the value
+// the whole reference exists for. It was extracted, put in the record, and
+// dropped on the way to the file without a word.
+func TestAnEntityReferenceKeepsAColumnOfItsOwn(t *testing.T) {
+	doc, err := engine.Parse([]byte(`
+job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/"]
+
+  item "article" {
+    property "author" {
+      entity = "person"
+      css    = [".byline"]
+
+      property "role" {
+        type = str
+        css  = [".role"]
+      }
+    }
+
+    property "body" {
+      property "text" {
+        type = str
+      }
+    }
+  }
+}
+`), "job.hcl")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+
+	item := doc.Jobs[0].Items[0]
+	if !slices.Contains(item.Names(), "author") {
+		t.Errorf("the reference has no column of its own, so the name it extracted "+
+			"never reaches the file: %v", item.Names())
+	}
+	if !slices.Contains(item.Names(), "author.role") {
+		t.Errorf("the reference's children lost their columns: %v", item.Names())
+	}
+
+	// An object really is only a container, and must not gain one.
+	if slices.Contains(item.Names(), "body") {
+		t.Errorf("an object property was given a column of its own: %v", item.Names())
+	}
+}
+
+// TestAZeroTimeoutIsRefused.
+//
+// Validation refused only a negative one, and zero is the value somebody writes
+// on purpose. It does not mean "the default": it means no deadline at all, on
+// the fetch and on the HTTP client, so one page that dribbles its body holds a
+// worker for as long as the server keeps the socket open.
+//
+// The lease is sized from the timeout, so it collapses to its floor of five
+// minutes while the fetch it covers becomes unbounded: the URL comes due again,
+// a second worker takes it, and both hit the same host at once - with the first
+// worker's report then discarded by the attempt fence, so nothing counts it -
+// while any worker not fetching declares the crawl stalled.
+func TestAZeroTimeoutIsRefused(t *testing.T) {
+	doc, err := engine.Parse([]byte(`
+job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+
+  downloader {
+    timeout = "0"
+  }
+}
+`), "job.hcl")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	err = doc.Validate()
+	if err == nil {
+		t.Fatal("a timeout of zero was accepted, and it means no timeout at all")
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Errorf("the refusal does not name the field: %v", err)
+	}
+}

@@ -302,6 +302,13 @@ func (i *Item) Names() []string {
 			out = append(out, name)
 			return
 		}
+
+		// An entity reference has a value of its own as well as children. See
+		// [flattened], which had the same omission: the name the reference
+		// extracted got no column and never reached the file.
+		if p.PropertyType() == TypeEntity {
+			out = append(out, name)
+		}
 		for _, nested := range p.Properties {
 			add(name+".", nested)
 		}
@@ -363,6 +370,18 @@ func flattened(prefix string, p *Property) []string {
 	}
 
 	var out []string
+
+	// An entity reference has a value of its own as well as children, and an
+	// object does not. A reference is a name that refers to something and the
+	// children describe the thing referred to - `author` is the person's name
+	// and `author.role` is their role - so flattening it away left the item
+	// with a column for the role and none for the name, which is the value the
+	// whole reference exists for. It was extracted, put in the record, and
+	// dropped on the way to the file, silently.
+	if p.PropertyType() == TypeEntity {
+		out = append(out, prefix)
+	}
+
 	for _, nested := range p.Properties {
 		out = append(out, flattened(prefix+"."+nested.Name, nested)...)
 	}

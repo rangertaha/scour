@@ -195,10 +195,10 @@ type splice struct {
 // nested in it.
 func collect(body *hclsyntax.Body, src []byte, dir string, into *[]splice) error {
 	for name, attr := range body.Attributes {
-		span := attr.Expr.Range()
-		if !calls(src[span.Start.Byte:span.End.Byte], linesFunc) {
+		if !reads(attr.Expr) {
 			continue
 		}
+		span := attr.Expr.Range()
 
 		value, diags := attr.Expr.Value(evalContext(dir))
 		if diags.HasErrors() {
@@ -220,35 +220,27 @@ func collect(body *hclsyntax.Body, src []byte, dir string, into *[]splice) error
 	return nil
 }
 
-// calls reports whether an expression's source mentions a function by name.
+// reads reports whether an expression calls the function that reads a file.
 //
-// A scan of the expression's own bytes rather than a walk of its AST, because
-// the answer is no for almost every attribute of almost every document and the
-// cost of being wrong is nothing: a false positive is evaluated below and
-// evaluates to what it already was.
-func calls(src []byte, name string) bool {
-	rest := src
-	for {
-		at := bytes.Index(rest, []byte(name))
-		if at < 0 {
-			return false
-		}
-		after := rest[at+len(name):]
-		// A call, not a longer identifier that happens to start with it.
-		before := byte(' ')
-		if at > 0 {
-			before = rest[at-1]
-		}
-		if !isWord(before) && len(bytes.TrimLeft(after, " \t")) > 0 &&
-			bytes.TrimLeft(after, " \t")[0] == '(' {
-			return true
-		}
-		rest = after
-	}
-}
+// Asked of the parsed expression, not of its source text. A scan of the bytes
+// answered yes to anything that merely contained `lines(` - a comment inside a
+// list saying `# replaced lines(2) of the old seed file` was enough - and the
+// attribute was then re-rendered from its value, which deleted the comment from
+// somebody's document on its way to the cluster. In a plugin body the same
+// re-render changed the raw text the diff is keyed on, so a resubmission that
+// changed nothing was refused as a cache move.
+func reads(expr hclsyntax.Expression) bool {
+	var found bool
 
-func isWord(c byte) bool {
-	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+	// The walk's diagnostics are the visitor's own, and this visitor never
+	// produces any: it looks at a node and sets a flag.
+	_ = hclsyntax.VisitAll(expr, func(node hclsyntax.Node) hcl.Diagnostics {
+		if call, ok := node.(*hclsyntax.FunctionCallExpr); ok && call.Name == linesFunc {
+			found = true
+		}
+		return nil
+	})
+	return found
 }
 
 // indentOf is the whitespace the line at an offset begins with.

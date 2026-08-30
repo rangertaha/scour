@@ -297,6 +297,19 @@ func (d *Downloader) validate() []error {
 		problems = append(problems, err)
 	} else if v < 0 {
 		problems = append(problems, fmt.Errorf("downloader.timeout: %s is negative", v))
+	} else if v == 0 {
+		// Zero is refused too, and it is the one somebody writes on purpose. It
+		// does not mean "the default": it means no deadline at all, on the
+		// fetch and on the client, so one page that dribbles its body holds a
+		// worker forever. The lease is sized from the timeout, so it collapses
+		// to its floor while the fetch it covers becomes unbounded - the URL
+		// comes due again, a second worker takes it, and both hit the same host
+		// at once while the crawl reports itself stalled.
+		//
+		// Leaving the field out is how a document asks for the default.
+		problems = append(problems, fmt.Errorf(
+			"downloader.timeout: zero is not a timeout, it is no timeout. "+
+				"Leave it out for the default of %s", DefaultRequestTimeout))
 	}
 	if _, err := d.ExternalWait(); err != nil {
 		problems = append(problems, err)
