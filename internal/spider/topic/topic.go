@@ -44,6 +44,22 @@ const Name = "topic"
 
 // Property is where the score is put on every item the page produced, so a
 // record says how confident the crawl was rather than only that it kept it.
+//
+// # Declare it to export it
+//
+// Put here after extraction, so it is a value the shape did not declare. The
+// JSON exporter writes whatever a record holds and carries it; csv, sqlite,
+// parquet and the event exports take their columns from the shape the job
+// declared, because a header, a table and a schema all have to be the same for
+// two runs over one corpus. A job that wants the score in one of those
+// declares a property of this name:
+//
+//	item "article" {
+//	  property "topic_score" { type = str }
+//	}
+//
+// Extraction finds nothing for it and leaves it empty; this fills it
+// afterwards.
 const Property = "topic_score"
 
 func init() {

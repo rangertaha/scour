@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -43,6 +44,13 @@ func trained(t *testing.T, terms ...string) string {
 
 func job(t *testing.T, blocks string) *engine.Job {
 	t.Helper()
+	return jobWith(t, "", blocks)
+}
+
+// jobWith is [job] with extra properties on the article, for the test that
+// declares topic_score.
+func jobWith(t *testing.T, properties, blocks string) *engine.Job {
+	t.Helper()
 
 	src := `
 job "news" {
@@ -52,6 +60,7 @@ job "news" {
     property "title" {
       type = str
     }
+` + properties + `
   }
 ` + blocks + `
 }
@@ -85,8 +94,13 @@ const offTopic = `<html><head><meta property="og:title" content="A football matc
 
 func stage(t *testing.T, dir string, blocks string) *spider.Stage {
 	t.Helper()
+	return stageOf(t, job(t, blocks))
+}
 
-	s, err := spider.New(context.Background(), job(t, blocks), spider.Options{})
+func stageOf(t *testing.T, j *engine.Job) *spider.Stage {
+	t.Helper()
+
+	s, err := spider.New(context.Background(), j, spider.Options{})
 	if err != nil {
 		t.Fatalf("new spider: %v", err)
 	}
@@ -260,5 +274,52 @@ func TestANodeRunningNoTopicedJobsLoadsNothing(t *testing.T) {
 	}
 	if _, err := s.Handle(context.Background(), page(offTopic)); err != nil {
 		t.Errorf("a page was scored by a job that asked for no scoring: %v", err)
+	}
+}
+
+// TestADeclaredScorePropertyIsTheRouteToAnExport.
+//
+// The score is put on the item's values after extraction, and the structured
+// exporters take their columns from the shape the job declared rather than from
+// whichever record arrived first: a csv header, a sqlite table and a parquet
+// schema all have to be the same for two runs over one corpus. So a score on a
+// value nothing declared reaches the JSON export and no other, which is not
+// what "a record says how confident the crawl was" promises.
+//
+// Declaring a property of that name is the route, and this is what says it
+// keeps working: extraction finds nothing for it and leaves it empty, and the
+// middleware fills it afterwards.
+func TestADeclaredScorePropertyIsTheRouteToAnExport(t *testing.T) {
+	dir := trained(t, "climate", "emissions", "renewable")
+
+	j := jobWith(t, `
+    property "topic_score" {
+      type = str
+    }
+`, fmt.Sprintf(`
+  spider {
+    plugin "topic" {
+      subject = "climate@7"
+      dir     = %q
+    }
+  }
+`, dir))
+
+	if !slices.Contains(j.Items[0].Fields(), topic.Property) {
+		t.Fatalf("the declared score is not one of the item's fields: %v", j.Items[0].Fields())
+	}
+
+	out, err := stageOf(t, j).Handle(context.Background(), page(onTopic))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Items) == 0 {
+		t.Fatal("nothing was extracted")
+	}
+
+	got, ok := out.Items[0].Get(topic.Property)
+	if !ok || strings.TrimSpace(got.Text) == "" {
+		t.Fatalf("the declared property was left empty, so the export would carry a blank column: %v",
+			out.Items[0].Values)
 	}
 }
