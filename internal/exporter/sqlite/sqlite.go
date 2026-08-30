@@ -182,7 +182,45 @@ func (t *table) schema(ctx context.Context) error {
 	}
 	b.WriteString("\n)")
 
-	return t.file.schema(ctx, b.String())
+	if err := t.file.schema(ctx, b.String()); err != nil {
+		return err
+	}
+
+	// And any column the table has not got yet.
+	//
+	// CREATE TABLE IF NOT EXISTS is a no-op against a table that is already
+	// there, whatever shape it is in, and the insert names every column the job
+	// declares now. So a job that gained a property could no longer write to
+	// its own database at all: SQLite answered "table article has no column
+	// named author" on the first batch and the crawl exported nothing for that
+	// item - not a degraded export, a total one. Re-running a crawl into an
+	// existing database is the case this format is shaped around, and a job
+	// gaining a property is the ordinary way that database gets out of date.
+	//
+	// Added rather than recreated, because the rows already there are the point
+	// of keeping the file. An old row simply has the empty default in the new
+	// column, which is what "not extracted" already looks like everywhere else
+	// in this table.
+	have, err := t.file.existing(ctx, t.item)
+	if err != nil {
+		return err
+	}
+	if len(have) == 0 {
+		// Freshly created above, so it is exactly what was asked for.
+		return nil
+	}
+
+	for _, name := range t.columns {
+		if have[name] {
+			continue
+		}
+		add := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s TEXT NOT NULL DEFAULT ''",
+			ident(t.item), ident(name))
+		if err := t.file.schema(ctx, add); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // insert is the upsert, built once.

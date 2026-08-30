@@ -519,3 +519,105 @@ func TestTheLastBatchSurvivesTheWriteContextEnding(t *testing.T) {
 		t.Errorf("%d rows in the database, want 1: the crawl reported the record and wrote nothing", n)
 	}
 }
+
+// TestAJobThatGainedAPropertyCanStillWrite.
+//
+// CREATE TABLE IF NOT EXISTS is a no-op against a table that is already there,
+// whatever shape it is in, and the insert names every column the job declares
+// now. So a job that gained a property could no longer write to its own
+// database at all: SQLite answered "table article has no column named author"
+// on the first batch and the crawl exported nothing for that item - not a
+// degraded export, a total one.
+//
+// Re-running a crawl into an existing database is the case this format is
+// shaped around, and a job gaining a property is the ordinary way that database
+// falls behind. The rows already there are the point of keeping the file, so
+// the column is added rather than the table recreated: an old row has the empty
+// default, which is what "not extracted" already looks like everywhere else in
+// this table.
+func TestAJobThatGainedAPropertyCanStillWrite(t *testing.T) {
+	dir := t.TempDir()
+
+	shaped := func(extra string) *engine.Job {
+		t.Helper()
+
+		doc, err := engine.Parse([]byte(`
+job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+`+extra+`
+  }
+
+  exporter "sqlite" "article" {
+    dir = "`+dir+`"
+  }
+}
+`), "job.hcl")
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if err := doc.Validate(); err != nil {
+			t.Fatalf("validate: %v", err)
+		}
+		return doc.Jobs[0]
+	}
+
+	write := func(j *engine.Job, r *record.Record) error {
+		set, err := exporter.New(context.Background(), j, nil)
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		if err := set.Write(context.Background(), r); err != nil {
+			_ = set.Close()
+			return err
+		}
+		return set.Close()
+	}
+
+	if err := write(shaped(""), &record.Record{
+		Item: "article", URL: "https://example.com/a", Spec: "abc", Fetched: fetched,
+		Values: map[string]string{"title": "A"},
+	}); err != nil {
+		t.Fatalf("the first run: %v", err)
+	}
+
+	if err := write(shaped(`
+    property "author" {
+      type = str
+    }
+`), &record.Record{
+		Item: "article", URL: "https://example.com/b", Spec: "abc", Fetched: fetched,
+		Values: map[string]string{"title": "B", "author": "Bo"},
+	}); err != nil {
+		t.Fatalf("a job that gained a property can no longer export to its own database: %v", err)
+	}
+
+	// Both rows are there, and the older one simply has nothing in the new
+	// column.
+	db, err := sql.Open("sqlite", filepath.Join(dir, "records.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var older, newer string
+	if err := db.QueryRow(`SELECT author FROM article WHERE url = ?`,
+		"https://example.com/a").Scan(&older); err != nil {
+		t.Fatalf("reading the row written before the column existed: %v", err)
+	}
+	if err := db.QueryRow(`SELECT author FROM article WHERE url = ?`,
+		"https://example.com/b").Scan(&newer); err != nil {
+		t.Fatalf("reading the row written after: %v", err)
+	}
+	if older != "" {
+		t.Errorf("the older row has %q in a column it was written without", older)
+	}
+	if newer != "Bo" {
+		t.Errorf("the newer row has %q", newer)
+	}
+}

@@ -121,6 +121,38 @@ func (f *file) exec(ctx context.Context, statement string, args ...any) error {
 	return nil
 }
 
+// existing is the columns a table already has, empty if it has none.
+//
+// Read so that a table created by an older run of a job can be brought up to
+// the shape the job has now. See [table.schema].
+func (f *file) existing(ctx context.Context, table string) (map[string]bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if err := f.commitLocked(); err != nil {
+		return nil, err
+	}
+
+	rows, err := f.db.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return nil, fmt.Errorf("exporter/sqlite: %s: %w", f.path, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	have := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("exporter/sqlite: %s: %w", f.path, err)
+		}
+		have[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("exporter/sqlite: %s: %w", f.path, err)
+	}
+	return have, nil
+}
+
 // schema runs a CREATE outside the batch, because a table two exporters are
 // about to write must exist before either of them starts one.
 func (f *file) schema(ctx context.Context, statement string) error {
