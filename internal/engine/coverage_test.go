@@ -113,13 +113,19 @@ func TestNegativeNumbersAreRefused(t *testing.T) {
 	}
 }
 
+// TestPipelineExternalWait reads the timeout off a pipeline that says it is
+// external, which validation refuses (see
+// TestAnExternalPipelineIsRefusedWhenTheDocumentIsRead): the accessors still
+// have to answer for a document that arrived some other way, which is what the
+// refusal in run.New is there for.
 func TestPipelineExternalWait(t *testing.T) {
-	j := mustValidate(t, `
+	doc := parse(t, minimal(`
   pipeline {
     external         = true
     external_timeout = "3m"
   }
-`)
+`))
+	j := doc.Jobs[0]
 	if !j.IsExternal(engine.StagePipeline) {
 		t.Error("pipeline was not marked external")
 	}
@@ -1505,4 +1511,22 @@ func TestThePipelineBlockIsValidatedToo(t *testing.T) {
 		"pipeline.external_timeout")
 	refuses(t, "\n  pipeline {\n    external         = true\n    external_timeout = \"-10m\"\n  }\n",
 		"negative")
+}
+
+// TestAnExternalPipelineIsRefusedWhenTheDocumentIsRead.
+//
+// There is no seam to supply and no node that serves one: run.Options has a
+// Fetch and a Read and nothing for a pipeline, and node.Options.Serve answers
+// that nothing there serves a pipeline stage. So a document saying this cannot
+// run anywhere, and it was refused only when somebody started it - `scour job
+// valid` passed it, `scour job create` accepted it into the cluster, and the
+// operator found out at the first start.
+func TestAnExternalPipelineIsRefusedWhenTheDocumentIsRead(t *testing.T) {
+	refuses(t, `
+  pipeline {
+    external = true
+
+    step "clean" "article" {}
+  }
+`, "external")
 }

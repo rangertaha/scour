@@ -5,6 +5,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/rangertaha/scour/internal/engine"
 )
@@ -39,13 +40,13 @@ func (a *App) showJob(j *engine.Job) {
 	a.field("max_body", fmt.Sprint(j.Downloader.BodyBytes()))
 	a.field("max_redirects", fmt.Sprint(j.Downloader.Redirects()))
 	if j.Downloader.IsExternal() {
-		a.field("external", "yes, waiting "+j.Downloader.ExternalTimeout)
+		a.field("external", waiting(j.Downloader.ExternalWait()))
 	}
 	a.chain(j, engine.StageDownloader)
 
 	a.Printf("\nspider\n")
 	if j.Spider.IsExternal() {
-		a.field("external", "yes, waiting "+j.Spider.ExternalTimeout)
+		a.field("external", waiting(j.Spider.ExternalWait()))
 	}
 	a.chain(j, engine.StageSpider)
 
@@ -84,10 +85,33 @@ func (a *App) chain(j *engine.Job, stage engine.Stage) {
 	a.Printf("  %-14s %s\n", "chain", strings.Join(names, " -> "))
 }
 
+// waiting is how long an external stage has to answer, resolved.
+//
+// The accessor and not the raw field. A stage that said `external = true` and
+// left the timeout to its default printed "yes, waiting " with nothing after
+// it, which reads as a stage with no timeout at all - the opposite of what the
+// document means.
+func waiting(d time.Duration, err error) string {
+	if err != nil {
+		return "yes, and the timeout cannot be read: " + err.Error()
+	}
+	return "yes, waiting " + d.String()
+}
+
 // pipeline prints the graph as the waves it runs in, because the reason to
 // have a graph is that independent work happens at the same time, and a flat
 // list hides exactly that.
 func (a *App) pipeline(j *engine.Job) {
+	// Said before the waves, because it is the thing about this pipeline that
+	// changes what happens rather than a detail of how it is ordered. It is
+	// refused by validation, so a document showing it here arrived some other
+	// way, and `scour job show` is how somebody finds out why it will not run.
+	if j.Pipeline.IsExternal() {
+		a.Printf("\npipeline\n")
+		a.field("external", waiting(j.Pipeline.ExternalWait())+
+			", and nothing serves an external pipeline")
+	}
+
 	waves, err := j.Waves()
 	if err != nil {
 		a.Printf("\npipeline\n  %s\n", err)

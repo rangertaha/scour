@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -360,6 +361,20 @@ func (p *Pipeline) validate() []error {
 	}
 
 	var problems []error
+
+	// Refused when the document is read, not when somebody starts it. There is
+	// no seam to supply and no node that serves one - [run.Options] has a Fetch
+	// and a Read and nothing for a pipeline, and node's Serve answers that
+	// nothing there serves a pipeline stage - so this is a document that cannot
+	// run anywhere rather than one that needs the right host. Checked only at
+	// the start, `scour job valid` passed it, `scour job create` took it into
+	// the cluster, and the operator found out at the first start.
+	if p.External {
+		problems = append(problems, errors.New(
+			"pipeline: external = true, and nothing serves an external pipeline. "+
+				"A downloader and a spider can be somebody else's; a pipeline cannot"))
+	}
+
 	if v, err := p.ExternalWait(); err != nil {
 		problems = append(problems, err)
 	} else if v < 0 {

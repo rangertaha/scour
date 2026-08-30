@@ -72,20 +72,37 @@ func site(t *testing.T) (*httptest.Server, *atomic.Int32) {
 	return server, &hits
 }
 
-func job(t *testing.T, src string) *engine.Job {
+// parsed reads one job, validating it unless the caller is deliberately
+// building a document validation refuses - which is what the refusals in
+// run.New exist for: a job that reached this process some other way than
+// through `scour job create`.
+func parsed(t *testing.T, src string, check bool) *engine.Job {
 	t.Helper()
 
 	doc, err := engine.Parse([]byte(src), "job.hcl")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if err := doc.Validate(); err != nil {
-		t.Fatalf("validate: %v", err)
+	if check {
+		if err := doc.Validate(); err != nil {
+			t.Fatalf("validate: %v", err)
+		}
 	}
 	return doc.Jobs[0]
 }
 
 func document(t *testing.T, server *httptest.Server, extra string) *engine.Job {
+	t.Helper()
+	return documentWith(t, server, extra, true)
+}
+
+// looseDocument is [document] for a job validation refuses. See [parsed].
+func looseDocument(t *testing.T, server *httptest.Server, extra string) *engine.Job {
+	t.Helper()
+	return documentWith(t, server, extra, false)
+}
+
+func documentWith(t *testing.T, server *httptest.Server, extra string, check bool) *engine.Job {
 	t.Helper()
 
 	// A rate a test can wait for, folded into whatever scheduler block the
@@ -99,7 +116,7 @@ func document(t *testing.T, server *httptest.Server, extra string) *engine.Job {
 		extra = "\n  scheduler {\n    rate = \"1ms\"\n  }\n" + extra
 	}
 
-	return job(t, fmt.Sprintf(`
+	return parsed(t, fmt.Sprintf(`
 job "news" {
   domains = ["%s"]
   start   = ["%s/"]
@@ -117,7 +134,7 @@ job "news" {
   }
 %s
 }
-`, hostOf(server.URL), server.URL, extra))
+`, hostOf(server.URL), server.URL, extra), check)
 }
 
 func hostOf(url string) string {
@@ -845,7 +862,7 @@ func TestAJobWhoseStageIsElsewhereIsRefusedRatherThanRunLocally(t *testing.T) {
 func TestAnExternalPipelineIsRefusedBecauseNothingServesOne(t *testing.T) {
 	server, hits := site(t)
 
-	_, err := run.New(context.Background(), document(t, server, `
+	_, err := run.New(context.Background(), looseDocument(t, server, `
   pipeline {
     external = true
   }
@@ -1197,7 +1214,7 @@ func TestOneRudeSiteCannotSwitchOffTheWatchdog(t *testing.T) {
 func TestAnExternalPipelineIsRefusedEvenWhenTheStagesAreSupplied(t *testing.T) {
 	server, _ := site(t)
 
-	_, err := run.New(context.Background(), document(t, server, `
+	_, err := run.New(context.Background(), looseDocument(t, server, `
   pipeline {
     external = true
   }
