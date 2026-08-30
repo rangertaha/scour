@@ -215,3 +215,82 @@ func TestAPortDoesNotDefeatAPattern(t *testing.T) {
 		}
 	}
 }
+
+// TestAPortDoesNotDefeatAPatternWithAPathInIt.
+//
+// The other half of [TestAPortDoesNotDefeatAPattern], which only ever wrote
+// host-shaped patterns. A pattern with a path in it is compared against the
+// whole normalised URL, and that carries the port: the strip reached the
+// host-only comparisons and neither of the two that a pattern like
+// `https://example.com/admin/*` actually uses.
+//
+// Dangerous in the same direction as before. A crawl of a site served on a
+// non-default port fetched exactly the subtree the job had said never to
+// touch, while the same URL on :443 was correctly refused.
+func TestAPortDoesNotDefeatAPatternWithAPathInIt(t *testing.T) {
+	for _, pattern := range []string{
+		"https://example.com/admin/*", // globbed
+		"https://example.com/admin",   // read as a prefix
+	} {
+		excluded, err := scope.New([]string{"example.com"}, nil, []string{pattern})
+		if err != nil {
+			t.Fatalf("scope: %v", err)
+		}
+		for _, u := range []string{
+			"https://example.com/admin/secret",
+			"https://example.com:8443/admin/secret",
+		} {
+			if excluded.Allows(u) {
+				t.Errorf("%q is allowed by a scope that excludes %q, "+
+					"so the crawl fetches what it was told never to", u, pattern)
+			}
+		}
+	}
+
+	included, err := scope.New([]string{"example.com"}, []string{"https://example.com/news/*"}, nil)
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	for _, u := range []string{
+		"https://example.com/news/a",
+		"https://example.com:8080/news/a",
+	} {
+		if !included.Allows(u) {
+			t.Errorf("%q is outside a scope that includes https://example.com/news/*, "+
+				"so a crawl of a site on that port includes nothing", u)
+		}
+	}
+}
+
+// TestAPatternsHostIsFoldedLikeEveryOtherHost.
+//
+// Normalise lowercases the scheme and the host of every URL, and New folds
+// every entry in `domains`. Patterns were left as written, so an exclusion
+// with a capital in its host matched no URL the crawler can produce: the job
+// named the host it must never fetch, nothing refused it, and nothing said so.
+//
+// The path is not folded, because a URL path is case-sensitive and
+// `excluded = ["*/Print/*"]` means that path and not another.
+func TestAPatternsHostIsFoldedLikeEveryOtherHost(t *testing.T) {
+	excluded, err := scope.New([]string{"example.com"}, nil, []string{
+		"*.Internal.example.com",
+		"https://Example.com/Admin/*",
+	})
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	for _, u := range []string{
+		"https://db.internal.example.com/x",
+		"https://example.com/Admin/secret",
+	} {
+		if excluded.Allows(u) {
+			t.Errorf("%q is allowed by a scope that names its host, only in different case", u)
+		}
+	}
+
+	// And the path keeps its case, or the exclusion would be wider than what
+	// was written.
+	if !excluded.Allows("https://example.com/admin/secret") {
+		t.Error("an exclusion written /Admin/ also refused /admin/, which is a different path")
+	}
+}

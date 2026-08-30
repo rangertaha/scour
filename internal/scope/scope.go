@@ -91,7 +91,7 @@ func New(domains, included, excluded []string) (*Scope, error) {
 					"scope: %s pattern %q: only * and ? are patterns here, and [ ] are not",
 					list.name, pattern)
 			}
-			*list.to = append(*list.to, pattern)
+			*list.to = append(*list.to, foldHost(pattern))
 		}
 	}
 	return s, nil
@@ -146,6 +146,36 @@ func (s *Scope) Domains() []string {
 	return append([]string(nil), s.domains...)
 }
 
+// foldHost lowercases the host of a pattern and leaves the rest as written.
+//
+// [urls.Normalise] lowercases the scheme and the host of every URL, and New
+// folds every entry in `domains`, so a pattern left as written could name a
+// host no URL reaching here will ever spell the same way:
+// `excluded = ["*.Internal.example.com"]` matched nothing at all, and the job
+// had said in as many words which host it must never fetch.
+//
+// The path is deliberately not folded. A URL path is case-sensitive, so
+// `excluded = ["*/Print/*"]` means that path and not `/print/`, and folding it
+// would silently widen every exclusion somebody wrote.
+func foldHost(pattern string) string {
+	scheme := strings.Index(pattern, "://")
+	if scheme < 0 {
+		if strings.ContainsAny(pattern, "/?#") {
+			// A path with no scheme. Nothing here is the host.
+			return pattern
+		}
+		// Host-shaped, which is what `*.example.com` is.
+		return strings.ToLower(pattern)
+	}
+
+	host := scheme + len("://")
+	end := strings.IndexAny(pattern[host:], "/?#")
+	if end < 0 {
+		return strings.ToLower(pattern)
+	}
+	return strings.ToLower(pattern[:host+end]) + pattern[host+end:]
+}
+
 // matches applies a pattern to a URL.
 //
 // A pattern is matched against the whole URL and against the host alone, so
@@ -170,16 +200,41 @@ func matches(pattern, normalised string) bool {
 	// `https://db.internal.example.com:8443/x`, so a crawl fetched the thing it
 	// had been told never to touch - while the same URL on the default port was
 	// correctly refused.
-	if glob(pattern, normalised) || glob(pattern, host) || glob(pattern, urls.WithoutPort(host)) {
+	// The URL without its port as well as with it, and not only the host,
+	// because a pattern with a path in it is compared against the whole URL
+	// and never reaches the two host comparisons below. That is where the
+	// strip was missing: `excluded = ["https://example.com/admin/*"]` did not
+	// exclude `https://example.com:8443/admin/secret`, while the same URL on
+	// :443 was correctly refused, and a crawl of a site served on :8080
+	// matched no `included` pattern and so included nothing.
+	bare := withoutPort(normalised)
+
+	if glob(pattern, normalised) || glob(pattern, bare) ||
+		glob(pattern, host) || glob(pattern, urls.WithoutPort(host)) {
 		return true
 	}
 
 	// A pattern with no wildcard reads as a prefix, because
 	// `excluded = ["https://example.com/print"]` plainly means that subtree.
 	if !strings.ContainsAny(pattern, "*?") {
-		return strings.HasPrefix(normalised, pattern)
+		return strings.HasPrefix(normalised, pattern) || strings.HasPrefix(bare, pattern)
 	}
 	return false
+}
+
+// withoutPort is a normalised URL with the port taken off its host, which is
+// the form a pattern is written in. Everything after the host is untouched: a
+// port only ever appears in the authority, and a `:` in a path is ordinary.
+func withoutPort(normalised string) string {
+	host := urls.Host(normalised)
+	if host == "" {
+		return normalised
+	}
+	bare := urls.WithoutPort(host)
+	if bare == host {
+		return normalised
+	}
+	return strings.Replace(normalised, host, bare, 1)
 }
 
 // glob matches `*` and `?` against a whole string.
