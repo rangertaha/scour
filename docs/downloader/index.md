@@ -84,6 +84,29 @@ Disallow: /public/private/
 > meant otherwise has to say so with a longer pattern. This is the answer
 > RFC 9309 requires, and it is not the one most people expect.
 
+### Which agent the rules are read for
+
+The one the request is about to be sent under, not the one the job configured.
+
+A request may carry its own `User-Agent` - a middleware setting one is
+supported, and rotating them is why - and the guard used to check the job's
+agent while the wire carried another. A site that disallows `acmebot` and
+allows everybody else was read as allowing, and the disallowed path was then
+asked for with `User-Agent: acmebot`. Refused by name, fetched anyway, and the
+site's log shows one agent asking for the rules and another ignoring them. The
+parsed file is agent-independent and cached per host, so asking about the right
+agent costs nothing and re-fetches nothing.
+
+### Escapes compare without regard to case
+
+RFC 3986 says a percent-encoding compares case-insensitively, and both sides of
+this comparison are written by somebody else: the publisher's escapes in the
+rule, and the site's own in the links it serves. Compared byte for byte,
+`Disallow: /müll/` did not match a link written `/m%c3%bcll/page`, so the
+crawler fetched a path the site had refused; a lowercase rule and a
+normally-encoded link failed the same way. Only the two hex digits after a `%`
+are folded, because a robots.txt path is case-sensitive everywhere else.
+
 ### The one thing in the file this stage cannot act on
 
 `Crawl-delay` is read here and honoured somewhere else. Politeness is per host

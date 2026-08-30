@@ -24,6 +24,15 @@ That is what lets the same interface be a directory on a laptop and a bucket
 shared by a fleet, with the local filesystem, S3 and Google Cloud Storage
 behind one contract that all three are held to by the same test suite.
 
+**What the key is derived from is the middleware's business too, and it is not
+always the URL.** An ordinary GET keys on the URL alone, which is every fetch a
+crawl makes and every entry already on disk: the cache is the corpus, and a key
+that changed would make every corpus anybody has unreadable overnight. Anything
+else - a form post, a HEAD - keys on its method and body as well. They were left
+out, and the key is what decides whether a request is answered from disk, so two
+posts of one form with different terms shared an entry: the second was answered
+with the first's results, marked as a hit, and never sent to the site.
+
 Using two of those keys per page is the middleware's business and none of the
 store's. The sidecar exists because a body on its own is not re-readable. A
 page in windows-1251 that declared its encoding in the `Content-Type` header

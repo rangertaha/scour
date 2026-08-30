@@ -241,6 +241,16 @@ could be turned off is a boundary that can be crossed by deleting a line. The
 scheduler checks them itself, on the way into the frontier and outside the
 chain, the same way robots.txt sits outside the downloader's.
 
+**A port is not part of a site's name.** `domains` has stripped one before
+comparing since the day that was noticed, and `included` and `excluded` were
+left globbing against a host that still carried it. Both directions were wrong
+and one of them dangerously: a site served on `:8080` matched no `included`
+pattern, so a crawl of it included nothing, and an `excluded` pattern did not
+exclude the same host on a non-default port, so the crawl fetched the thing it
+had been told never to touch while the identical URL on `:443` was correctly
+refused. A pattern written by a person never carries a port, which is exactly
+why the comparison must not either.
+
 **One rule, one implementation, and two stages that need it.** The scheduler
 covers every URL a crawl decides to fetch, because deciding is what it is for.
 It cannot cover a redirect: a hop is chosen by whoever controls a page the crawl
