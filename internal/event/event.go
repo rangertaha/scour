@@ -244,10 +244,23 @@ func (s *log) Put(ctx context.Context, e Event) (string, error) {
 	// Two jobs can derive one id, because the identity is the observation:
 	// same measurement, same tags, same instant. Replacing meant the second
 	// silently erased the first's numbers and took the row, so Retract of the
-	// first returned zero and could not take back what it had contributed,
-	// which is the one promise this store makes. Merging loses nothing: a job
-	// re-reading a corrected value still overwrites its own key, because the
-	// key is the same.
+	// first returned zero and could not take back what it had contributed.
+	// Merging loses no numbers, and a job re-reading a corrected value still
+	// overwrites its own key, because the key is the same.
+	//
+	// # What merging does not fix
+	//
+	// The row keeps one job, so the promise [log.Retract] makes holds only for
+	// whoever wrote the point first. A second job contributing fields to an
+	// existing point cannot take them back - its Retract does not match the row
+	// - and the first job's Retract deletes the whole row, including fields it
+	// never wrote. List by job does not find them either.
+	//
+	// Keeping the promise for both means the job belonging to the row's
+	// identity rather than to its provenance, which makes two jobs measuring
+	// one instant two rows. That is a change to what a reader sees for a point
+	// and not one to make quietly, so it is written down here rather than
+	// half-done. Nothing in scour writes two jobs into one series today.
 	if _, err := s.db.ExecContext(ctx, s.sql.Rebind(`
 INSERT INTO events (id, name, tags, fields, at, job, url, spec)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -350,11 +363,16 @@ func (s *log) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// Retract removes everything one job contributed, and says how much.
+// Retract removes every point one job recorded, and says how many.
 //
-// The same promise the entity graph makes: one job's contribution is one
-// delete. A job that turns out to have been reading a page wrongly is removed
-// without rebuilding the store or reasoning about which points it touched.
+// Close to the promise the entity graph makes: a job that turns out to have
+// been reading a page wrongly is removed without rebuilding the store or
+// reasoning about which points it touched.
+//
+// The exception is a point two jobs contributed to, where the row belongs to
+// whoever wrote it first: see [log.Put]. This deletes such a row whole, fields
+// the other job contributed included, and the other job's own Retract does not
+// match it at all.
 func (s *log) Retract(ctx context.Context, job string) (int64, error) {
 	if job == "" {
 		return 0, errors.New("event: retract needs a job")
