@@ -331,6 +331,19 @@ func (m *Manager) Create(ctx context.Context, document []byte) (bus.JobStatus, e
 		return bus.JobStatus{}, err
 	}
 
+	// Claimed like every other operation that writes a job. The document and
+	// the state row are two writes, and a delete answered between them left a
+	// state row with no document behind - which is the row nothing can ever
+	// clear, because every path that clears one starts by reading the
+	// document. Create was the one mutating operation left outside the claim
+	// when the claim was introduced, so the class it was meant to close was
+	// still open on exactly this pair of writes.
+	release, err := m.claim(job.Name, "creating")
+	if err != nil {
+		return bus.JobStatus{}, err
+	}
+	defer release()
+
 	// The store refuses a name already taken, rather than this reading first
 	// and writing after. That gap is where a second client got the same answer:
 	// eight simultaneous creates of one name all found nothing, all wrote, and
@@ -384,8 +397,15 @@ func (m *Manager) Update(ctx context.Context, document []byte) (bus.JobStatus, e
 	}
 	defer release()
 
+	// The running map alone, not "is anything working on this job". Nothing
+	// else can be working on it: this holds the claim, and that is what the
+	// claim means. Asking the broader question here meant asking about a
+	// reservation this call had just taken, so the answer was always yes -
+	// every stopped job was reviewed as if it were running, the default
+	// `costly = "refuse"` refused every scope change to one, and the refusal
+	// said the job was running when it was not.
 	m.mu.Lock()
-	live := m.busy(submitted.Name)
+	live := m.running[submitted.Name] != nil
 	m.mu.Unlock()
 
 	if live {
@@ -474,7 +494,19 @@ func (m *Manager) Start(ctx context.Context, name string, fresh bool) (bus.JobSt
 }
 
 // Resume starts a paused job again without re-seeding it.
+//
+// Claimed before the phase is read, not after. Reading first and deciding on
+// what it said is the shape [Manager.claim] exists to stop: the answer can be
+// stale by the time it is acted on, and a resume that reported "is running,
+// not paused" about a job another request was in the middle of deleting told
+// the operator something that was true a moment ago and useless now.
 func (m *Manager) Resume(ctx context.Context, name string) (bus.JobStatus, error) {
+	release, err := m.claim(name, "resuming")
+	if err != nil {
+		return bus.JobStatus{}, err
+	}
+	defer release()
+
 	state, err := m.states.Get(ctx, name)
 	if err != nil {
 		return bus.JobStatus{}, err
@@ -483,7 +515,7 @@ func (m *Manager) Resume(ctx context.Context, name string) (bus.JobStatus, error
 		return bus.JobStatus{}, fmt.Errorf(
 			"jobs: %q is %s, not paused. Use start", name, state.Phase)
 	}
-	return m.begin(ctx, name, false, false)
+	return m.launch(ctx, name, false, false)
 }
 
 // Stop ends a crawl, keeping the frontier.
@@ -494,13 +526,6 @@ func (m *Manager) Stop(ctx context.Context, name string) (bus.JobStatus, error) 
 // Pause ends the loop and records that resuming should carry on.
 func (m *Manager) Pause(ctx context.Context, name string) (bus.JobStatus, error) {
 	return m.halt(ctx, name, bus.PhasePaused)
-}
-
-// busy reports whether anything is already working on this job.
-//
-// Running, or being worked on by another request. Caller holds m.mu.
-func (m *Manager) busy(name string) bool {
-	return m.running[name] != nil || m.claimed[name] != ""
 }
 
 // claim reserves a job name for one operation and returns what gives it back.
@@ -558,20 +583,30 @@ func (m *Manager) claim(name, doing string) (func(), error) {
 }
 
 // begin builds a crawl and drives it.
+// begin claims a job and builds a crawl for it.
+//
+// Resume does the same thing without this wrapper, because it holds the claim
+// already: the phase it decides on has to be read under the claim, not before
+// it. See [Manager.claim].
 func (m *Manager) begin(ctx context.Context, name string, fresh, seed bool) (bus.JobStatus, error) {
-	job, revision, err := m.jobs.Job(ctx, name)
-	if err != nil {
-		return bus.JobStatus{}, err
-	}
-
-	// Claimed before anything is built, so a caller that has lost stops here
-	// rather than opening a frontier it is about to discard, and so that
-	// nothing else acts on the job while it is being built.
+	// Claimed before anything is read or built, so a caller that has lost
+	// stops here rather than opening a frontier it is about to discard, and so
+	// that nothing else acts on the job while it is being built.
 	release, err := m.claim(name, "starting")
 	if err != nil {
 		return bus.JobStatus{}, err
 	}
 	defer release()
+
+	return m.launch(ctx, name, fresh, seed)
+}
+
+// launch builds a crawl and drives it. The caller holds the job's claim.
+func (m *Manager) launch(ctx context.Context, name string, fresh, seed bool) (bus.JobStatus, error) {
+	job, revision, err := m.jobs.Job(ctx, name)
+	if err != nil {
+		return bus.JobStatus{}, err
+	}
 
 	m.mu.Lock()
 	running := m.running[name] != nil

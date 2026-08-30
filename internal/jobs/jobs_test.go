@@ -275,7 +275,11 @@ func TestOnlyOneCreateWinsWhenTheyRace(t *testing.T) {
 			switch {
 			case err == nil:
 				won++
-			case strings.Contains(err.Error(), "already exists"):
+			// Either message: a loser that reached the store is told the name
+			// is taken, and one refused at the claim is told another request
+			// has it. Both are true and both leave exactly one job.
+			case strings.Contains(err.Error(), "already exists"),
+				strings.Contains(err.Error(), "is busy"):
 				refused++
 			default:
 				t.Errorf("create failed for another reason: %v", err)
@@ -288,7 +292,7 @@ func TestOnlyOneCreateWinsWhenTheyRace(t *testing.T) {
 		t.Errorf("%d of 8 racing creates won, want exactly 1: the rest overwrote a job that existed", won)
 	}
 	if refused != 7 {
-		t.Errorf("%d were refused as already existing, want 7", refused)
+		t.Errorf("%d were refused, want 7: the rest overwrote a job that existed", refused)
 	}
 }
 
@@ -513,7 +517,6 @@ func TestOnlyOneStartWinsWhenTheyRace(t *testing.T) {
 
 	release := make(chan struct{})
 	var once sync.Once
-	t.Cleanup(func() { once.Do(func() { close(release) }) })
 
 	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/robots.txt" {
@@ -525,6 +528,12 @@ func TestOnlyOneStartWinsWhenTheyRace(t *testing.T) {
 		fmt.Fprint(w, `<html><head><title>Held</title></head><body></body></html>`)
 	}))
 	t.Cleanup(held.Close)
+
+	// Registered after the server, so it runs before it: cleanups are LIFO,
+	// and closing a server whose handler is still blocked waits forever. A
+	// t.Fatal anywhere below would otherwise hang the package rather than
+	// report the failure.
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
 
 	if _, err := manager.Create(ctx, document(held, "news")); err != nil {
 		t.Fatalf("create: %v", err)
@@ -980,7 +989,6 @@ func TestADeleteOwnsTheJobWhileItDrains(t *testing.T) {
 
 	release := make(chan struct{})
 	var once sync.Once
-	t.Cleanup(func() { once.Do(func() { close(release) }) })
 
 	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/robots.txt" {
@@ -993,6 +1001,12 @@ func TestADeleteOwnsTheJobWhileItDrains(t *testing.T) {
 	}))
 	t.Cleanup(held.Close)
 
+	// Registered after the server, so it runs before it: cleanups are LIFO,
+	// and closing a server whose handler is still blocked waits forever. A
+	// t.Fatal anywhere below would otherwise hang the package rather than
+	// report the failure.
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+
 	if _, err := manager.Create(ctx, document(held, "news")); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1001,8 +1015,20 @@ func TestADeleteOwnsTheJobWhileItDrains(t *testing.T) {
 	}
 	waitFor(t, manager, "news", bus.PhaseRunning)
 
+	// Retried, because claim refuses rather than waits and the probe below
+	// takes the claim itself for as long as it takes to be told no. A caller
+	// that means to win has to ask again; that is the trade the claim makes.
 	deleted := make(chan error, 1)
-	go func() { deleted <- manager.Delete(ctx, "news") }()
+	go func() {
+		for {
+			err := manager.Delete(ctx, "news")
+			if err == nil || !strings.Contains(err.Error(), "is busy") {
+				deleted <- err
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
 
 	var owned bool
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
@@ -1060,5 +1086,144 @@ func TestAJobThatNeverRanLeavesNoFrontier(t *testing.T) {
 	}
 	if _, err := os.Stat(frontierDir); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("the deleted job left a frontier behind: %v", err)
+	}
+}
+
+// TestAStoppedJobIsUpdatedWithoutReview.
+//
+// The mutation block is the operator's statement about which changes may be
+// applied to a crawl in progress. A job that is not running has no work in
+// progress for a costly change to cost anything, so it is changed without
+// review - and it was, until Update began claiming the job for its whole span
+// and then asked whether anything was working on it. The claim it was holding
+// itself made the answer yes, so every stopped job was reviewed as if running,
+// the default `costly = "refuse"` refused every scope change to one, and the
+// message said the job was running when it was not.
+func TestAStoppedJobIsUpdatedWithoutReview(t *testing.T) {
+	manager, _ := cluster(t)
+	ctx := context.Background()
+
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(site.Close)
+
+	if _, err := manager.Create(ctx, document(site, "news")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// A scope change, which is what `costly` is about.
+	widened := strings.Replace(string(document(site, "news")),
+		`start   = ["`+site.URL+`/"]`,
+		`start   = ["`+site.URL+`/", "`+site.URL+`/other"]`, 1)
+	if widened == string(document(site, "news")) {
+		t.Fatal("the fixture changed shape and this test no longer widens the scope")
+	}
+
+	if _, err := manager.Update(ctx, []byte(widened)); err != nil {
+		t.Fatalf("a stopped job was refused a change nothing was running to be costly to: %v", err)
+	}
+}
+
+// TestEveryMutatingOperationWaitsItsTurn walks them all, so an operation added
+// later without a claim fails the build rather than shipping.
+//
+// The claim exists because every mutating operation here is "read this job's
+// state, decide, act on it" over shared state, and four separate windows of
+// that shape were fixed one at a time before the reservation was made the
+// operation rather than a flag. Create was still outside it after that change:
+// it writes the document and the state row as two writes, and a delete
+// answered between them left a state row with no document, which is the row
+// nothing can ever clear.
+//
+// A delete draining a held crawl is what holds the claim here, because it is a
+// real operation that takes a real amount of time.
+func TestEveryMutatingOperationWaitsItsTurn(t *testing.T) {
+	manager, _ := cluster(t)
+	ctx := context.Background()
+
+	release := make(chan struct{})
+	var once sync.Once
+
+	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		<-release
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<html><head><title>Held</title></head><body></body></html>`)
+	}))
+	t.Cleanup(held.Close)
+
+	// Registered after the server, so it runs before it: cleanups are LIFO,
+	// and closing a server whose handler is still blocked waits forever. A
+	// t.Fatal anywhere below would otherwise hang the package rather than
+	// report the failure.
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+
+	doc := document(held, "news")
+	if _, err := manager.Create(ctx, doc); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := manager.Start(ctx, "news", true); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	waitFor(t, manager, "news", bus.PhaseRunning)
+
+	// Retried, because claim refuses rather than waits and the probes below
+	// take the claim themselves for as long as it takes to be told no. A
+	// caller that means to win has to ask again; that is the trade the claim
+	// makes, and this is what it looks like.
+	deleted := make(chan error, 1)
+	go func() {
+		for {
+			err := manager.Delete(ctx, "news")
+			if err == nil || !strings.Contains(err.Error(), "is busy") {
+				deleted <- err
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+
+	operations := map[string]func() error{
+		"create": func() error { _, err := manager.Create(ctx, doc); return err },
+		"update": func() error { _, err := manager.Update(ctx, doc); return err },
+		"delete": func() error { return manager.Delete(ctx, "news") },
+		"start":  func() error { _, err := manager.Start(ctx, "news", false); return err },
+		"resume": func() error { _, err := manager.Resume(ctx, "news"); return err },
+		"stop":   func() error { _, err := manager.Stop(ctx, "news"); return err },
+		"pause":  func() error { _, err := manager.Pause(ctx, "news"); return err },
+	}
+
+	// Wait until the delete has the claim, using one of the operations to ask.
+	// Before that it may legitimately still be reading the document.
+	held2 := false
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		if err := operations["start"](); err != nil && strings.Contains(err.Error(), "is busy") {
+			held2 = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !held2 {
+		t.Fatal("the delete never took the claim, so this test proves nothing")
+	}
+
+	for _, name := range []string{"create", "update", "delete", "start", "resume", "stop", "pause"} {
+		err := operations[name]()
+		if err == nil {
+			t.Errorf("%s went ahead on a job another request was in the middle of deleting", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "is busy") {
+			t.Errorf("%s was refused for another reason, so it is not waiting its turn: %v", name, err)
+		}
+	}
+
+	once.Do(func() { close(release) })
+	if err := <-deleted; err != nil {
+		t.Fatalf("delete: %v", err)
 	}
 }
