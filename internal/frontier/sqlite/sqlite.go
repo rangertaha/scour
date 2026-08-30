@@ -328,7 +328,18 @@ func ordering(policy string) (string, error) {
 	case "breadth":
 		return "u.depth ASC, u.discovered ASC, u.rowid ASC", nil
 	case "depth":
-		return "u.depth DESC, u.discovered DESC, u.rowid DESC", nil
+		// By hash last, not by rowid, because that is the tie-break the memory
+		// frontier applies and the two have to hand out the same URL. A page's
+		// whole link set ties on depth and on the instant it was discovered, so
+		// the last column is what decides, and it decided differently in each
+		// implementation: SQLite took the row inserted last and memory took the
+		// largest hash, which are uncorrelated. Half the time they disagreed
+		// about which URL a depth-first crawl fetches next.
+		//
+		// The conformance suite did not catch it because its fixture adds
+		// hashes in ascending order, the one arrangement where "last inserted"
+		// and "largest hash" are the same row.
+		return "u.depth DESC, u.discovered DESC, u.hash DESC", nil
 	case "random":
 		return "RANDOM()", nil
 	default:

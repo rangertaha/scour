@@ -23,6 +23,7 @@ import (
 	"github.com/rangertaha/scour/internal/frontier/sqlite"
 	"github.com/rangertaha/scour/internal/record"
 	"github.com/rangertaha/scour/internal/run"
+	"github.com/rangertaha/scour/internal/spider"
 
 	_ "github.com/rangertaha/scour/internal/cache/local"
 	_ "github.com/rangertaha/scour/internal/downloader/httpcache"
@@ -1179,5 +1180,85 @@ func TestOneRudeSiteCannotSwitchOffTheWatchdog(t *testing.T) {
 	// could be lengthened.
 	if got := run.Patience(stall, -time.Hour); got < stall {
 		t.Errorf("a negative delay narrowed the bound to %s", got)
+	}
+}
+
+// TestAnExternalPipelineIsRefusedEvenWhenTheStagesAreSupplied.
+//
+// The refusal was gated on the caller having supplied neither stage handler, so
+// any caller that supplied them turned the whole check off - including the
+// pipeline case, which is documented as refused outright because there is no
+// seam to supply and no node that serves one.
+//
+// The job service always supplies both. So `scour job start` on a document with
+// `pipeline { external = true }` built the run without complaint and wrote the
+// operator's records on the machine they were moving them off, while
+// `scour job show` told them the pipeline was elsewhere.
+func TestAnExternalPipelineIsRefusedEvenWhenTheStagesAreSupplied(t *testing.T) {
+	server, _ := site(t)
+
+	_, err := run.New(context.Background(), document(t, server, `
+  pipeline {
+    external = true
+  }
+`), run.Options{
+		Dir:   t.TempDir(),
+		Open:  func(cfg frontier.Config) (frontier.Frontier, error) { return sqlite.Open(cfg) },
+		Fetch: downloader.HandlerFunc(func(context.Context, *downloader.Request) (*downloader.Response, error) { return nil, nil }),
+		Read:  spider.HandlerFunc(func(context.Context, *downloader.Response) (*spider.Output, error) { return nil, nil }),
+	})
+	if err == nil {
+		t.Fatal("a job whose pipeline is external was built, and nothing serves one")
+	}
+	if !strings.Contains(err.Error(), "pipeline") {
+		t.Errorf("the refusal does not name the pipeline: %v", err)
+	}
+}
+
+// TestAnExternalStageIsRefusedOnlyWhenItCannotBeReached.
+//
+// The two handlers are supplied separately, and the gate was one condition over
+// both: a caller with only a Read had an external downloader crawled locally,
+// which is the operator being told their pages are fetched somewhere they are
+// not.
+func TestAnExternalStageIsRefusedOnlyWhenItCannotBeReached(t *testing.T) {
+	server, _ := site(t)
+
+	for name, tc := range map[string]struct {
+		blocks  string
+		opts    run.Options
+		refused bool
+	}{
+		"an external downloader with no fetch handler": {
+			blocks:  "\n  downloader {\n    external = true\n  }\n",
+			opts:    run.Options{Read: spider.HandlerFunc(func(context.Context, *downloader.Response) (*spider.Output, error) { return nil, nil })},
+			refused: true,
+		},
+		"an external downloader with one": {
+			blocks: "\n  downloader {\n    external = true\n  }\n",
+			opts:   run.Options{Fetch: downloader.HandlerFunc(func(context.Context, *downloader.Request) (*downloader.Response, error) { return nil, nil }), Read: spider.HandlerFunc(func(context.Context, *downloader.Response) (*spider.Output, error) { return nil, nil })},
+		},
+		"an external spider with no read handler": {
+			blocks:  "\n  spider {\n    external = true\n  }\n",
+			opts:    run.Options{Fetch: downloader.HandlerFunc(func(context.Context, *downloader.Request) (*downloader.Response, error) { return nil, nil })},
+			refused: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			opts := tc.opts
+			opts.Dir = t.TempDir()
+			opts.Open = func(cfg frontier.Config) (frontier.Frontier, error) { return sqlite.Open(cfg) }
+
+			r, err := run.New(context.Background(), document(t, server, tc.blocks), opts)
+			if err == nil {
+				defer r.Close()
+			}
+			if tc.refused && err == nil {
+				t.Error("a stage this run cannot reach was accepted")
+			}
+			if !tc.refused && err != nil {
+				t.Errorf("a stage the caller supplied was refused: %v", err)
+			}
+		})
 	}
 }

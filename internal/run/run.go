@@ -263,7 +263,7 @@ type Options struct {
 // running on a bus changes here, and a caller that has not used it is a caller
 // with no way to reach the stage the job named. Checked here rather than in
 // each command, so a new caller cannot forget.
-func external(job *engine.Job) error {
+func external(job *engine.Job, haveFetch, haveRead bool) error {
 	// A pipeline is refused outright, because there is no seam to supply and
 	// no node that serves one: [Options] has a Fetch and a Read and nothing
 	// for a pipeline, and [node.Options.Serve] answers "nothing here serves a
@@ -275,11 +275,17 @@ func external(job *engine.Job) error {
 				"Take `external = true` out of the pipeline block", job.Name)
 	}
 
+	// A stage the caller supplied a handler for is reachable, and one it did
+	// not is the case this refuses. Asked per stage, because the two are
+	// supplied separately and the gate used to be one condition over both: a
+	// caller that supplied only a Read had an external downloader crawled
+	// locally, and the job service supplies both, so it skipped the pipeline
+	// refusal above as well.
 	var stages []string
-	if job.Downloader != nil && job.Downloader.IsExternal() {
+	if !haveFetch && job.Downloader != nil && job.Downloader.IsExternal() {
 		stages = append(stages, "downloader")
 	}
-	if job.Spider != nil && job.Spider.IsExternal() {
+	if !haveRead && job.Spider != nil && job.Spider.IsExternal() {
 		stages = append(stages, "spider")
 	}
 	if len(stages) == 0 {
@@ -412,7 +418,7 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Run, error) {
 	// "yes, waiting 5m0s", so a run that quietly ignored it left them believing
 	// their pages were being fetched somewhere they were not. Refused by name,
 	// which is what the whole engine does with a job it cannot honour.
-	if err := external(job); err != nil && opts.Fetch == nil && opts.Read == nil {
+	if err := external(job, opts.Fetch != nil, opts.Read != nil); err != nil {
 		_ = r.sched.Close()
 		return nil, err
 	}

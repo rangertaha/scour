@@ -869,9 +869,16 @@ func testAFullTieIsBrokenTheSameWay(t *testing.T, open Open) {
 	f := open(t, frontier.Config{Policy: "depth"})
 
 	// One page's links: one depth, one instant, different hashes.
+	//
+	// Added in descending hash order on purpose. This used to add them
+	// ascending, which is the one arrangement where "the row inserted last" and
+	// "the largest hash" are the same row - so SQLite ordering by rowid and
+	// memory ordering by hash agreed on this fixture and nowhere else, and the
+	// check passed while the two implementations handed out different URLs
+	// about half the time.
 	at := time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)
 	var reqs []frontier.Request
-	for _, name := range []string{"a", "b", "c", "d"} {
+	for _, name := range []string{"d", "c", "b", "a"} {
 		reqs = append(reqs, frontier.Request{
 			Hash:       "hash-" + name,
 			URL:        "https://example.com/" + name,

@@ -100,6 +100,12 @@ func (depth) Less(a, b Request) bool {
 	// The hash orders them the same way everywhere, and reversed to match
 	// SQLite's DESC, so a crawl drains in one order whichever frontier it is
 	// using. Arbitrary, but arbitrary and agreed beats arbitrary and split.
+	//
+	// SQLite has to be told: it ordered by rowid for a long time after this was
+	// written, which is insertion order and uncorrelated with a SHA-256 prefix,
+	// so the two disagreed about half the time and this comment was describing
+	// an intention rather than the code. See the depth case in
+	// frontier/sqlite's ordering.
 	return a.Hash > b.Hash
 }
 
