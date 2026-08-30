@@ -47,7 +47,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -135,17 +137,9 @@ type Manager struct {
 	running map[string]*driver
 	closed  bool
 
-	// starting is the names somebody is in the middle of starting.
-	//
-	// A driver is only in `running` once its stages are built and its frontier
-	// is open, which takes long enough for every concurrent caller to get past
-	// the check that looks there. They all then built a crawl of their own and
-	// threw it away, and building one opens the job's SQLite frontier: a loser
-	// could fail with "database is locked" rather than being told plainly that
-	// somebody else had started it.
-	//
-	// Reserving the name first makes the losers cheap and their message true.
-	starting map[string]bool
+	// claimed is the names an operation currently owns, and what it is doing
+	// with them: see [Manager.claim].
+	claimed map[string]string
 
 	// wg counts the drivers, so Close can wait for the crawls rather than
 	// merely cancelling them and returning while they are still writing.
@@ -211,15 +205,15 @@ func New(ctx context.Context, conn *bus.Conn, opts Options) (*Manager, error) {
 	own, stop := context.WithCancel(context.WithoutCancel(ctx))
 
 	m := &Manager{
-		conn:     conn,
-		opts:     opts,
-		log:      opts.Log.With("service", opts.Name),
-		jobs:     jobsKV,
-		states:   states,
-		ctx:      own,
-		stop:     stop,
-		running:  map[string]*driver{},
-		starting: map[string]bool{},
+		conn:    conn,
+		opts:    opts,
+		log:     opts.Log.With("service", opts.Name),
+		jobs:    jobsKV,
+		states:  states,
+		ctx:     own,
+		stop:    stop,
+		running: map[string]*driver{},
+		claimed: map[string]string{},
 	}
 
 	// The manager still dies with the process. Close is what a caller should
@@ -384,6 +378,12 @@ func (m *Manager) Update(ctx context.Context, document []byte) (bus.JobStatus, e
 		return bus.JobStatus{}, err
 	}
 
+	release, err := m.claim(submitted.Name, "updating")
+	if err != nil {
+		return bus.JobStatus{}, err
+	}
+	defer release()
+
 	m.mu.Lock()
 	live := m.busy(submitted.Name)
 	m.mu.Unlock()
@@ -417,26 +417,23 @@ func (m *Manager) Delete(ctx context.Context, name string) error {
 		return err
 	}
 
-	m.mu.Lock()
-	live, starting := m.running[name] != nil, m.starting[name]
-	m.mu.Unlock()
-
-	if starting {
-		// Refused rather than raced. There is no driver to stop yet, and
-		// deleting now would leave begin registering one for a job that no
-		// longer exists.
-		return fmt.Errorf("jobs: %q is starting. Try again once it is running", name)
+	// Claimed for the whole delete, not for the check alone. Draining a live
+	// crawl takes as long as its pages in flight, and a start answered in that
+	// window seeded the frontier that the forget below then emptied: the new
+	// crawl ended "finished, fetched 0". See [Manager.claim].
+	release, err := m.claim(name, "deleting")
+	if err != nil {
+		return err
 	}
+	defer release()
 
-	if live {
-		// A crawl that ended between the check above and the stop below is not
-		// a failure: it is the thing being asked for, arriving early. Reported
-		// as one, `scour job delete` told the operator the job was not running,
-		// which they had not claimed, and then deleted nothing. List already
-		// treats this race as ordinary; this did not.
-		if _, err := m.halt(ctx, name, bus.PhaseStopped); err != nil && !errors.Is(err, errNotRunning) {
-			return err
-		}
+	// A crawl that ended between the check above and the stop below is not a
+	// failure: it is the thing being asked for, arriving early. Reported as
+	// one, `scour job delete` told the operator the job was not running, which
+	// they had not claimed, and then deleted nothing. List already treats this
+	// race as ordinary; this did not.
+	if _, err := m.end(ctx, name, bus.PhaseStopped); err != nil && !errors.Is(err, errNotRunning) {
+		return err
 	}
 
 	// The frontier too, because delete means delete.
@@ -501,22 +498,63 @@ func (m *Manager) Pause(ctx context.Context, name string) (bus.JobStatus, error)
 
 // busy reports whether anything is already working on this job.
 //
-// Running or about to be: a driver only reaches the running map once its stages
-// are built and its frontier is open, and `begin` reserves the name before that
-// so a second start does not do the work twice. Everything else that acts on a
-// job has to ask the same question, and did not - it looked at the running map
-// alone, so the whole build window was a hole.
-//
-// A delete landing in it returned success and removed the document while begin
-// carried on, registered a driver and wrote a running phase for a job that no
-// longer existed: a crawl nothing could find, and a state row nothing could
-// ever clear, because every path that clears one starts by reading the document.
-// An update landing in it skipped the mutation review and applied a change to
-// the revision that was about to start.
-//
-// Caller holds m.mu.
+// Running, or being worked on by another request. Caller holds m.mu.
 func (m *Manager) busy(name string) bool {
-	return m.running[name] != nil || m.starting[name]
+	return m.running[name] != nil || m.claimed[name] != ""
+}
+
+// claim reserves a job name for one operation and returns what gives it back.
+//
+// # Why a claim and not a check
+//
+// Because every mutating operation here is "read this job's state, decide, act
+// on it", the state is shared, and each of them used to hold the lock for the
+// read alone. Three passes of this have now been fixed one window at a time and
+// the fourth was the same shape again, so the reservation is now the whole
+// operation rather than a flag one of them sets:
+//
+//   - Eight simultaneous starts built eight drivers on one job, seven of them
+//     unreachable, because a driver reaches `running` only once its stages are
+//     built and its frontier is open. Eight schedulers on one frontier is the
+//     politeness rule broken exactly as the single-driver design prevents.
+//   - A delete landing in that build window returned success and removed the
+//     document while begin carried on and wrote a running phase for a job that
+//     no longer existed: a crawl nothing can find, and a state row nothing can
+//     ever clear, because every path that clears one begins by reading the
+//     document.
+//   - An update landing in it skipped the mutation review and applied a change
+//     to the revision that was about to start.
+//   - A delete that got as far as draining a live crawl released the lock to do
+//     it. A start answered in that window seeded the frontier afresh, and the
+//     delete then resumed and emptied it: the new crawl ended "finished,
+//     fetched 0".
+//
+// The window is not the same one each time and patching them individually has
+// not converged, which is what says the shape is wrong rather than the code.
+//
+// # Why it refuses rather than waits
+//
+// Because these are control requests, each answered on its own goroutine, and
+// the thing being waited for can be a crawl draining its pages in flight. A
+// caller told "busy, try again" can decide; a caller blocked for a minute
+// inside `scour job delete` cannot tell that from a hung cluster.
+func (m *Manager) claim(name, doing string) (func(), error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.closed {
+		return nil, errors.New("jobs: the manager is closing")
+	}
+	if other := m.claimed[name]; other != "" {
+		return nil, fmt.Errorf("jobs: %q is busy: another request is %s it", name, other)
+	}
+	m.claimed[name] = doing
+
+	return func() {
+		m.mu.Lock()
+		delete(m.claimed, name)
+		m.mu.Unlock()
+	}, nil
 }
 
 // begin builds a crawl and drives it.
@@ -526,27 +564,21 @@ func (m *Manager) begin(ctx context.Context, name string, fresh, seed bool) (bus
 		return bus.JobStatus{}, err
 	}
 
-	m.mu.Lock()
-	switch {
-	case m.closed:
-		m.mu.Unlock()
-		return bus.JobStatus{}, errors.New("jobs: the manager is closing")
+	// Claimed before anything is built, so a caller that has lost stops here
+	// rather than opening a frontier it is about to discard, and so that
+	// nothing else acts on the job while it is being built.
+	release, err := m.claim(name, "starting")
+	if err != nil {
+		return bus.JobStatus{}, err
+	}
+	defer release()
 
-	case m.running[name] != nil, m.starting[name]:
-		m.mu.Unlock()
+	m.mu.Lock()
+	running := m.running[name] != nil
+	m.mu.Unlock()
+	if running {
 		return bus.JobStatus{}, fmt.Errorf("jobs: %q is already running", name)
 	}
-
-	// Reserved before anything is built, so a caller that has lost stops here
-	// rather than opening a frontier it is about to discard.
-	m.starting[name] = true
-	m.mu.Unlock()
-
-	defer func() {
-		m.mu.Lock()
-		delete(m.starting, name)
-		m.mu.Unlock()
-	}()
 
 	dir := m.dir(name)
 	if fresh {
@@ -810,22 +842,38 @@ func (m *Manager) reporting(ctx context.Context, d *driver, until <-chan struct{
 	}
 }
 
-// halt ends a crawl and waits for it to have ended.
+// halt claims a job and ends its crawl.
+//
+// Delete does the same thing without this wrapper, because it holds the claim
+// already and has more to do under it. See [Manager.claim].
 func (m *Manager) halt(ctx context.Context, name string, intent bus.Phase) (bus.JobStatus, error) {
+	release, err := m.claim(name, phrase(intent))
+	if err != nil {
+		return bus.JobStatus{}, err
+	}
+	defer release()
+
+	return m.end(ctx, name, intent)
+}
+
+// phrase is what an intent is called in the message a losing caller gets.
+func phrase(intent bus.Phase) string {
+	if intent == bus.PhasePaused {
+		return "pausing"
+	}
+	return "stopping"
+}
+
+// end ends a crawl and waits for it to have ended. The caller holds the job's
+// claim, so nothing can start one underneath this.
+func (m *Manager) end(ctx context.Context, name string, intent bus.Phase) (bus.JobStatus, error) {
 	m.mu.Lock()
 	d := m.running[name]
 	if d == nil {
-		starting := m.starting[name]
 		m.mu.Unlock()
 
 		if _, _, err := m.jobs.Get(ctx, name); err != nil {
 			return bus.JobStatus{}, err
-		}
-		if starting {
-			// It is about to be, and saying "not running" a millisecond before
-			// it starts is an answer somebody would act on by starting it
-			// again.
-			return bus.JobStatus{}, fmt.Errorf("jobs: %q is starting. Try again once it is running", name)
 		}
 		return bus.JobStatus{}, fmt.Errorf("jobs: %q %w", name, errNotRunning)
 	}
@@ -886,9 +934,11 @@ func (m *Manager) snapshot(ctx context.Context, d *driver) bus.JobStats {
 
 // waiting is how much a job that is not running has left.
 func (m *Manager) waiting(ctx context.Context, name string) (int, error) {
-	queue, err := sqlite.Open(frontier.Config{Dir: m.dir(name)})
-	if err != nil {
-		return 0, fmt.Errorf("jobs: %q: %w", name, err)
+	queue, ok, err := m.queue(name)
+	if err != nil || !ok {
+		// A job that has never run has nothing waiting, which is the true
+		// answer and not an error.
+		return 0, err
 	}
 	defer func() { _ = queue.Close() }()
 
@@ -899,11 +949,38 @@ func (m *Manager) waiting(ctx context.Context, name string) (int, error) {
 	return left, nil
 }
 
-// forget empties a job's frontier, which is what starting fresh means.
-func (m *Manager) forget(ctx context.Context, name string) error {
+// queue opens a job's frontier if it has one, and says it has none rather than
+// making one.
+//
+// [sqlite.Open] creates the directory and the database, which is what a crawl
+// about to start wants and what every other caller here does not. Asking how
+// many URLs a job has waiting created an empty frontier for a job that had
+// never run, and deleting such a job created one on its way out and left the
+// directory behind after the job was gone. Both looked like nothing had
+// happened, because an empty frontier answers every question the same way a
+// missing one should.
+func (m *Manager) queue(name string) (*sqlite.Frontier, bool, error) {
+	if _, err := os.Stat(filepath.Join(m.dir(name), sqlite.File)); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("jobs: %q: %w", name, err)
+	}
+
 	queue, err := sqlite.Open(frontier.Config{Dir: m.dir(name)})
 	if err != nil {
-		return fmt.Errorf("jobs: %q: %w", name, err)
+		return nil, false, fmt.Errorf("jobs: %q: %w", name, err)
+	}
+	return queue, true, nil
+}
+
+// forget empties a job's frontier, which is what starting fresh means.
+func (m *Manager) forget(ctx context.Context, name string) error {
+	queue, ok, err := m.queue(name)
+	if err != nil || !ok {
+		// Nothing to forget, and making one to empty it is how a deleted job
+		// left a frontier behind.
+		return err
 	}
 	defer func() { _ = queue.Close() }()
 

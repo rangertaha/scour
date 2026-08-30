@@ -4,9 +4,13 @@ package jobs_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -94,6 +98,15 @@ func bodies(t *testing.T) cache.Store {
 func cluster(t *testing.T) (*jobs.Manager, *bus.Conn) {
 	t.Helper()
 
+	manager, conn, _ := clusterIn(t)
+	return manager, conn
+}
+
+// clusterIn is [cluster] and also says where the manager keeps its frontiers,
+// for the tests that care what it leaves on disk.
+func clusterIn(t *testing.T) (*jobs.Manager, *bus.Conn, string) {
+	t.Helper()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -115,8 +128,9 @@ func cluster(t *testing.T) (*jobs.Manager, *bus.Conn) {
 
 	go func() { _ = joined.Watch(ctx) }()
 
+	dir := t.TempDir()
 	manager, err := jobs.New(ctx, conn, jobs.Options{
-		Dir:    t.TempDir(),
+		Dir:    dir,
 		Bodies: shared,
 		Name:   "test",
 	})
@@ -125,7 +139,7 @@ func cluster(t *testing.T) (*jobs.Manager, *bus.Conn) {
 	}
 	t.Cleanup(func() { _ = manager.Close() })
 
-	return manager, conn
+	return manager, conn, dir
 }
 
 // waitFor polls until a job reaches one of the phases, or gives up.
@@ -534,9 +548,19 @@ func TestOnlyOneStartWinsWhenTheyRace(t *testing.T) {
 				won++
 				return
 			}
-			if strings.Contains(err.Error(), "already running") {
+			// Either message: a loser that got as far as the running map is
+			// told the job is already running, and one refused at the claim is
+			// told another request has it. Both are true and both name the
+			// job; which one a caller gets depends on how far the winner had
+			// got, which is not something to assert.
+			switch {
+			case strings.Contains(err.Error(), "already running"),
+				strings.Contains(err.Error(), "is busy"):
+				if !strings.Contains(err.Error(), `"news"`) {
+					t.Errorf("the refusal does not name the job: %v", err)
+				}
 				refused++
-			} else {
+			default:
 				t.Errorf("a losing start failed for another reason: %v", err)
 			}
 		}()
@@ -547,7 +571,7 @@ func TestOnlyOneStartWinsWhenTheyRace(t *testing.T) {
 		t.Errorf("%d of 8 racing starts won, want exactly 1: any more is two crawls on one frontier", won)
 	}
 	if refused != 7 {
-		t.Errorf("%d starts were refused as already running, want 7", refused)
+		t.Errorf("%d starts were refused, want 7: the rest built a crawl nobody can reach", refused)
 	}
 
 	// And the one that won is the one the manager can still reach, which is the
@@ -936,5 +960,105 @@ func TestAJobNobodySubmittedIsRefusedByEveryOperation(t *testing.T) {
 		if err := call(); err == nil {
 			t.Errorf("%s accepted a job nobody submitted", name)
 		}
+	}
+}
+
+// TestADeleteOwnsTheJobWhileItDrains.
+//
+// Delete stops a live crawl and then empties its frontier, and stopping means
+// waiting out the pages in flight. It used to check that nothing else held the
+// job and then release the lock for the whole of that wait: a start answered in
+// the window seeded the frontier afresh, and the delete resumed and emptied it.
+// The new crawl ended "finished, fetched 0" - the exact failure that emptying
+// the frontier on delete exists to prevent, reached from the other side.
+//
+// The site blocks so the delete is definitely still draining while the starts
+// are attempted.
+func TestADeleteOwnsTheJobWhileItDrains(t *testing.T) {
+	manager, _ := cluster(t)
+	ctx := context.Background()
+
+	release := make(chan struct{})
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+
+	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		<-release
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<html><head><title>Held</title></head><body></body></html>`)
+	}))
+	t.Cleanup(held.Close)
+
+	if _, err := manager.Create(ctx, document(held, "news")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := manager.Start(ctx, "news", true); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	waitFor(t, manager, "news", bus.PhaseRunning)
+
+	deleted := make(chan error, 1)
+	go func() { deleted <- manager.Delete(ctx, "news") }()
+
+	var owned bool
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		_, err := manager.Start(ctx, "news", true)
+		if err == nil {
+			t.Fatal("a start won a job a delete was in the middle of removing")
+		}
+		if strings.Contains(err.Error(), "is busy") {
+			owned = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !owned {
+		t.Error("the delete did not hold the job while it drained, so a start could seed a frontier it was about to empty")
+	}
+
+	once.Do(func() { close(release) })
+	if err := <-deleted; err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+}
+
+// TestAJobThatNeverRanLeavesNoFrontier.
+//
+// sqlite.Open creates the directory and the database, so every caller that
+// merely asked about a frontier made one: `job stats` on a job that had never
+// run left an empty frontier behind, and `job delete` created one on its way
+// out and left the directory there after the job itself was gone. Nothing
+// failed, which is why it went unnoticed - an empty frontier answers every
+// question the same way a missing one should.
+func TestAJobThatNeverRanLeavesNoFrontier(t *testing.T) {
+	manager, _, dir := clusterIn(t)
+	ctx := context.Background()
+
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(site.Close)
+
+	if _, err := manager.Create(ctx, document(site, "news")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if _, err := manager.Stats(ctx, "news"); err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	frontierDir := filepath.Join(dir, "jobs", "news")
+	if _, err := os.Stat(frontierDir); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("asking a job that never ran for its stats built it a frontier: %v", err)
+	}
+
+	if err := manager.Delete(ctx, "news"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := os.Stat(frontierDir); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the deleted job left a frontier behind: %v", err)
 	}
 }

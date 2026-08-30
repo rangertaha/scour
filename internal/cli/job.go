@@ -249,8 +249,12 @@ func Job(a *App) *ucli.Command {
 			},
 			acts("In the cluster", "delete", "Remove a job, stopping it first",
 				"Stops the crawl if it is running, then forgets the document, what\n"+
-					"it was doing, and the queue it had built. A job created again under\n"+
-					"the same name starts from nothing.\n\n"+
+					"it was doing, and the queue it had built.\n\n"+
+					"The queue lives on the driver that ran the crawl, and a cluster\n"+
+					"with more than one driver answers this from whichever is free, so\n"+
+					"a queue on another driver outlives the job. Start a job created\n"+
+					"again under the same name with --fresh to be certain it begins\n"+
+					"from nothing.\n\n"+
 					"Carrying on where a crawl left off is what stop and start are for.",
 				func(ctx context.Context, jobs *bus.ControlClient, name string) error {
 					if err := jobs.Delete(ctx, name); err != nil {
