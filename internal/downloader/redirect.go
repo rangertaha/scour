@@ -34,12 +34,20 @@ var ErrRedirectOutOfScope = fmt.Errorf("the redirect leaves the job's scope: %w"
 // The URL is normalised first, because that is what the scope was built to
 // compare against: the scheduler normalises before it checks, and a check
 // against the raw form would answer a different question about the same page.
+//
+// With the job's own canonicalisation, for the same reason and for a while
+// without it. `included` and `excluded` are globbed against the whole URL, so
+// `lower_path` or `strip_trailing_slash` changes the answer: a job with
+// `lower_path = true` and `excluded = ["*/private/*"]` refused
+// /PRIVATE/secret at the scheduler and followed a 302 to it here. That is the
+// looser of two subtly different scope checks deciding the one URL in a crawl
+// that a third party chooses.
 func (f *follower) allowed(target *url.URL) error {
 	if f.bounds == nil {
 		return nil
 	}
 
-	normalised, err := urls.Normalise(target.String(), urls.Options{})
+	normalised, err := urls.Normalise(target.String(), f.canon)
 	if err != nil {
 		// Not somewhere this job may go, because it is not anywhere: a target
 		// that will not normalise is not a URL the crawl can hold.
@@ -100,6 +108,11 @@ type follower struct {
 	// no domains, included or excluded allows everything, which is what `scour
 	// try` on a single URL means.
 	bounds *scope.Scope
+
+	// canon is how the job decides two URLs are the same page, which is what
+	// the scheduler normalises with before it asks the same scope the same
+	// question. See [engine.Job.Canonical].
+	canon urls.Options
 }
 
 func (f *follower) wrap(next Handler) Handler {

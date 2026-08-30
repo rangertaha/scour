@@ -38,7 +38,6 @@ import (
 	"time"
 
 	"github.com/hashicorp/hcl/v2"
-	"github.com/hashicorp/hcl/v2/gohcl"
 
 	"github.com/rangertaha/scour/internal/chain"
 	"github.com/rangertaha/scour/internal/downloader"
@@ -400,7 +399,7 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Run, error) {
 	// The dupefilter decides what counts as the same page, and the spider has
 	// to report links in the spelling the frontier will store them under, or
 	// one URL arrives as two.
-	r.canon = canonOf(job)
+	r.canon = job.Canonical()
 
 	var err error
 	if r.sched, err = scheduler.New(ctx, job, scheduler.Options{
@@ -1026,52 +1025,4 @@ func (r *Run) close() error {
 		}
 	}
 	return errors.Join(problems...)
-}
-
-// canonOf reads the dupefilter's settings, so the spider and the frontier agree
-// about what the same page is.
-//
-// Read from the document rather than from the built plugin because the plugin
-// is a function by then, and two stages needing the same answer is exactly the
-// case where reading it twice from one source is right.
-func canonOf(job *engine.Job) urls.Options {
-	for _, p := range job.Chain(engine.StageScheduler) {
-		if p.Name != "dupefilter" {
-			continue
-		}
-		var c struct {
-			Tracking      bool     `hcl:"strip_tracking,optional"`
-			Strip         []string `hcl:"strip,optional"`
-			SortQuery     bool     `hcl:"sort_query,optional"`
-			TrailingSlash bool     `hcl:"strip_trailing_slash,optional"`
-			LowerPath     bool     `hcl:"lower_path,optional"`
-		}
-		if p.Config == nil {
-			return urls.Options{}
-		}
-		if diags := decodeInto(p.Config, &c); diags != nil {
-			return urls.Options{}
-		}
-
-		opts := urls.Options{
-			StripQuery:         c.Strip,
-			SortQuery:          c.SortQuery,
-			StripTrailingSlash: c.TrailingSlash,
-			LowerPath:          c.LowerPath,
-		}
-		if c.Tracking {
-			opts.StripQuery = append(append([]string(nil), urls.Tracking...), c.Strip...)
-		}
-		return opts
-	}
-	return urls.Options{}
-}
-
-// decodeInto is the one place this package touches HCL, which it does only to
-// read a plugin's settings a second time.
-func decodeInto(body hcl.Body, into any) error {
-	if diags := gohcl.DecodeBody(body, nil, into); diags.HasErrors() {
-		return diags
-	}
-	return nil
 }

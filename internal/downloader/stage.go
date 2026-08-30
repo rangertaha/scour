@@ -120,7 +120,12 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Stage, error) {
 	// Outside everything, so a URL the site refused is refused before the cache
 	// is consulted and before anything else pays for it. See [guard] for why
 	// this is not a plugin with a configurable position.
-	handler := built.Handler(core)
+	var fetch Handler = core
+
+	// The guard is built before the chain when robots is on, because it wraps
+	// the chain from outside and the core from inside: see [guard.sending] for
+	// why one check is not enough once a middleware can set the agent.
+	var g *guard
 	if job.Downloader.ObeysRobots() {
 		// robots.txt is read to the cap RFC 9309 sets rather than the job's
 		// max_body, which is a limit on pages: a job that will not download a
@@ -133,7 +138,13 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Stage, error) {
 		// file to decide that each time.
 		reader.Truncate = true
 
-		handler = newGuard(&reader, core.Agent).wrap(handler)
+		g = newGuard(&reader, core.Agent)
+		fetch = g.sending(core)
+	}
+
+	handler := built.Handler(fetch)
+	if g != nil {
+		handler = g.wrap(handler)
 
 		// A robots.txt load is a fetch of its own, and it follows redirects
 		// itself, so the guard costs the whole of that before the request it
@@ -155,7 +166,7 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Stage, error) {
 		if err != nil {
 			return nil, fmt.Errorf("downloader: job %q: %w", job.Name, err)
 		}
-		handler = (&follower{max: hops, bounds: bounds}).wrap(handler)
+		handler = (&follower{max: hops, bounds: bounds, canon: job.Canonical()}).wrap(handler)
 
 		// Every hop re-enters from the top, so the whole of what is wrapped
 		// happens again per hop, robots and all.

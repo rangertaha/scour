@@ -371,3 +371,49 @@ func TestANonRedirectStatusIsLeftAlone(t *testing.T) {
 		t.Errorf("status = %d", resp.Status)
 	}
 }
+
+// TestARedirectIsCheckedWithTheJobsOwnCanonicalisation.
+//
+// The scheduler normalises a URL with the job's dupefilter settings and then
+// asks the scope whether it is allowed. The follower asks the same scope about
+// the target of a 3xx and normalised with the defaults instead, so the two
+// answered different questions about the same page - and `included` and
+// `excluded` are globbed against the whole URL, so `lower_path` changes the
+// answer.
+//
+// scope's package doc names the consequence: two subtly different scope checks
+// is a crawl that leaves the site through whichever of them is looser. Here
+// the looser one decides the one URL in a crawl that a third party chooses.
+func TestARedirectIsCheckedWithTheJobsOwnCanonicalisation(t *testing.T) {
+	server, seen := hops(t, map[string]string{
+		"/start": "/PRIVATE/secret",
+	})
+
+	// parse, not job: the shared fixture's start URL is example.com and this
+	// needs the scope pointed at the test server, which validation reads as a
+	// job that would seed nothing. The stage is what is under test here.
+	j := parse(t, fmt.Sprintf(`
+  domains  = ["%s"]
+  excluded = ["*/private/*"]
+
+  scheduler {
+    plugin "dupefilter" {
+      lower_path = true
+    }
+  }
+`, strings.TrimPrefix(server.URL, "http://")))
+
+	_, err := stage(t, j).Handle(context.Background(), &downloader.Request{URL: server.URL + "/start"})
+	if err == nil {
+		t.Fatal("followed a redirect to the subtree the job said never to touch")
+	}
+	if !chain.Dropped(err) {
+		t.Errorf("a redirect out of scope is a drop, not a failure: %v", err)
+	}
+	if !strings.Contains(err.Error(), "scope") {
+		t.Errorf("the error does not say why: %v", err)
+	}
+	if got := strings.Join(seen(), " "); strings.Contains(got, "/PRIVATE/secret") {
+		t.Errorf("the site was asked for %q, so the excluded page was fetched anyway", got)
+	}
+}
