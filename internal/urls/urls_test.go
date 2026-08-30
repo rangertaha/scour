@@ -352,17 +352,38 @@ func TestAnEncodedSeparatorIsNotASeparator(t *testing.T) {
 // rewrite was introduced to prevent. A doubled slash is something a template
 // produces by accident all the time.
 func TestADoubledSlashIsPartOfThePath(t *testing.T) {
-	for _, raw := range []string{
-		"https://example.com//assets/a.png",
-		"https://example.com//a/./p",
+	// Asserted as the whole URL, not as "it still contains //" - which every
+	// one of these passes on the `//` in `https://`, so the check was vacuous
+	// for exactly the inputs it was added for. Resolving the dot segments went
+	// on collapsing the empty one for another two passes underneath it.
+	for raw, want := range map[string]string{
+		"https://example.com//assets/a.png":   "https://example.com//assets/a.png",
+		"https://example.com//a/./p":          "https://example.com//a/p",
+		"https://example.com//assets/./a.png": "https://example.com//assets/a.png",
+		"https://example.com//a/b/../c":       "https://example.com//a/c",
+		"https://example.com/a/./p":           "https://example.com/a/p",
 	} {
 		got, err := urls.Normalise(raw, urls.Options{})
 		if err != nil {
 			t.Fatalf("%q: %v", raw, err)
 		}
-		if !strings.Contains(got, "//") {
-			t.Errorf("%q normalised to %q, losing a path segment", raw, got)
+		if got != want {
+			t.Errorf("%q normalised to %q, want %q", raw, got, want)
 		}
+	}
+
+	// The collision the whole rewrite exists to prevent, reached by resolving
+	// a dot segment rather than by parsing the path as a reference.
+	dotted, err := urls.Normalise("https://example.com//a/./p", urls.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := urls.Normalise("https://example.com/a/p", urls.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dotted == plain {
+		t.Errorf("//a/./p and /a/p both normalised to %q, so two pages share one hash", plain)
 	}
 
 	a, err := urls.Normalise("https://example.com//a/p", urls.Options{})
@@ -390,6 +411,45 @@ func TestAHostThatIsOnlyAPortIsNoHost(t *testing.T) {
 	for _, raw := range []string{"http://:8080/a", "https://:8443/", "http://:80/a"} {
 		if got, err := urls.Normalise(raw, urls.Options{}); err == nil {
 			t.Errorf("%q was accepted as %q, and nothing can fetch it", raw, got)
+		}
+	}
+}
+
+// TestDotSegmentsFollowTheRFC, including the two examples RFC 3986 section
+// 5.2.4 works through itself.
+//
+// Written out here because the implementation is written out too: it used to
+// call path.Clean, which is a different algorithm wearing a similar name, and
+// the ways the two differ are the ways a URL stops naming the resource it named.
+func TestDotSegmentsFollowTheRFC(t *testing.T) {
+	for in, want := range map[string]string{
+		// The RFC's own worked examples.
+		"/a/b/c/./../../g":    "/a/g",
+		"/mid/content=5/../6": "/mid/6",
+
+		// A trailing slash is not a dot segment and survives resolving one.
+		"/a/./":    "/a/",
+		"/a/b/../": "/a/",
+		"/a/.":     "/a/",
+		"/a/b/..":  "/a/",
+
+		// An empty segment is a segment.
+		"//a/./p":    "//a/p",
+		"/a//./b":    "/a//b",
+		"//a/b/../c": "//a/c",
+		"/a//b/../c": "/a//c",
+
+		// More `..` than there are segments walks up to the root and stops.
+		"/../a":      "/a",
+		"/a/../../b": "/b",
+
+		// A relative path is made absolute, which is what every caller here
+		// wants: this only ever sees the path of an absolute URL.
+		"./a":  "/a",
+		"../a": "/a",
+	} {
+		if got := urls.Clean(in); got != want {
+			t.Errorf("Clean(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

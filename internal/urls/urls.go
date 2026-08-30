@@ -29,7 +29,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
-	"path"
 	"sort"
 	"strings"
 )
@@ -206,22 +205,92 @@ func setPath(u *url.URL, escaped string) {
 	}
 }
 
-// clean applies RFC 3986's remove_dot_segments, keeping the trailing slash that
-// path.Clean throws away. /a/ and /a are different pages to some servers, and
-// resolving dots must not be the thing that decides they are not.
+// clean applies RFC 3986's remove_dot_segments, and only that.
+//
+// Written out rather than delegated to path.Clean, which is a different
+// algorithm wearing a similar name. It does two things the RFC does not: it
+// drops a trailing slash, and it collapses repeated slashes. Both change which
+// resource a URL names.
+//
+// The trailing slash was already handled by putting it back afterwards. The
+// empty segment was not, and the guard above it hid how far the damage went:
+// the fast path returned early for a path with no dot segments, so
+// `//assets/a.png` survived while `//assets/./a.png` did not. So
+// `https://example.com//a/./p` and `https://example.com/a/p` normalised to one
+// string and hashed the same, the dupefilter dropped one of two real pages,
+// and the collision that [setPath] was rewritten to prevent was reachable
+// again by a different route. An empty segment is a segment: RFC 3986 says so
+// by never removing one, and a server that serves //a/p and /a/p differently
+// is within its rights.
+//
+// The loop is section 5.2.4 transcribed. It leaves an empty segment alone
+// because step E moves the leading slash and everything up to the next one,
+// which for `//a` is the slash by itself.
 func clean(p string) string {
 	if p == "" {
 		return "/"
 	}
+	// A path with no dot segment is returned as it arrived. The loop below
+	// would return it unchanged too - this only avoids the copy, and it is
+	// correct exactly because the loop preserves everything else.
 	if !strings.Contains(p, "./") && !strings.HasSuffix(p, "/.") && !strings.HasSuffix(p, "/..") {
 		return p
 	}
 
-	trailing := strings.HasSuffix(p, "/")
-	cleaned := path.Clean(p)
-	if trailing && !strings.HasSuffix(cleaned, "/") {
-		cleaned += "/"
+	var out strings.Builder
+	out.Grow(len(p))
+
+	// dropSegment removes the last segment written, for a `..`. Written on the
+	// builder's accumulated string because the segments are not tracked
+	// separately; the string is short and this runs only for a `..`.
+	dropSegment := func() {
+		s := out.String()
+		if i := strings.LastIndex(s, "/"); i >= 0 {
+			s = s[:i]
+		} else {
+			s = ""
+		}
+		out.Reset()
+		out.WriteString(s)
 	}
+
+	for p != "" {
+		switch {
+		case strings.HasPrefix(p, "../"):
+			p = p[len("../"):]
+		case strings.HasPrefix(p, "./"):
+			p = p[len("./"):]
+
+		case strings.HasPrefix(p, "/./"):
+			p = "/" + p[len("/./"):]
+		case p == "/.":
+			p = "/"
+
+		case strings.HasPrefix(p, "/../"):
+			p = "/" + p[len("/../"):]
+			dropSegment()
+		case p == "/..":
+			p = "/"
+			dropSegment()
+
+		case p == "." || p == "..":
+			p = ""
+
+		default:
+			// One segment: the leading slash, if there is one, and everything
+			// up to the next slash after it.
+			end := strings.Index(p[1:], "/")
+			if end < 0 {
+				out.WriteString(p)
+				p = ""
+				break
+			}
+			out.WriteString(p[:end+1])
+			p = p[end+1:]
+		}
+	}
+
+	cleaned := out.String()
 	if !strings.HasPrefix(cleaned, "/") {
 		cleaned = "/" + cleaned
 	}
