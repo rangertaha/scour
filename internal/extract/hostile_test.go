@@ -145,6 +145,74 @@ func TestAnXPathComparisonAgainstNonsenseDoesNotPanic(t *testing.T) {
 	}
 }
 
+// TestALocatorListIsTriedUntilOneFindsSomething.
+//
+// A list of locators is written in order precisely because the earlier ones are
+// expected to miss, and the loop stopped at the first that *matched* rather than
+// the first that found a value. A headline element holding only a logo image
+// matched `h1.headline`, produced nothing, and ended the search - so the `h1`
+// beside it, and the page's own <title>, were never tried, and a required
+// property was reported missing on a page that states it twice.
+func TestALocatorListIsTriedUntilOneFindsSomething(t *testing.T) {
+	item := one(t, `
+  item "article" {
+    property "title" {
+      type = str
+      css  = ["h1.headline", "h1"]
+    }
+  }
+`, `<html><head><title>A story</title></head><body>
+  <h1 class="headline"><img src="/logo.png"></h1>
+  <h1>A story</h1>
+</body></html>`)
+
+	got, ok := item.Values["title"]
+	if !ok {
+		t.Fatalf("title found nothing, though the second selector matches it: %v", item.Values)
+	}
+	if got.Text != "A story" {
+		t.Errorf("title is %q", got.Text)
+	}
+}
+
+// TestANestedFieldFallsBackToThePagesOwnMetadata.
+//
+// The rule that an empty match is not an answer was fixed on the unscoped path
+// and not on the scoped one, so a nested field whose element inside its parent
+// was a blank placeholder still ended the search before the vocabularies were
+// consulted - even though the page carried the value in its metadata, which is
+// exactly what the fallback exists for.
+func TestANestedFieldFallsBackToThePagesOwnMetadata(t *testing.T) {
+	item := one(t, `
+  item "article" {
+    property "story" {
+      css = ["article"]
+
+      property "title" {
+        type = str
+      }
+    }
+  }
+`, `<html><head>
+  <title>A story</title>
+  <meta property="og:title" content="A story">
+</head><body>
+  <article><h1></h1><p>Text.</p></article>
+</body></html>`)
+
+	story, ok := item.Values["story"]
+	if !ok {
+		t.Fatalf("the parent found nothing: %v", item.Values)
+	}
+	got, ok := story.Nested["title"]
+	if !ok {
+		t.Fatalf("the nested title found nothing, though the page states it twice: %v", story.Nested)
+	}
+	if got.Text != "A story" {
+		t.Errorf("story.title is %q", got.Text)
+	}
+}
+
 // TestADeclaredBaseDecidesWhatARelativeLinkMeans.
 //
 // A page may say what its relative links are relative to, and it was ignored.

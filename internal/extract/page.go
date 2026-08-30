@@ -119,9 +119,15 @@ func (p *page) walk(n *html.Node) {
 			// placeholder meant the page stated the value in microdata and
 			// nothing could read it. Later non-empty values still do not
 			// displace an earlier non-empty one: the first real answer wins.
+			// The guard is checked before the value is read, because reading
+			// it walks the element's whole subtree. Evaluated first, a page of
+			// deeply nested elements all carrying the same itemprop paid that
+			// walk once per element instead of once per name: a hundred nested
+			// sections around a long article body turned one pass over the page
+			// into a hundred.
 			name := strings.ToLower(prop)
-			if value := nodeValue(n); strings.TrimSpace(p.micro[name]) == "" {
-				p.micro[name] = value
+			if strings.TrimSpace(p.micro[name]) == "" {
+				p.micro[name] = nodeValue(n)
 			}
 		}
 	}

@@ -83,39 +83,63 @@ func merge(item *Item, name string, from *Value) {
 	}
 }
 
-// query runs one XPath expression, treating a panic as no match.
+// queryAll runs one XPath expression over every match, treating a panic as no
+// match.
 //
-// The XPath library panics rather than erroring when a comparison meets
-// something that is not a number: `//div[@data-score > 0.5]` against
-// `data-score="n/a"` calls ParseFloat and panics on the error. Nothing in this
-// process recovers, so one page with an unexpected attribute killed the crawler
-// mid-crawl - and the input here is the open web, where a page holding
-// something unexpected is the ordinary case rather than the exception.
+// Every match, for the reason [propPlan.find] gives: the first element an
+// expression matches may hold nothing.
+//
+// The panic is recovered because the XPath library panics rather than erroring
+// when a comparison meets something that is not a number: `//div[@data-score >
+// 0.5]` against `data-score="n/a"` calls ParseFloat and panics on the error.
+// Nothing in this process recovers, so one page with an unexpected attribute
+// killed the crawler mid-crawl - and the input here is the open web, where a
+// page holding something unexpected is the ordinary case rather than the
+// exception.
 //
 // No match is also the answer XPath itself specifies: a comparison against NaN
 // is false, so the node set is empty. Recovering here gives the right answer
 // and keeps the promise this package makes, which is that extraction does not
 // panic on anything a page can contain.
-func query(within *html.Node, expr *xpath.Expr) (node *html.Node) {
+func queryAll(within *html.Node, expr *xpath.Expr) (nodes []*html.Node) {
 	defer func() {
 		if recover() != nil {
-			node = nil
+			nodes = nil
 		}
 	}()
-	return htmlquery.QuerySelector(within, expr)
+	return htmlquery.QuerySelectorAll(within, expr)
 }
 
 // find looks for one property's value, taught locators first.
+//
+// # Matching is not finding
+//
+// Every candidate below is tried until one produces a value, rather than until
+// one matches. A selector that matched an element holding nothing is not an
+// answer, and treating it as one ended the search: `css = ["h1.headline", "h1"]`
+// against a headline element that holds only a logo image returned nothing at
+// all, and never tried the second selector, the xpath under it, the regex under
+// that, or the page's own metadata. A list of locators is written in order
+// precisely because the earlier ones are expected to miss.
 func (p *propPlan) find(page *page, within *html.Node) *Value {
+	// Every match, not the first: a selector may match several elements and the
+	// earlier ones may be empty. `css = ["h1.headline", "h1"]` against a page
+	// whose headline element holds only a logo could not be rescued by taking
+	// the next selector either, because `h1` matches that same empty element
+	// first. What the property wants is the first match that says something.
 	for _, selector := range p.css {
-		if node := selector.MatchFirst(within); node != nil {
-			return p.value(page, nodeValue(node), describe(node), ByCSS, node)
+		for _, node := range selector.MatchAll(within) {
+			if found := p.value(page, nodeValue(node), describe(node), ByCSS, node); found != nil {
+				return found
+			}
 		}
 	}
 
 	for _, expr := range p.xpath {
-		if node := query(within, expr); node != nil {
-			return p.value(page, nodeValue(node), describe(node), ByXPath, node)
+		for _, node := range queryAll(within, expr) {
+			if found := p.value(page, nodeValue(node), describe(node), ByXPath, node); found != nil {
+				return found
+			}
 		}
 	}
 
@@ -127,7 +151,9 @@ func (p *propPlan) find(page *page, within *html.Node) *Value {
 			if len(match) > 1 {
 				found = match[1]
 			}
-			return p.value(page, found, "page text", ByRegex, nil)
+			if v := p.value(page, found, "page text", ByRegex, nil); v != nil {
+				return v
+			}
 		}
 	}
 
@@ -186,11 +212,19 @@ func (p *propPlan) semantic(page *page, within *html.Node) *Value {
 	// its parent; it now is.
 	scoped := within != nil && within != page.root
 	if scoped {
+		// Each of these answers only if it found something, for the reason
+		// [propPlan.find] gives: an empty element inside the parent used to end
+		// the search here too, so a nested field whose element was a blank
+		// placeholder never reached the page's own metadata below.
 		if node := p.byWellKnownElement(within); node != nil {
-			return p.value(page, nodeValue(node), describe(node), BySemantics, node)
+			if found := p.value(page, nodeValue(node), describe(node), BySemantics, node); found != nil {
+				return found
+			}
 		}
 		if node := p.byClassOrID(within); node != nil {
-			return p.value(page, nodeValue(node), describe(node), BySemantics, node)
+			if found := p.value(page, nodeValue(node), describe(node), BySemantics, node); found != nil {
+				return found
+			}
 		}
 	}
 
@@ -250,7 +284,9 @@ func (p *propPlan) semantic(page *page, within *html.Node) *Value {
 			}
 		}
 		if node := p.byClassOrID(within); node != nil {
-			return p.value(page, nodeValue(node), describe(node), BySemantics, node)
+			if found := p.value(page, nodeValue(node), describe(node), BySemantics, node); found != nil {
+				return found
+			}
 		}
 	}
 	return nil
