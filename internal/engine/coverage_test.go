@@ -1358,6 +1358,40 @@ func TestTagsAndFields(t *testing.T) {
 	}
 }
 
+// TestIdentityIsDimensionsAndInstantForASeries, because that is what tells two
+// points apart: same sensor at two times, or two sensors at one time.
+func TestIdentityIsDimensionsAndInstantForASeries(t *testing.T) {
+	doc := parse(t, priceItem)
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("did not validate: %v", err)
+	}
+
+	item := doc.Jobs[0].Items[0]
+	if got := strings.Join(item.Identity(), ","); got != "currency,exchange,of,observed" {
+		t.Errorf("identity = %q", got)
+	}
+}
+
+// TestAPlainItemHasNoDeclaredIdentity. Dimensions are not identity, and reading
+// them as one deduplicated a crawl of articles down to one per byline.
+func TestAPlainItemHasNoDeclaredIdentity(t *testing.T) {
+	j := mustValidate(t, `
+  item "byline" {
+    property "author" {
+      type   = entity
+      entity = "person"
+    }
+  }
+`)
+	item := j.Items[1]
+	if got := strings.Join(item.Tags(), ","); got != "author" {
+		t.Fatalf("tags = %q, want the entity reference", got)
+	}
+	if got := item.Identity(); len(got) != 0 {
+		t.Errorf("identity = %v, want nothing: an item with no instant declares none", got)
+	}
+}
+
 // TestEntityPropertiesAreTagsAlready: an entity reference is bounded and
 // indexed by definition, so declaring it one is redundant and refused rather
 // than quietly accepted.

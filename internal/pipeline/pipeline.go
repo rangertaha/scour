@@ -196,14 +196,6 @@ func (p *Pipeline) Run(ctx context.Context, records []*record.Record) ([]*record
 			if err != nil {
 				return nil, err
 			}
-			// After a wave the uniqueness is the pipeline's own invariant
-			// rather than the crawl's, so a step that invented a duplicate is a
-			// step bug and is refused. Checked after every wave and not only
-			// before a merge, because a duplicate that reaches an exporter is
-			// two rows nobody can tell apart.
-			if err := unique(out); err != nil {
-				return nil, fmt.Errorf("pipeline: job %q: step %s.%s: %w", p.job, wave[0].Kind, wave[0].Name, err)
-			}
 			current = out
 			continue
 		}
@@ -255,6 +247,17 @@ func (p *Pipeline) runOne(ctx context.Context, declared *engine.Step, records []
 	out, err := step.Run(ctx, records)
 	if err != nil {
 		return nil, fmt.Errorf("pipeline: job %q: %s: %w", p.job, declared.Address(), err)
+	}
+
+	// A step's own output is unique, checked here so that neither caller can
+	// forget it. It used to be checked by the wave loop, and only on the branch
+	// that runs a lone step: a step beside another in one wave had its twin
+	// reach [merge] first, where the per-step de-duplication threw it away and
+	// left [unique] with nothing to refuse. Whether the pipeline refused a step
+	// bug loudly or dropped a record silently then depended on what else the
+	// job happened to declare in the same wave.
+	if err := unique(out); err != nil {
+		return nil, fmt.Errorf("pipeline: job %q: step %s: %w", p.job, declared.Address(), err)
 	}
 	return out, nil
 }

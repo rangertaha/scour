@@ -321,7 +321,10 @@ func (i *Item) Names() []string {
 	return out
 }
 
-// Tags are the dimensions of this item's events: its entity references, its
+// Tags are the dimensions of this item's events, and not its identity: see
+// [Item.Identity], which is what tells one record of this shape from another.
+//
+// The dimensions of this item's events: its entity references, its
 // relations, and any property declared a tag.
 func (i *Item) Tags() []string {
 	var out []string
@@ -340,6 +343,36 @@ func (i *Item) Tags() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Identity is what tells one record of this shape from another, empty when the
+// shape declares nothing that does.
+//
+// A point in a series is identified by its dimensions and its instant: two
+// readings of one sensor differ by when they were taken, and two taken at once
+// differ by where. So an item with a time property answers with [Item.Tags]
+// plus that property.
+//
+// A plain item answers with nothing, because dimensions are not identity. Two
+// articles filed under one section are two articles, and two by one author are
+// two articles. A caller that needs a key for such an item has to fall back to
+// something outside the shape, which in practice is where the record came from.
+//
+// # Why this is not Tags
+//
+// Because dedupe read [Item.Tags] as identity, and the two agreed only by
+// accident. They came apart when `property "author" { entity = "person" }`
+// began resolving as the entity reference it says it is, which made the author
+// a dimension the operator never wrote down: dedupe then read a whole crawl as
+// one article per byline and dropped the rest silently. Where the author's
+// selector matched nothing every key was the empty string and the crawl
+// exported a single row. Nothing logged, and the export looked like a crawl
+// that had found one article.
+func (i *Item) Identity() []string {
+	if i.Time == "" {
+		return nil
+	}
+	return append(i.Tags(), i.Time)
 }
 
 // Fields are what this item measures: every property that is not a dimension.

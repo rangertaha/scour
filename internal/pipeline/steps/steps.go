@@ -151,8 +151,9 @@ func newValidate(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) 
 // the same article at two URLs is one article and a crawl that followed both
 // paths to it should not say otherwise.
 type dedupeConfig struct {
-	// By names the values that identify an item. Empty uses the shape's tags,
-	// and failing that the URL, which is the weakest useful answer.
+	// By names the values that identify an item. Empty asks the shape what
+	// identifies one of its records, and failing that uses the URL, which is
+	// the weakest useful answer.
 	By []string `hcl:"by,optional"`
 }
 
@@ -164,7 +165,11 @@ func newDedupe(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
 
 	by := c.By
 	if len(by) == 0 && cfg.Item != nil {
-		by = cfg.Item.Tags()
+		// Identity, not Tags. A shape's dimensions are what its events are
+		// filed under, not what tells two of its records apart, and reading
+		// them as a key deduplicated a whole crawl down to one record per
+		// byline. See [engine.Item.Identity].
+		by = cfg.Item.Identity()
 	}
 
 	return pipeline.Func(func(_ context.Context, records []*record.Record) ([]*record.Record, error) {

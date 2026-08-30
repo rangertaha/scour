@@ -1087,3 +1087,81 @@ func TestARankWithALimitDoesNotReorderAnotherItem(t *testing.T) {
 		t.Errorf("prices = %v, want %v", values, want)
 	}
 }
+
+// TestDedupeWithNoKeysKeepsDistinctArticles. Dimensions are not identity: three
+// articles by one author are three articles, and a dedupe that read the shape's
+// tags as a key kept one of them and dropped the rest without saying so.
+func TestDedupeWithNoKeysKeepsDistinctArticles(t *testing.T) {
+	out := run(t, job(t, `
+  pipeline {
+    step "dedupe" "article" {}
+  }
+`),
+		rec("https://example.com/a", map[string]string{"title": "One", "author": "Alex Doe"}),
+		rec("https://example.com/b", map[string]string{"title": "Two", "author": "Alex Doe"}),
+		rec("https://example.com/c", map[string]string{"title": "Three", "author": "Alex Doe"}))
+
+	if len(out) != 3 {
+		t.Errorf("kept %d records, want all three articles: %v", len(out), out)
+	}
+}
+
+// TestDedupeWithNoKeysAndNothingExtractedKeepsEverything, which is the same
+// defect at its worst: where the author selector matched nothing, every record
+// keyed on the empty string and a whole crawl exported one row.
+func TestDedupeWithNoKeysAndNothingExtractedKeepsEverything(t *testing.T) {
+	out := run(t, job(t, `
+  pipeline {
+    step "dedupe" "article" {}
+  }
+`),
+		rec("https://example.com/a", map[string]string{"title": "One"}),
+		rec("https://example.com/b", map[string]string{"title": "Two"}),
+		rec("https://example.com/c", map[string]string{"title": "Three"}))
+
+	if len(out) != 3 {
+		t.Errorf("kept %d records, want all three articles: %v", len(out), out)
+	}
+}
+
+// TestAStepThatInventsADuplicateIsRefusedBesideAnotherStep, which is the same
+// invariant as TestAStepThatInventsADuplicateIsRefusedLoudly and used to hold
+// only when the step happened to be alone in its wave. In a shared wave the
+// merge's own de-duplication reached the twin first and threw it away, so
+// whether the pipeline refused or silently dropped a record depended on what
+// else the job declared.
+func TestAStepThatInventsADuplicateIsRefusedBesideAnotherStep(t *testing.T) {
+	register(t, "test-twin-2", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+		return pipeline.Func(func(_ context.Context, records []*record.Record) ([]*record.Record, error) {
+			out := make([]*record.Record, 0, len(records)*2)
+			for _, r := range records {
+				out = append(out, r, r.Clone())
+			}
+			return out, nil
+		}), nil
+	})
+
+	p, err := pipeline.New(context.Background(), job(t, `
+  pipeline {
+    step "test-twin-2" "article" {}
+
+    step "validate" "article" {}
+  }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = p.Run(context.Background(), []*record.Record{
+		rec("https://example.com/a", map[string]string{"title": "One"}),
+	})
+	if err == nil {
+		t.Fatal("a step that invented a duplicate was merged rather than refused")
+	}
+	if !strings.Contains(err.Error(), "identity") {
+		t.Errorf("the error does not say what is wrong: %v", err)
+	}
+	if !strings.Contains(err.Error(), "test-twin-2") {
+		t.Errorf("the error does not say which step: %v", err)
+	}
+}
