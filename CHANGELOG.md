@@ -30,6 +30,10 @@ of [the book](docs/index.md).
   `Crawl-delay` carried back from the downloader.
 - Entity graph, event log and trained topics, shared behind `scour server`.
 - Exporters for json, jsonlines, csv, parquet, nats and sqlite.
+- `domains`, `start`, `included` and `excluded` can be read from a file beside
+  the document with `lines("domains.txt")`. The entries are expanded into the
+  document before it is submitted, because a stored job has to carry everything
+  a crawl needs: nothing in a cluster can see the author's files.
 - The book, in ten chapters, checked against the code by tests.
 - CI, release and documentation workflows, golangci-lint, GoReleaser and a
   Makefile.
@@ -44,5 +48,21 @@ of [the book](docs/index.md).
 - The marker written beside an induced locator is matched by a prefix that
   carries no command name, so a document written by an older scour is still
   recognised and the next rename cannot reach it.
+- `scour job delete` empties the job's frontier as well as forgetting the
+  document. It used to leave it, so a job deleted, rewritten and started again
+  found every start URL already recorded as finished: it fetched nothing and
+  reported "finished". Carrying on where a crawl left off is what stop and
+  start are for.
+- `downloader { timeout = "0" }` is refused. It does not mean the default, it
+  means no deadline at all, and the lease that covers a fetch is sized from it.
+  Leave the field out for the default.
+- An `entity` property with nested properties keeps a column of its own. The
+  reference's own value - the name it read - had no column, so it was extracted
+  and then dropped on the way to the file.
+- A property that names an `entity` kind without also writing `type = entity`
+  is an entity reference. It used to resolve as a string, so nothing ever
+  resolved it.
+- A mistyped subcommand exits 2, the code that means the command line was
+  wrong. Two commands exited 3 and one exited 0.
 
 [Unreleased]: https://github.com/rangertaha/scour/commits/main
