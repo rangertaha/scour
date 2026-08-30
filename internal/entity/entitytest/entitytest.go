@@ -83,6 +83,8 @@ func Run(t *testing.T, open Open) {
 	t.Run("RetractSweepsTheEvidenceWithTheFact", func(t *testing.T) { testRetractSweepsTheEvidenceWithTheFact(t, open) })
 	t.Run("AKindIsTheSameKindWhoeverSpelledIt", func(t *testing.T) { testAKindIsTheSameKindWhoeverSpelledIt(t, open) })
 	t.Run("AMergeGoesToTheNameTheRuleActuallyFound", func(t *testing.T) { testAMergeGoesToTheNameTheRuleFound(t, open) })
+	t.Run("ARuleOnlyLicensesTheMergesItCouldHaveFound", func(t *testing.T) { testARuleOnlyLicensesTheMergesItCouldHaveFound(t, open) })
+	t.Run("AnUnknownRuleIsRefused", func(t *testing.T) { testAnUnknownRuleIsRefused(t, open) })
 }
 
 func said(job, url string) entity.Provenance {
@@ -824,6 +826,69 @@ func testAKindIsTheSameKindWhoeverSpelledIt(t *testing.T, open Open) {
 //
 // Merging wrongly is worse than not merging, which is the whole reason this
 // rule is conservative in the first place.
+// testARuleOnlyLicensesTheMergesItCouldHaveFound.
+//
+// The counterpart to [testAMergeGoesToTheNameTheRuleFound], from the other
+// side: that one swaps the keeper, this one swaps the loser. The initial rule
+// is about an initial, so a pair with no initial in it is not a pair that rule
+// found, and a merge stamped with a rule that did not find it is a merge
+// nothing can undo as a class - which is the reason the rule is recorded at
+// all.
+//
+// A rule the store has never heard of is refused for the same reason. Merge
+// takes its rule from the caller, and `internal/bus` passes one straight off
+// the wire.
+func testARuleOnlyLicensesTheMergesItCouldHaveFound(t *testing.T, open Open) {
+	ctx := context.Background()
+	g := open(t)
+	from := said("news", "https://a.example/1")
+
+	full, err := g.Assert(ctx, "person", "Alex Doe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Assert(ctx, "person", "A. Doe", from); err != nil {
+		t.Fatal(err)
+	}
+	stranger, err := g.Assert(ctx, "person", "Bob Roe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Two full names. The initial rule cannot have proposed this: there is no
+	// initial in it. Accepted, Bob Roe reads as Alex Doe from then on and every
+	// article bylined "Bob Roe" attaches to the wrong person.
+	if err := g.Merge(ctx, stranger, full, entity.RuleInitial, from); err == nil {
+		t.Error("the initial rule licensed a merge between two full names, which it could not have found")
+	}
+
+	// A person saying so is still evidence, and still the exemption.
+	if err := g.Merge(ctx, stranger, full, entity.RuleManual, from); err != nil {
+		t.Errorf("refused a manual merge: %v", err)
+	}
+}
+
+// testAnUnknownRuleIsRefused, because a rule is what makes a merge undoable as
+// a class and an unrecognised one is checked by nothing at all.
+func testAnUnknownRuleIsRefused(t *testing.T, open Open) {
+	ctx := context.Background()
+	g := open(t)
+	from := said("news", "https://a.example/1")
+
+	full, err := g.Assert(ctx, "person", "Alex Doe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stranger, err := g.Assert(ctx, "person", "Bob Roe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := g.Merge(ctx, stranger, full, "whatever-the-caller-sent", from); err == nil {
+		t.Error("a rule the store has never heard of merged two entities unchecked")
+	}
+}
+
 func testAMergeGoesToTheNameTheRuleFound(t *testing.T, open Open) {
 	ctx := context.Background()
 	g := open(t)

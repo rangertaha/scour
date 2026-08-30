@@ -196,8 +196,11 @@ func unambiguous(ctx context.Context, tx *sql.Tx, kind, loser, keeper string) (b
 
 	asked, ok := parseName(loserName)
 	if !ok || !asked.initial {
-		// Not a merge this rule proposes, so it is not this rule's to refuse.
-		return true, nil
+		// Not a merge this rule could have proposed, so the rule does not
+		// license it. This used to answer true - "not mine to refuse" - which
+		// left the pair checked by nothing at all, since the caller's rule was
+		// the only thing that had brought it here.
+		return false, nil
 	}
 
 	// Canonical rows, not raw ones, because that is what [Store.Candidates]
@@ -310,19 +313,38 @@ func (s *graph) Merge(ctx context.Context, from, to, rule string, said Provenanc
 	// transaction instead, which buys the same thing: nothing can be asserted
 	// between the counting and the alias row.
 	//
+	// Switched on the rule rather than on the shape of the pair, because the
+	// rule is the claim being made: "this merge is one the initial rule found".
+	// Asking the pair instead meant a rule licensed merges it could not have
+	// proposed. unambiguous reads the loser's name and answered "not mine to
+	// refuse" for anything that is not an initial, so RuleInitial on two full
+	// names was checked by nothing - and Merge takes its rule from the caller,
+	// which `internal/bus` passes straight off the wire. A rule string the
+	// store had never heard of took the same path and was likewise unchecked.
+	//
 	// RuleManual is exempt. A person saying two spellings are one person is
 	// evidence, and the ambiguity rule exists to keep the machine from
 	// guessing, not to overrule them.
-	if rule != RuleManual {
+	switch rule {
+	case RuleManual:
+
+	case RuleInitial:
 		ok, err := unambiguous(ctx, tx, keeperKind, loser, keeper)
 		if err != nil {
 			return err
 		}
 		if !ok {
 			return fmt.Errorf(
-				"entity: refusing to merge %s: another name it could belong to has been asserted since it was proposed",
-				loser)
+				"entity: refusing to merge %s under the %s rule: it is not a pair that rule proposes, "+
+					"or another name it could belong to has been asserted since it was proposed",
+				loser, rule)
 		}
+
+	default:
+		return fmt.Errorf(
+			"entity: refusing to merge %s under the rule %q, which this store does not know. "+
+				"A merge is recorded under the rule that found it so a rule that turns out to be "+
+				"wrong can be undone as a class", loser, rule)
 	}
 
 	// Anything that pointed at the loser now points at the keeper, which is
