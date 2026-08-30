@@ -263,6 +263,15 @@ func TestAHugeBodyIsRefusedOnItsDeclaredLength(t *testing.T) {
 	if !strings.Contains(err.Error(), "declared") {
 		t.Errorf("refused after reading it: %v", err)
 	}
+	// A drop, like every other ordinary outcome the downloader has a sentinel
+	// for. Counted as a failure instead, the run spends a frontier attempt on
+	// it, the frontier retries the URL until it abandons it, and a healthy
+	// crawl of a site with media links reports failures and re-hits the host -
+	// re-downloading up to the limit on each attempt when nothing declared a
+	// length.
+	if !chain.Dropped(err) {
+		t.Errorf("an over-limit body is counted as a fetch failure and retried: %v", err)
+	}
 }
 
 // TestABodyThatDeclaresNothingIsRefusedWhileReading. A chunked response has no
@@ -288,6 +297,9 @@ func TestABodyThatDeclaresNothingIsRefusedWhileReading(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "declared") {
 		t.Errorf("claimed a declared length that was never sent: %v", err)
+	}
+	if !chain.Dropped(err) {
+		t.Errorf("an over-limit body is counted as a fetch failure and retried: %v", err)
 	}
 }
 
@@ -834,5 +846,63 @@ func TestRobotsIsCheckedForTheAgentActuallySent(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("fetched a path disallowed for the agent the request was sent under")
+	}
+}
+
+// TestRobotsIsCheckedForAnAgentAMiddlewareSets.
+//
+// The half [TestRobotsIsCheckedForTheAgentActuallySent] could not reach. It
+// sets the header on the request handed to Handle, which is outside the guard,
+// so it proved the guard reads the header and not that anything can put one
+// there. The guard wraps the whole chain on purpose - a disallowed URL is
+// refused before the cache is consulted - and every middleware therefore runs
+// inside it, which made a middleware structurally incapable of setting an
+// agent the guard could see. The doc on agentFor names this exact case as
+// supported.
+//
+// So the check happens again at the core, where the agent is final.
+func TestRobotsIsCheckedForAnAgentAMiddlewareSets(t *testing.T) {
+	var asked []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			fmt.Fprint(w, "User-agent: acmebot\nDisallow: /private\n\nUser-agent: *\nDisallow:\n")
+			return
+		}
+		asked = append(asked, r.URL.Path)
+		fmt.Fprint(w, "<html><body>secret</body></html>")
+	}))
+	defer server.Close()
+
+	register(t, "test-rotates-agent", func(_ context.Context, _ plugin.Config) (downloader.Wrapper, error) {
+		return func(next downloader.Handler) downloader.Handler {
+			return downloader.HandlerFunc(func(ctx context.Context, req *downloader.Request) (*downloader.Response, error) {
+				out := *req
+				out.Header = http.Header{"User-Agent": []string{"acmebot/1.0"}}
+				return next.Handle(ctx, &out)
+			})
+		}, nil
+	})
+
+	stage, err := downloader.New(context.Background(), job(t, `
+  downloader {
+    robots     = true
+    user_agent = "scour"
+
+    plugin "test-rotates-agent" {
+      order = 100
+    }
+  }
+`), downloader.Options{})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	defer stage.Close()
+
+	_, err = stage.Handle(context.Background(), &downloader.Request{URL: server.URL + "/private"})
+	if err == nil {
+		t.Error("a middleware set an agent the site refuses by name and the path was fetched anyway")
+	}
+	if len(asked) != 0 {
+		t.Errorf("the site was asked for %v under an agent it disallows", asked)
 	}
 }

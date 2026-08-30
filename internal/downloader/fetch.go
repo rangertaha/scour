@@ -10,15 +10,22 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/rangertaha/scour/internal/chain"
 )
 
 // ErrTooLarge reports a body over the job's limit.
 //
-// A sentinel because it is a normal outcome of crawling the open web, where a
+// A drop, because it is a normal outcome of crawling the open web, where a
 // link to a video is indistinguishable from a link to an article until the
-// headers arrive, and counting it as a failure would make a working crawl look
-// broken.
-var ErrTooLarge = errors.New("body over the limit")
+// headers arrive. It was a bare sentinel while saying that, which is the
+// reason every other ordinary outcome here wraps [chain.ErrDrop] and nothing
+// checked for this one: the run counted it as a fetch failure and spent a
+// frontier attempt on it, so the frontier retried the URL until it abandoned
+// it. A crawl of a site with media links reported failures, re-hit the host
+// once per attempt, and re-downloaded up to the limit each time when the
+// server declared no length.
+var ErrTooLarge = fmt.Errorf("body over the limit: %w", chain.ErrDrop)
 
 // Fetcher is the core of the downloader: one request, one response, no
 // middleware.

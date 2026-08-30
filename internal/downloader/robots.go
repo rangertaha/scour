@@ -65,6 +65,39 @@ func newGuard(fetch Handler, agent string) *guard {
 	return &guard{fetch: fetch, agent: agent, known: map[string]*answer{}}
 }
 
+// sending re-checks robots against the agent the request is actually going out
+// under, immediately before the fetch.
+//
+// # Why there are two checks and not one
+//
+// [guard.wrap] is outside the whole chain on purpose, so a disallowed URL is
+// refused before the cache is consulted and before anything else pays for it,
+// and that position is not configurable because it is the only correct one.
+// But it is also outside every middleware, so a middleware that sets a
+// User-Agent - a supported thing to do, and rotating them is why - sets it
+// after the guard has already decided. [guard.agentFor] reads the header and
+// could never see one, and the request went out under an agent robots was
+// never asked about: a site that disallows `acmebot` by name was read as
+// allowing, and then asked for the disallowed path with `User-Agent: acmebot`.
+//
+// So the check happens again here, wrapping the core fetch, where the agent is
+// final. The rules are parsed per host and cached, and they are
+// agent-independent, so the second question costs a map lookup and never a
+// fetch.
+//
+// A middleware that rotates to an agent the site allows does not rescue a job
+// whose declared agent the site refuses: the outer check has already stopped
+// it. That is the conservative answer and the right one - rotating an agent to
+// get past a refusal is not something to make easy.
+func (g *guard) sending(next Handler) Handler {
+	return HandlerFunc(func(ctx context.Context, req *Request) (*Response, error) {
+		if _, err := g.check(ctx, req.URL, g.agentFor(req)); err != nil {
+			return nil, err
+		}
+		return next.Handle(ctx, req)
+	})
+}
+
 func (g *guard) wrap(next Handler) Handler {
 	return HandlerFunc(func(ctx context.Context, req *Request) (*Response, error) {
 		asked, err := g.check(ctx, req.URL, g.agentFor(req))
