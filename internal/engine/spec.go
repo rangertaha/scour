@@ -95,7 +95,7 @@ func (s *Spec) Fingerprint() string {
 func (s *Spec) HCL() []byte {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "# Extraction spec for job %q, fingerprint %s.\n", s.Job, s.Fingerprint())
+	fmt.Fprintf(&b, "# Extraction spec for job %s, fingerprint %s.\n", HCLString(s.Job), s.Fingerprint())
 	b.WriteString("# Generated. The job document is the source.\n")
 
 	for _, item := range s.Items {
@@ -108,7 +108,7 @@ func (s *Spec) HCL() []byte {
 func writeItem(b *strings.Builder, item *Item, depth int) {
 	pad := strings.Repeat("  ", depth)
 
-	fmt.Fprintf(b, "%sitem %q {\n", pad, item.Name)
+	fmt.Fprintf(b, "%sitem %s {\n", pad, HCLString(item.Name))
 
 	// The resolved type, never the raw field. A spec is what a spider in
 	// another language is handed, and it is the whole of what that spider
@@ -135,7 +135,7 @@ func writeItem(b *strings.Builder, item *Item, depth int) {
 func writeProperty(b *strings.Builder, p *Property, depth int) {
 	pad := strings.Repeat("  ", depth)
 
-	fmt.Fprintf(b, "%sproperty %q {\n", pad, p.Name)
+	fmt.Fprintf(b, "%sproperty %s {\n", pad, HCLString(p.Name))
 	writeAttr(b, depth+1, "type", string(p.PropertyType()))
 	writeAttr(b, depth+1, "entity", p.Entity)
 	writeAttr(b, depth+1, "description", p.Description)
@@ -162,7 +162,7 @@ func writeProperty(b *strings.Builder, p *Property, depth int) {
 func writeRelation(b *strings.Builder, r *Relation, depth int) {
 	pad := strings.Repeat("  ", depth)
 
-	fmt.Fprintf(b, "%srelation %q {\n", pad, r.Name)
+	fmt.Fprintf(b, "%srelation %s {\n", pad, HCLString(r.Name))
 	writeAttr(b, depth+1, "entity", r.Entity)
 	writeAttr(b, depth+1, "property", r.Property)
 	writeList(b, depth+1, "topic", r.Topic)
@@ -181,7 +181,14 @@ func writeAttr(b *strings.Builder, depth int, name, value string) {
 	if value == "" {
 		return
 	}
-	fmt.Fprintf(b, "%s%s = %q\n", strings.Repeat("  ", depth), name, value)
+	// HCL quoting, not Go's. This renders a document a spider in another
+	// language parses, and the two agree until a value contains `${`, which HCL
+	// reads as an interpolation: an induced selector like
+	// meta[name="og:title-${id}"] - which train.Write escapes correctly on its
+	// way into the job document - came back out of `scour job spec` as a spec
+	// that will not parse. Two writers were fixed for this and this is the
+	// third; see [HCLString].
+	fmt.Fprintf(b, "%s%s = %s\n", strings.Repeat("  ", depth), name, HCLString(value))
 }
 
 func writeList(b *strings.Builder, depth int, name string, values []string) {
@@ -190,7 +197,10 @@ func writeList(b *strings.Builder, depth int, name string, values []string) {
 	}
 	quoted := make([]string, 0, len(values))
 	for _, v := range values {
-		quoted = append(quoted, fmt.Sprintf("%q", v))
+		// See [writeAttr]: a css or xpath value is the likeliest place for a
+		// `${` to turn up, because that is what an induced selector picks up
+		// off a page whose template did not render.
+		quoted = append(quoted, HCLString(v))
 	}
 	fmt.Fprintf(b, "%s%s = [%s]\n", strings.Repeat("  ", depth), name, strings.Join(quoted, ", "))
 }

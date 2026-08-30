@@ -128,7 +128,15 @@ func normalise(u *url.URL, opts Options) (string, error) {
 		u.Host = u.Host[:strings.LastIndex(u.Host, ":")]
 	}
 
-	if u.Host == "" {
+	// A host that is only a port is no host either. url.Parse validates the
+	// port and is content for the name to be empty, and the default-port strip
+	// above only fires for :80 and :443, so "http://:8080/a" got through the
+	// emptiness check with a host of ":8080". It is idempotent, so normalising
+	// it twice cannot notice, and it queues with a real hash: the downloader
+	// then fails it with "no Host in request URL" on every attempt until the
+	// frontier abandons it, instead of the caller being told plainly that the
+	// URL has no host.
+	if host := strings.TrimSpace(u.Host); host == "" || strings.HasPrefix(host, ":") {
 		return "", fmt.Errorf("urls: %q has no host", u.String())
 	}
 
@@ -173,14 +181,29 @@ func normalise(u *url.URL, opts Options) (string, error) {
 // setPath writes an escaped path back, keeping the decoded and raw forms in
 // step so that what was encoded stays encoded.
 func setPath(u *url.URL, escaped string) {
-	// Parsed as a reference, which is how the standard library builds the two
-	// halves: Path decoded, RawPath kept only when it says something the
-	// decoded form does not.
-	if ref, err := url.Parse(escaped); err == nil {
-		u.Path, u.RawPath = ref.Path, ref.RawPath
+	// Unescaped directly rather than parsed as a reference. url.Parse reads a
+	// leading `//` as a scheme-relative authority, so `//assets/a.png` came
+	// back with a host of `assets` and a path of `/a.png`, and writing only its
+	// path back turned https://example.com//assets/a.png into
+	// https://example.com/a.png - a different page, usually one that does not
+	// exist. It also collided: //a/p and //b/p both became /p, one hash, and
+	// the dupefilter dropped one of two real pages. A doubled slash is
+	// something a template produces by accident all the time, which makes it a
+	// commoner input than the encoded separator this function was written for.
+	decoded, err := url.PathUnescape(escaped)
+	if err != nil {
+		u.Path, u.RawPath = escaped, ""
 		return
 	}
-	u.Path, u.RawPath = escaped, ""
+
+	// RawPath is kept only when it says something the default encoding of Path
+	// does not, which is the standard library's own rule: EscapedPath returns
+	// RawPath while it is a valid encoding of Path, and the escaped form we
+	// built otherwise.
+	u.Path, u.RawPath = decoded, escaped
+	if u.EscapedPath() != escaped {
+		u.RawPath = ""
+	}
 }
 
 // clean applies RFC 3986's remove_dot_segments, keeping the trailing slash that

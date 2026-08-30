@@ -214,3 +214,49 @@ job "news" {
 		})
 	}
 }
+
+// TestASpecSurvivesEverythingAPageCanPutInASelector.
+//
+// A spec is a document a spider in another language parses, and the renderer
+// quoted with Go's %q. The two agree until a value contains `${`, which HCL
+// reads as the start of an interpolation - and a selector is the likeliest
+// place for one, because that is what training picks up off a page whose
+// template did not render. train.Write escapes it correctly on the way into
+// the job document, and `scour job spec` then printed a spec that will not
+// parse. Two writers had already been fixed for this; the renderer was the
+// third and was missed.
+func TestASpecSurvivesEverythingAPageCanPutInASelector(t *testing.T) {
+	doc, err := engine.Parse([]byte(`
+job "news" {
+  domains = ["example.com"]
+  start   = ["https://example.com/"]
+
+  item "article" {
+    property "title" {
+      type        = str
+      description = "the headline, $${verbatim}"
+      css         = ["meta[name=\"og:title-$${id}\"]", "h1"]
+    }
+  }
+}
+`), "job.hcl")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	rendered := doc.Jobs[0].Spec().HCL()
+	spec, err := engine.ParseSpec(rendered, "spec.hcl")
+	if err != nil {
+		t.Fatalf("the rendered spec does not parse:\n%v\n\n%s", err, rendered)
+	}
+
+	// And it says the same thing it was given, rather than something HCL
+	// resolved on the way through.
+	got := spec.Items[0].Properties[0]
+	if len(got.CSS) == 0 || got.CSS[0] != `meta[name="og:title-${id}"]` {
+		t.Errorf("the selector came back as %q", got.CSS)
+	}
+	if got.Description != "the headline, ${verbatim}" {
+		t.Errorf("the description came back as %q", got.Description)
+	}
+}

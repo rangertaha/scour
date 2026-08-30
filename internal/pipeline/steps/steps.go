@@ -259,6 +259,21 @@ func newRank(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
 		//
 		// In place, a rank says only what it means. For a job with one item
 		// this is the same answer as before, because then every slot is mine.
+		// The survivors go back into the slots the survivors themselves came
+		// from, and a record the limit dropped takes its slot with it.
+		//
+		// Not into the first n of this step's slots. Compacting moves a
+		// surviving record earlier, past records of other items, and the wave
+		// then reads that as this step having reordered them: a rank with a
+		// limit dragged another item's ranking back into crawl order. Filling
+		// only the survivors' own slots leaves every other item exactly where
+		// it was, and the survivors are still ranked among themselves because
+		// those slots are filled in ranked order.
+		keeping := make(map[*record.Record]bool, len(mineOnly))
+		for _, r := range mineOnly {
+			keeping[r] = true
+		}
+
 		out := make([]*record.Record, 0, len(records))
 		next := 0
 		for _, r := range records {
@@ -266,12 +281,13 @@ func newRank(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
 				out = append(out, r)
 				continue
 			}
-			if next < len(mineOnly) {
-				out = append(out, mineOnly[next])
-				next++
+			if !keeping[r] {
+				// Past the limit. What that means for the record is the wave's
+				// keep rule to say, not this.
+				continue
 			}
-			// Past the limit, so the slot closes up: what that means for the
-			// record is the wave's keep rule to say, not this.
+			out = append(out, mineOnly[next])
+			next++
 		}
 		return out, nil
 	}), nil

@@ -934,3 +934,156 @@ func TestTwoRanksInOneWaveBothKeepTheirOrder(t *testing.T) {
 		t.Errorf("price values = %v, want %v: the second rank in the wave was undone", values, want)
 	}
 }
+
+// TestAStepThatOnlyFiltersDoesNotReorderAnything.
+//
+// What a step moved is read from its output against the wave's input, and it
+// was read by index. An index says nothing on its own: dropping one record
+// shifts every record after it, so a `validate` that removed one invalid price
+// claimed both articles and re-imposed the input's order on them - silently
+// undoing the `rank` sharing its wave, which is the defect the merge was
+// rewritten to fix, arriving by the other door.
+//
+// The same shape reaches it three ways, so all three are here: a step that
+// drops, a rank whose `limit` closes up slots, and a step that adds a record.
+func TestAStepThatOnlyFiltersDoesNotReorderAnything(t *testing.T) {
+	register(t, "test-prepend", func(_ context.Context, cfg pipeline.Config) (pipeline.Step, error) {
+		return pipeline.Func(func(_ context.Context, records []*record.Record) ([]*record.Record, error) {
+			extra := records[0].Clone()
+			extra.URL = "https://example.com/invented"
+			return append([]*record.Record{extra}, records...), nil
+		}), nil
+	})
+
+	articles := func() []*record.Record {
+		return []*record.Record{
+			rec("https://example.com/a1", map[string]string{"title": "A1", "score": "2"}),
+			rec("https://example.com/a2", map[string]string{"title": "A2", "score": "9"}),
+			rec("https://example.com/a3", map[string]string{"title": "A3", "score": "5"}),
+		}
+	}
+
+	for name, tc := range map[string]struct {
+		steps string
+		extra func([]*record.Record) []*record.Record
+		want  []string
+	}{
+		"beside a step that drops": {
+			steps: `step "validate" "price" {}`,
+			extra: func(in []*record.Record) []*record.Record {
+				bad := rec("https://example.com/p1", map[string]string{})
+				bad.Item = "price"
+				return append([]*record.Record{bad}, in...)
+			},
+			want: []string{"9", "5", "2"},
+		},
+		"beside a step that adds": {
+			steps: `step "test-prepend" "article" {}`,
+			want:  []string{"9", "5", "2"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, err := pipeline.New(context.Background(), job(t, `
+  item "price" {
+    property "value" {
+      type     = str
+      required = true
+    }
+  }
+
+  pipeline {
+    step "rank" "article" {
+      by         = "score"
+      descending = true
+    }
+    `+tc.steps+`
+  }
+`))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			in := articles()
+			if tc.extra != nil {
+				in = tc.extra(in)
+			}
+
+			out, err := p.Run(context.Background(), in)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var scores []string
+			for _, r := range out {
+				if r.Item == "price" || r.URL == "https://example.com/invented" {
+					continue
+				}
+				scores = append(scores, r.Values["score"])
+			}
+			if !slices.Equal(scores, tc.want) {
+				t.Errorf("article scores = %v, want %v: the rank was undone", scores, tc.want)
+			}
+		})
+	}
+}
+
+// TestARankWithALimitDoesNotReorderAnotherItem.
+//
+// A limit closes up the slots of the records it drops, which shifts every index
+// after them just as a filter does.
+func TestARankWithALimitDoesNotReorderAnotherItem(t *testing.T) {
+	p, err := pipeline.New(context.Background(), job(t, `
+  item "price" {
+    property "value" {
+      type = str
+    }
+  }
+
+  pipeline {
+    step "rank" "article" {
+      by         = "score"
+      descending = true
+    }
+    step "rank" "price" {
+      by         = "value"
+      descending = true
+      limit      = 1
+    }
+  }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	price := func(url, value string) *record.Record {
+		r := rec(url, map[string]string{"value": value})
+		r.Item = "price"
+		return r
+	}
+
+	out, err := p.Run(context.Background(), []*record.Record{
+		rec("https://example.com/a1", map[string]string{"title": "A1", "score": "2"}),
+		price("https://example.com/p1", "1"),
+		rec("https://example.com/a2", map[string]string{"title": "A2", "score": "9"}),
+		price("https://example.com/p2", "5"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var scores, values []string
+	for _, r := range out {
+		if r.Item == "price" {
+			values = append(values, r.Values["value"])
+			continue
+		}
+		scores = append(scores, r.Values["score"])
+	}
+
+	if want := []string{"9", "2"}; !slices.Equal(scores, want) {
+		t.Errorf("article scores = %v, want %v: a limit on the other item undid this rank", scores, want)
+	}
+	if want := []string{"5"}; !slices.Equal(values, want) {
+		t.Errorf("prices = %v, want %v", values, want)
+	}
+}

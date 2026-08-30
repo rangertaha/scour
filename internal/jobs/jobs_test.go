@@ -598,6 +598,133 @@ func TestDeleteStopsARunningJob(t *testing.T) {
 	}
 }
 
+// TestARecreatedJobStartsFromNothing.
+//
+// Delete used to leave the frontier, on the reasoning that a job recreated
+// under the same name should carry on. That reasoning is what stop is for.
+// What it produced was a job somebody deleted, rewrote and started whose every
+// start URL was already recorded as finished: Seed added nothing, the workers
+// leased nothing, and the run ended "finished" with fetched 0 - which is what a
+// site that has gone dark looks like, and was fixable only by knowing to pass
+// --fresh to a job that had never been run.
+func TestARecreatedJobStartsFromNothing(t *testing.T) {
+	manager, _ := cluster(t)
+	ctx := context.Background()
+	server := site(t)
+
+	crawl := func() int64 {
+		t.Helper()
+		if _, err := manager.Create(ctx, document(server, "news")); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if _, err := manager.Start(ctx, "news", false); err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		waitFor(t, manager, "news", bus.PhaseDone, bus.PhaseFailed)
+
+		stats, err := manager.Stats(ctx, "news")
+		if err != nil {
+			t.Fatalf("stats: %v", err)
+		}
+		return stats.Fetched
+	}
+
+	first := crawl()
+	if first == 0 {
+		t.Fatal("the first crawl fetched nothing")
+	}
+
+	if err := manager.Delete(ctx, "news"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	if second := crawl(); second == 0 {
+		t.Errorf("a job created again after a delete fetched nothing, because it "+
+			"inherited the finished queue of the job that was deleted (the first fetched %d)", first)
+	}
+}
+
+// TestStartingAndDeletingAtOnceNeverDisagree.
+//
+// A driver only reaches the running map once its stages are built and its
+// frontier is open, and begin reserves the name before that. Everything else
+// that acts on a job has to ask the same question, and asked the running map
+// alone: the whole build window was a hole.
+//
+// A delete landing in it returned success and removed the document while begin
+// carried on, registered a driver and wrote a running phase for a job that no
+// longer existed - a crawl nothing could find, and a state row nothing could
+// ever clear, because every path that clears one starts by reading the
+// document.
+//
+// The two must always agree afterwards, whichever won: a job that is gone is
+// not being crawled, and a job being crawled has not been deleted.
+func TestStartingAndDeletingAtOnceNeverDisagree(t *testing.T) {
+	manager, _ := cluster(t)
+	ctx := context.Background()
+
+	// Slow rather than blocking, so a crawl that does start can still be
+	// stopped: stopping drains, and draining waits for the page in flight.
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+		fmt.Fprint(w, `<html><head><title>Slow</title></head></html>`)
+	}))
+	t.Cleanup(slow.Close)
+
+	for range 10 {
+		if _, err := manager.Create(ctx, document(slow, "news")); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, _ = manager.Start(ctx, "news", false)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = manager.Delete(ctx, "news")
+		}()
+		wg.Wait()
+
+		listed, err := manager.List(ctx)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+
+		var found bool
+		for _, job := range listed {
+			if job.Name == "news" {
+				found = true
+			}
+		}
+
+		if !found {
+			// Deleted, so nothing may still be driving it: a running phase for
+			// a job with no document is the row nothing can clear.
+			if _, err := manager.Status(ctx, "news"); err == nil {
+				t.Fatal("news was deleted and still has a status")
+			}
+			continue
+		}
+
+		// Still there, so tidy up for the next round.
+		if status, err := manager.Status(ctx, "news"); err == nil && status.State.Phase.Live() {
+			if _, err := manager.Stop(ctx, "news"); err != nil {
+				t.Fatalf("stop: %v", err)
+			}
+		}
+		if err := manager.Delete(ctx, "news"); err != nil {
+			t.Fatalf("cleanup delete: %v", err)
+		}
+	}
+}
+
 // TestListReportsEveryJobAndItsPhase.
 func TestListReportsEveryJobAndItsPhase(t *testing.T) {
 	manager, _ := cluster(t)

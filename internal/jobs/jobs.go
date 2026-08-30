@@ -385,7 +385,7 @@ func (m *Manager) Update(ctx context.Context, document []byte) (bus.JobStatus, e
 	}
 
 	m.mu.Lock()
-	live := m.running[submitted.Name] != nil
+	live := m.busy(submitted.Name)
 	m.mu.Unlock()
 
 	if live {
@@ -418,8 +418,15 @@ func (m *Manager) Delete(ctx context.Context, name string) error {
 	}
 
 	m.mu.Lock()
-	live := m.running[name] != nil
+	live, starting := m.running[name] != nil, m.starting[name]
 	m.mu.Unlock()
+
+	if starting {
+		// Refused rather than raced. There is no driver to stop yet, and
+		// deleting now would leave begin registering one for a job that no
+		// longer exists.
+		return fmt.Errorf("jobs: %q is starting. Try again once it is running", name)
+	}
 
 	if live {
 		// A crawl that ended between the check above and the stop below is not
@@ -432,9 +439,27 @@ func (m *Manager) Delete(ctx context.Context, name string) error {
 		}
 	}
 
-	// The state goes first. A job whose document is gone and whose state is
-	// not is a row nothing can ever clear, because every path that clears one
-	// starts by reading the document.
+	// The frontier too, because delete means delete.
+	//
+	// It used to be left, on the reasoning that a job recreated under the same
+	// name should carry on. That reasoning is what `stop` is for. What it
+	// actually produced was a job somebody deleted, rewrote and started, whose
+	// every start URL was already recorded as finished: Seed added nothing, the
+	// workers leased nothing, and the run ended "finished" with fetched 0 and
+	// items 0 - indistinguishable from a site that had gone dark, and fixable
+	// only by knowing to pass --fresh to a job that had never been run.
+	//
+	// Reported and not fatal. The document is what the cluster serves, and
+	// refusing to delete it because a file could not be tidied would leave the
+	// job running tomorrow.
+	if err := m.forget(ctx, name); err != nil {
+		m.log.WarnContext(ctx, "the job is deleted and its frontier was not emptied",
+			"job", name, "error", err)
+	}
+
+	// The state goes before the document. A job whose document is gone and
+	// whose state is not is a row nothing can ever clear, because every path
+	// that clears one starts by reading the document.
 	if err := m.states.Delete(ctx, name); err != nil {
 		return err
 	}
@@ -472,6 +497,26 @@ func (m *Manager) Stop(ctx context.Context, name string) (bus.JobStatus, error) 
 // Pause ends the loop and records that resuming should carry on.
 func (m *Manager) Pause(ctx context.Context, name string) (bus.JobStatus, error) {
 	return m.halt(ctx, name, bus.PhasePaused)
+}
+
+// busy reports whether anything is already working on this job.
+//
+// Running or about to be: a driver only reaches the running map once its stages
+// are built and its frontier is open, and `begin` reserves the name before that
+// so a second start does not do the work twice. Everything else that acts on a
+// job has to ask the same question, and did not - it looked at the running map
+// alone, so the whole build window was a hole.
+//
+// A delete landing in it returned success and removed the document while begin
+// carried on, registered a driver and wrote a running phase for a job that no
+// longer existed: a crawl nothing could find, and a state row nothing could
+// ever clear, because every path that clears one starts by reading the document.
+// An update landing in it skipped the mutation review and applied a change to
+// the revision that was about to start.
+//
+// Caller holds m.mu.
+func (m *Manager) busy(name string) bool {
+	return m.running[name] != nil || m.starting[name]
 }
 
 // begin builds a crawl and drives it.
@@ -567,14 +612,10 @@ func (m *Manager) begin(ctx context.Context, name string, fresh, seed bool) (bus
 	// list closing the shared cache and the bus, and drive then started and
 	// flushed its exporters into a closed bucket.
 	//
-	// Every path out of here from this point either starts drive or calls Done.
-	m.wg.Add(1)
-
 	m.mu.Lock()
 	switch {
 	case m.closed:
 		m.mu.Unlock()
-		m.wg.Done()
 		cancel()
 		_ = crawl.Close()
 		return bus.JobStatus{}, errors.New("jobs: the manager is closing")
@@ -584,11 +625,20 @@ func (m *Manager) begin(ctx context.Context, name string, fresh, seed bool) (bus
 		// built is closed rather than left running, which is the whole point:
 		// the loser must not be a second crawl nobody can stop.
 		m.mu.Unlock()
-		m.wg.Done()
 		cancel()
 		_ = crawl.Close()
 		return bus.JobStatus{}, fmt.Errorf("jobs: %q is already running", name)
 	}
+
+	// Counted under the same lock that sets `closed`, so a positive Add can
+	// never land while Close is waiting: either this gets the lock first and
+	// Close then sees the driver and waits for it, or Close gets it first and
+	// the case above returns. Lifting the counter off zero beside a live Wait
+	// is a documented misuse that panics the process, and the window was real -
+	// the last driver's Done takes it to zero while a start is in flight.
+	//
+	// Every path out of here from this point either starts drive or calls Done.
+	m.wg.Add(1)
 	m.running[name] = d
 	m.mu.Unlock()
 
@@ -765,9 +815,17 @@ func (m *Manager) halt(ctx context.Context, name string, intent bus.Phase) (bus.
 	m.mu.Lock()
 	d := m.running[name]
 	if d == nil {
+		starting := m.starting[name]
 		m.mu.Unlock()
+
 		if _, _, err := m.jobs.Get(ctx, name); err != nil {
 			return bus.JobStatus{}, err
+		}
+		if starting {
+			// It is about to be, and saying "not running" a millisecond before
+			// it starts is an answer somebody would act on by starting it
+			// again.
+			return bus.JobStatus{}, fmt.Errorf("jobs: %q is starting. Try again once it is running", name)
 		}
 		return bus.JobStatus{}, fmt.Errorf("jobs: %q %w", name, errNotRunning)
 	}

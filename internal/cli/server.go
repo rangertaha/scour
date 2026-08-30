@@ -92,7 +92,7 @@ func Server(a *App) *ucli.Command {
 	}
 }
 
-func runServer(ctx context.Context, a *App, path, join, name, dir, stages string, quiet, drive bool) error {
+func runServer(ctx context.Context, a *App, path, join, name, dir, stages string, quiet, drive bool) (err error) {
 	if name == "" {
 		host, err := os.Hostname()
 		if err != nil || host == "" {
@@ -149,11 +149,34 @@ func runServer(ctx context.Context, a *App, path, join, name, dir, stages string
 	// what answers the bus goes down before what it answers from: a store
 	// closed while its subscriptions were still taking work would answer
 	// requests with a closed database.
+	//
+	// What a close reports is not thrown away. Shutting down is where the
+	// expensive failures live: an exporter writing its footer, a store
+	// committing its last batch, an object-store bucket being let go. A server
+	// that swallowed those exited zero having lost the tail of the work it had
+	// just reported doing, which is the failure `scour crawl` closes early to
+	// avoid and the one this had no way to notice at all.
 	var stop []func() error
 	defer func() {
+		var problems []error
 		for i := len(stop) - 1; i >= 0; i-- {
-			_ = stop[i]()
+			if closeErr := stop[i](); closeErr != nil {
+				problems = append(problems, closeErr)
+			}
 		}
+		if len(problems) == 0 {
+			return
+		}
+
+		// Not over the top of a failure that is already being reported: that
+		// one is the reason the shutdown is happening, and it is the more
+		// diagnostic of the two.
+		joined := errors.Join(problems...)
+		if err == nil {
+			err = Failedf("%v", joined)
+			return
+		}
+		a.Warnf("while shutting down: %v\n", joined)
 	}()
 
 	// One cache, shared by the node that fetches and the job service that

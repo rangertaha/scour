@@ -454,20 +454,48 @@ func same(before, after *record.Record) bool {
 // changed, and nothing else. A step that reordered nothing claims nothing, so
 // it cannot undo the step beside it.
 func moved(input, output []string) []string {
-	was := make(map[string]int, len(input))
-	for i, id := range input {
-		was[id] = i
+	// Compared over the records the two have in common, not by index.
+	//
+	// An index says nothing on its own: dropping one record shifts every record
+	// after it, and adding one at the front shifts all of them. Read that way, a
+	// step that only filtered claimed everything below its first drop and
+	// re-imposed the input's order on it - so a `validate` that removed one
+	// invalid record silently undid the `rank` sharing its wave, which is the
+	// defect this function was written to fix, arriving by the other door.
+	//
+	// Restricting each list to what the other also holds leaves two orderings
+	// of one set, and then a difference really is a move.
+	kept := make(map[string]bool, len(output))
+	for _, id := range output {
+		kept[id] = true
+	}
+	held := make(map[string]bool, len(input))
+	for _, id := range input {
+		held[id] = true
+	}
+
+	var was []string
+	for _, id := range input {
+		if kept[id] {
+			was = append(was, id)
+		}
+	}
+
+	now := make([]string, 0, len(was))
+	seen := make(map[string]bool, len(output))
+	for _, id := range output {
+		// Invented by this step, or repeated: where it sits is not a
+		// reordering of anything, and the wave's keep rule decides its fate.
+		if !held[id] || seen[id] {
+			continue
+		}
+		seen[id] = true
+		now = append(now, id)
 	}
 
 	var claimed []string
-	for i, id := range output {
-		at, known := was[id]
-		if !known {
-			// Invented by this step. Where it sits is not a reordering of
-			// anything, and the wave's keep rule decides whether it survives.
-			continue
-		}
-		if at != i {
+	for i, id := range now {
+		if i < len(was) && was[i] != id {
 			claimed = append(claimed, id)
 		}
 	}

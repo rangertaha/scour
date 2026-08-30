@@ -281,6 +281,9 @@ func TestNormalisingIsClosedOverItsOwnOutput(t *testing.T) {
 	for _, raw := range []string{
 		"http://:80/a",
 		"https://:443/a",
+		"http://:8080/a",
+		"https://example.com//assets/a.png",
+		"https://example.com//",
 		"https://example.com/a/./b",
 		"https://example.com:8080/a",
 		"HTTPS://Example.COM/A",
@@ -331,6 +334,62 @@ func TestAnEncodedSeparatorIsNotASeparator(t *testing.T) {
 		}
 		if urls.Hash(a) == urls.Hash(b) {
 			t.Errorf("%q and %q hash the same", a, b)
+		}
+	}
+}
+
+// TestADoubledSlashIsPartOfThePath.
+//
+// Path rewrites run on the escaped form so an encoded separator survives them,
+// and the escaped form was written back by parsing it as a URL reference.
+// url.Parse reads a leading `//` as a scheme-relative authority, so
+// `//assets/a.png` came back with a host of `assets` and a path of `/a.png`:
+// https://example.com//assets/a.png became https://example.com/a.png, a
+// different page and usually one that does not exist.
+//
+// It collided too - //a/p and //b/p both became /p, one hash, and the
+// dupefilter dropped one of two real pages, which is the failure the escaped
+// rewrite was introduced to prevent. A doubled slash is something a template
+// produces by accident all the time.
+func TestADoubledSlashIsPartOfThePath(t *testing.T) {
+	for _, raw := range []string{
+		"https://example.com//assets/a.png",
+		"https://example.com//a/./p",
+	} {
+		got, err := urls.Normalise(raw, urls.Options{})
+		if err != nil {
+			t.Fatalf("%q: %v", raw, err)
+		}
+		if !strings.Contains(got, "//") {
+			t.Errorf("%q normalised to %q, losing a path segment", raw, got)
+		}
+	}
+
+	a, err := urls.Normalise("https://example.com//a/p", urls.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := urls.Normalise("https://example.com//b/p", urls.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Errorf("two different pages both normalise to %q", a)
+	}
+}
+
+// TestAHostThatIsOnlyAPortIsNoHost.
+//
+// url.Parse validates a port and is content for the name to be empty, and the
+// default-port strip only fires for :80 and :443, so "http://:8080/a" passed
+// the emptiness check with a host of ":8080". It is idempotent, so the
+// round-trip check cannot see it, and it queues with a real hash: the
+// downloader then fails it with "no Host in request URL" on every attempt until
+// the frontier abandons it.
+func TestAHostThatIsOnlyAPortIsNoHost(t *testing.T) {
+	for _, raw := range []string{"http://:8080/a", "https://:8443/", "http://:80/a"} {
+		if got, err := urls.Normalise(raw, urls.Options{}); err == nil {
+			t.Errorf("%q was accepted as %q, and nothing can fetch it", raw, got)
 		}
 	}
 }

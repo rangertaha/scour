@@ -248,10 +248,10 @@ func Job(a *App) *ucli.Command {
 				}),
 			},
 			acts("In the cluster", "delete", "Remove a job, stopping it first",
-				"Stops the crawl if it is running, then forgets the document and\n"+
-					"everything recorded about it. The frontier on disk is left where it\n"+
-					"is, so a job recreated under the same name resumes rather than\n"+
-					"starting over. Start it fresh if that is not what you want.",
+				"Stops the crawl if it is running, then forgets the document, what\n"+
+					"it was doing, and the queue it had built. A job created again under\n"+
+					"the same name starts from nothing.\n\n"+
+					"Carrying on where a crawl left off is what stop and start are for.",
 				func(ctx context.Context, jobs *bus.ControlClient, name string) error {
 					if err := jobs.Delete(ctx, name); err != nil {
 						return serviceError(err)
