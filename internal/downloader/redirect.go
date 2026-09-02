@@ -12,7 +12,6 @@ import (
 
 	"github.com/rangertaha/scour/internal/chain"
 	"github.com/rangertaha/scour/internal/scope"
-	"github.com/rangertaha/scour/internal/urls"
 )
 
 // ErrTooManyRedirects reports a request that was forwarded more times than the
@@ -31,30 +30,23 @@ var ErrRedirectOutOfScope = fmt.Errorf("the redirect leaves the job's scope: %w"
 
 // allowed reports why a redirect target may not be followed, or nil.
 //
-// The URL is normalised first, because that is what the scope was built to
-// compare against: the scheduler normalises before it checks, and a check
-// against the raw form would answer a different question about the same page.
+// The target is handed over as written. The scope normalises it with the job's
+// own canonicalisation, which is the only way to be sure this asks the same
+// question the scheduler asked: this used to normalise with the defaults, and
+// a job with `lower_path = true` and `excluded = ["*/private/*"]` refused
+// /PRIVATE/secret when it queued one and followed a 302 straight to it. That
+// is the looser of two subtly different scope checks deciding the one URL in a
+// crawl a third party picks.
 //
-// With the job's own canonicalisation, for the same reason and for a while
-// without it. `included` and `excluded` are globbed against the whole URL, so
-// `lower_path` or `strip_trailing_slash` changes the answer: a job with
-// `lower_path = true` and `excluded = ["*/private/*"]` refused
-// /PRIVATE/secret at the scheduler and followed a 302 to it here. That is the
-// looser of two subtly different scope checks deciding the one URL in a crawl
-// that a third party chooses.
+// A target that will not normalise is refused by [scope.Scope.Allows] for the
+// same reason it would be refused here: it is not a URL the crawl can hold,
+// let alone one this job may fetch.
 func (f *follower) allowed(target *url.URL) error {
 	if f.bounds == nil {
 		return nil
 	}
-
-	normalised, err := urls.Normalise(target.String(), f.canon)
-	if err != nil {
-		// Not somewhere this job may go, because it is not anywhere: a target
-		// that will not normalise is not a URL the crawl can hold.
+	if !f.bounds.Allows(target.String()) {
 		return fmt.Errorf("%s: %w", target, ErrRedirectOutOfScope)
-	}
-	if !f.bounds.Allows(normalised) {
-		return fmt.Errorf("%s: %w", normalised, ErrRedirectOutOfScope)
 	}
 	return nil
 }
@@ -108,11 +100,6 @@ type follower struct {
 	// no domains, included or excluded allows everything, which is what `scour
 	// try` on a single URL means.
 	bounds *scope.Scope
-
-	// canon is how the job decides two URLs are the same page, which is what
-	// the scheduler normalises with before it asks the same scope the same
-	// question. See [engine.Job.Canonical].
-	canon urls.Options
 }
 
 func (f *follower) wrap(next Handler) Handler {

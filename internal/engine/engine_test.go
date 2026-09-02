@@ -1239,3 +1239,52 @@ func TestMutationValuesAreChecked(t *testing.T) {
 		})
 	}
 }
+
+// TestTheSeedCheckUsesTheJobsOwnCanonicalisation.
+//
+// The scheduler normalises a URL with the job's dupefilter settings and then
+// asks the scope. This check normalised with the defaults, so it answered a
+// different question about the same URL and got it wrong in both directions:
+// a job whose start URLs leave scope only once canonicalised was accepted,
+// stored, started and crawled nothing while reporting success - the exact
+// failure this validator exists to prevent - and a job whose start URLs enter
+// scope only once canonicalised was refused outright though it would have
+// worked.
+//
+// The third site of that class. The scope normalises for its callers now, so
+// there is no longer a way to ask it a question in terms it did not choose.
+func TestTheSeedCheckUsesTheJobsOwnCanonicalisation(t *testing.T) {
+	job := func(start, rule, pattern string) string {
+		return `
+job "news" {
+  start   = ["` + start + `"]
+  domains = ["example.com"]
+  ` + rule + ` = ["` + pattern + `"]
+
+  scheduler {
+    plugin "dupefilter" {
+      lower_path = true
+    }
+  }
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+}
+`
+	}
+
+	// Excluded once the path is lowercased, so the crawl would seed nothing.
+	err := parse(t, job("https://example.com/PRIVATE/index.html", "excluded", "*/private/*")).Validate()
+	if err == nil {
+		t.Error("accepted a job whose only start URL its own scheduler will refuse: " +
+			"the crawl reports success having fetched nothing")
+	}
+
+	// Included once the path is lowercased, so the crawl works.
+	if err := parse(t, job("https://example.com/Products/1", "included", "*/products/*")).Validate(); err != nil {
+		t.Errorf("refused a job whose start URL its own scheduler would have seeded: %v", err)
+	}
+}

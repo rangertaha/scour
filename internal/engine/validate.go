@@ -150,7 +150,7 @@ func (j *Job) validateStartIsInScope() []error {
 		return nil
 	}
 
-	bounds, err := scope.New(j.Domains, j.Included, j.Excluded)
+	bounds, err := scope.New(j.Domains, j.Included, j.Excluded, j.Canonical())
 	if err != nil {
 		// Reported here, and this used to be deliberately silent on the
 		// grounds that the scheduler says it when it builds one. That was true
@@ -170,11 +170,16 @@ func (j *Job) validateStartIsInScope() []error {
 
 	var refused []string
 	for _, raw := range j.Start {
-		normalised, err := urls.Normalise(raw, urls.Options{})
-		if err != nil {
+		// Asked as written. The scope normalises with the job's own
+		// canonicalisation, which is what the scheduler will do when it seeds:
+		// normalising here with the defaults instead accepted a job whose
+		// start URLs leave scope only once canonicalised - it crawled nothing
+		// and reported success - and refused one whose start URLs enter scope
+		// only once canonicalised, which would have worked.
+		if _, err := urls.Normalise(raw, j.Canonical()); err != nil {
 			continue // already reported by checkStartURL
 		}
-		if !bounds.Allows(normalised) {
+		if !bounds.Allows(raw) {
 			refused = append(refused, raw)
 		}
 	}

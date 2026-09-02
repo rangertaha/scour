@@ -33,6 +33,30 @@
 //
 // One rule, one implementation, whoever asks: two subtly different scope checks
 // is a crawl that leaves the site through whichever of them is looser.
+//
+// # Why the scope normalises the URL itself
+//
+// Because "one rule" turned out to mean the patterns and not the input. A
+// scope compares against a normalised URL, `included` and `excluded` are
+// globbed against the whole of it, and the job's own canonicalisation -
+// `lower_path`, `strip_trailing_slash`, `sort_query` - changes what that
+// string is. Three callers normalised before asking, and got it right once:
+//
+//   - the scheduler used the job's settings, which is the answer.
+//   - the downloader's redirect follower used the defaults, so a job with
+//     `lower_path = true` and `excluded = ["*/private/*"]` refused
+//     /PRIVATE/secret when it queued one and followed a 302 to it.
+//   - validation used the defaults, so a job whose start URLs are in scope
+//     only after canonicalisation was refused outright, and one whose start
+//     URLs leave scope only after it was accepted, stored, and crawled
+//     nothing - the exact "success that did nothing" that check exists to
+//     prevent.
+//
+// Fixing each site as it was found did not converge; a third turned up in the
+// pass after the second was fixed. So [Scope.Allows] takes the URL as written
+// and normalises it here, with the canonicalisation the scope was built with.
+// There is no longer a way to ask a scope a question in terms it did not
+// choose.
 package scope
 
 import (
@@ -47,6 +71,10 @@ import (
 // The zero value allows everything, which is what a job with no scope at all
 // means: `scour scrape` on one URL has nothing to be outside of.
 type Scope struct {
+	// canon is how the job this scope belongs to decides two URLs are the same
+	// page, applied to every URL before it is compared. See the package doc.
+	canon urls.Options
+
 	domains  []string
 	included []string
 	excluded []string
@@ -54,8 +82,13 @@ type Scope struct {
 
 // New builds a scope. Patterns are checked here so a job with an unusable one
 // is refused rather than quietly matching nothing.
-func New(domains, included, excluded []string) (*Scope, error) {
-	s := &Scope{}
+//
+// canon is the job's canonicalisation, from [engine.Job.Canonical]. It is a
+// parameter rather than something the caller applies beforehand for the reason
+// the package doc gives: three callers applied it beforehand and one of them
+// got it right.
+func New(domains, included, excluded []string, canon urls.Options) (*Scope, error) {
+	s := &Scope{canon: canon}
 
 	for _, d := range domains {
 		d = strings.ToLower(strings.TrimSpace(d))
@@ -97,10 +130,23 @@ func New(domains, included, excluded []string) (*Scope, error) {
 	return s, nil
 }
 
-// Allows reports whether a normalised URL is inside this scope.
-func (s *Scope) Allows(normalised string) bool {
+// Allows reports whether a URL is inside this scope.
+//
+// The URL is taken as written and normalised here, with the canonicalisation
+// the scope was built with. A URL that will not normalise is not allowed: it
+// is not a page this crawl can hold, let alone one it may fetch.
+//
+// Normalising an already-normalised URL is what the scheduler does, and it
+// costs a pass and changes nothing: normalisation is closed over its own
+// output, which its own tests pin.
+func (s *Scope) Allows(raw string) bool {
 	if s == nil {
 		return true
+	}
+
+	normalised, err := urls.Normalise(raw, s.canon)
+	if err != nil {
+		return false
 	}
 
 	// Excluded first and unconditionally. A job that has said never means

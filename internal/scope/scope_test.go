@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	"github.com/rangertaha/scour/internal/scope"
+	"github.com/rangertaha/scour/internal/urls"
 )
 
 func build(t *testing.T, domains, included, excluded []string) *scope.Scope {
 	t.Helper()
 
-	s, err := scope.New(domains, included, excluded)
+	s, err := scope.New(domains, included, excluded, urls.Options{})
 	if err != nil {
 		t.Fatalf("scope: %v", err)
 	}
@@ -137,10 +138,10 @@ func TestNoScopeAllowsEverything(t *testing.T) {
 // TestAPatternThatIsNotOneIsRefusedWhenBuilt, rather than quietly matching
 // nothing for the length of the crawl.
 func TestAPatternThatIsNotOneIsRefusedWhenBuilt(t *testing.T) {
-	if _, err := scope.New(nil, []string{"[unclosed"}, nil); err == nil {
+	if _, err := scope.New(nil, []string{"[unclosed"}, nil, urls.Options{}); err == nil {
 		t.Error("accepted an included pattern that is not one")
 	}
-	if _, err := scope.New(nil, nil, []string{"[unclosed"}); err == nil {
+	if _, err := scope.New(nil, nil, []string{"[unclosed"}, urls.Options{}); err == nil {
 		t.Error("accepted an excluded pattern that is not one")
 	}
 }
@@ -188,7 +189,7 @@ func TestAPortIsNotPartOfASitesName(t *testing.T) {
 // crawl fetched the thing it had been told never to touch, while the identical
 // URL on :443 was correctly refused.
 func TestAPortDoesNotDefeatAPattern(t *testing.T) {
-	included, err := scope.New(nil, []string{"*.example.com"}, nil)
+	included, err := scope.New(nil, []string{"*.example.com"}, nil, urls.Options{})
 	if err != nil {
 		t.Fatalf("scope: %v", err)
 	}
@@ -201,7 +202,7 @@ func TestAPortDoesNotDefeatAPattern(t *testing.T) {
 		}
 	}
 
-	excluded, err := scope.New([]string{"example.com"}, nil, []string{"*.internal.example.com"})
+	excluded, err := scope.New([]string{"example.com"}, nil, []string{"*.internal.example.com"}, urls.Options{})
 	if err != nil {
 		t.Fatalf("scope: %v", err)
 	}
@@ -232,7 +233,7 @@ func TestAPortDoesNotDefeatAPatternWithAPathInIt(t *testing.T) {
 		"https://example.com/admin/*", // globbed
 		"https://example.com/admin",   // read as a prefix
 	} {
-		excluded, err := scope.New([]string{"example.com"}, nil, []string{pattern})
+		excluded, err := scope.New([]string{"example.com"}, nil, []string{pattern}, urls.Options{})
 		if err != nil {
 			t.Fatalf("scope: %v", err)
 		}
@@ -247,7 +248,7 @@ func TestAPortDoesNotDefeatAPatternWithAPathInIt(t *testing.T) {
 		}
 	}
 
-	included, err := scope.New([]string{"example.com"}, []string{"https://example.com/news/*"}, nil)
+	included, err := scope.New([]string{"example.com"}, []string{"https://example.com/news/*"}, nil, urls.Options{})
 	if err != nil {
 		t.Fatalf("scope: %v", err)
 	}
@@ -275,7 +276,7 @@ func TestAPatternsHostIsFoldedLikeEveryOtherHost(t *testing.T) {
 	excluded, err := scope.New([]string{"example.com"}, nil, []string{
 		"*.Internal.example.com",
 		"https://Example.com/Admin/*",
-	})
+	}, urls.Options{})
 	if err != nil {
 		t.Fatalf("scope: %v", err)
 	}

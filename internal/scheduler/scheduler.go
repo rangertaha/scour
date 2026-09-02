@@ -134,7 +134,7 @@ func New(ctx context.Context, job *engine.Job, opts Options, open func(frontier.
 		return nil, errors.New("scheduler: no job")
 	}
 
-	bounds, err := scope.New(job.Domains, job.Included, job.Excluded)
+	bounds, err := scope.New(job.Domains, job.Included, job.Excluded, job.Canonical())
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: job %q: %w", job.Name, err)
 	}

@@ -96,7 +96,7 @@ func TestEveryTemplateCanFetchItsOwnStart(t *testing.T) {
 			}
 			job := doc.Jobs[0].Resolved()
 
-			bounds, err := scope.New(job.Domains, job.Included, job.Excluded)
+			bounds, err := scope.New(job.Domains, job.Included, job.Excluded, job.Canonical())
 			if err != nil {
 				t.Fatalf("scope: %v", err)
 			}
@@ -105,11 +105,12 @@ func TestEveryTemplateCanFetchItsOwnStart(t *testing.T) {
 				t.Fatal("has no start URLs, so it cannot crawl anything")
 			}
 			for _, start := range job.Start {
-				normalised, err := urls.Normalise(start, urls.Options{})
-				if err != nil {
+				if _, err := urls.Normalise(start, job.Canonical()); err != nil {
 					t.Fatalf("start %q: %v", start, err)
 				}
-				if !bounds.Allows(normalised) {
+				// Asked as written: the scope normalises with the job's own
+				// canonicalisation, which is what the scheduler will do.
+				if !bounds.Allows(start) {
 					t.Errorf("start %q is outside the job's own scope, so a crawl seeds nothing:\n"+
 						"  domains  = %v\n  included = %v\n  excluded = %v",
 						start, job.Domains, job.Included, job.Excluded)

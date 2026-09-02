@@ -162,11 +162,11 @@ func New(ctx context.Context, job *engine.Job, opts Options) (*Stage, error) {
 	// already handed this request over, so the check has to happen here or
 	// nowhere. It used to happen nowhere.
 	if hops := job.Downloader.Redirects(); hops > 0 {
-		bounds, err := scope.New(job.Domains, job.Included, job.Excluded)
+		bounds, err := scope.New(job.Domains, job.Included, job.Excluded, job.Canonical())
 		if err != nil {
 			return nil, fmt.Errorf("downloader: job %q: %w", job.Name, err)
 		}
-		handler = (&follower{max: hops, bounds: bounds, canon: job.Canonical()}).wrap(handler)
+		handler = (&follower{max: hops, bounds: bounds}).wrap(handler)
 
 		// Every hop re-enters from the top, so the whole of what is wrapped
 		// happens again per hop, robots and all.
