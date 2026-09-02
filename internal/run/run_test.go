@@ -232,6 +232,16 @@ func TestScopeKeepsACrawlOnItsOwnSite(t *testing.T) {
 	if got := r.Stats().Fetched.Load(); got != 5 {
 		t.Errorf("fetched %d pages; the link off-site was followed", got)
 	}
+
+	// And it was never queued, which is the half the count above cannot see.
+	// The scheduler's contract is that an out-of-scope URL is dropped before
+	// it is queued; with the check removed the off-site link is queued and
+	// then refused further down, by a robots.txt fetch that cannot resolve the
+	// host - so Fetched is 5 either way and this test passed with the scope
+	// check disabled outright.
+	if got := r.Stats().Queued.Load(); got != 5 {
+		t.Errorf("queued %d urls, want the 5 on this site: the link off-site was queued", got)
+	}
 }
 
 // TestTheSamePageIsFetchedOnce, whatever spelling it was linked under.

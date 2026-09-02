@@ -280,7 +280,15 @@ func TestAStepWorksOnACopy(t *testing.T) {
 		}), nil
 	})
 
-	original := rec("https://example.com/a", map[string]string{"title": "Real"})
+	// A value cleaning would change. It used to be "Real", already trimmed, so
+	// `clean` mutating its input in place produced the same bytes and nothing
+	// could tell: replacing its Clone with a plain assignment left the whole
+	// repo's suite passing, race detector included.
+	//
+	// clean is alone in the first wave, and a lone step is handed the caller's
+	// own records rather than a copy - that is the fast path in Run - so this
+	// is the caller's record being edited underneath it.
+	original := rec("https://example.com/a", map[string]string{"title": "  Real  "})
 
 	run(t, job(t, `
   pipeline {
@@ -296,7 +304,7 @@ func TestAStepWorksOnACopy(t *testing.T) {
   }
 `), original)
 
-	if original.Get("title") != "Real" {
+	if original.Get("title") != "  Real  " {
 		t.Errorf("the record handed in was edited: %q", original.Get("title"))
 	}
 }

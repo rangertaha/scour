@@ -67,6 +67,60 @@ INSERT INTO hosts (host, next_at) VALUES ('example.com', 0);`); err != nil {
 	if req, _ := f.Lease(ctx, "news", frontiertest.Origin.Add(10*time.Second), time.Minute); req == nil {
 		t.Error("the resumed crawl never got the host back")
 	}
+
+}
+
+// TestAResumedCrawlKeepsTheURLsItAlreadyHad.
+//
+// The other half of bringing a database forward, and the half migrate's version
+// number exists for. Lease answers "is anything due at all" from the hosts
+// table alone, so a URL whose host has no row there is a URL the resumed crawl
+// never leases again - which is losing work, not slowing it down.
+//
+// [TestAnOlderDatabaseIsBroughtForward] creates a hosts table and no urls
+// table, so `INSERT INTO hosts SELECT DISTINCT host FROM urls` had nothing to
+// copy: deleting the entire backfill left it passing.
+func TestAResumedCrawlKeepsTheURLsItAlreadyHad(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	old, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "frontier.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// A urls table with a host that hosts knows nothing about, which is what
+	// an older build left behind: it had no hosts table to keep in step.
+	if _, err := old.Exec(`
+CREATE TABLE hosts (host TEXT PRIMARY KEY, next_at INTEGER NOT NULL);
+
+CREATE TABLE urls (
+	job TEXT NOT NULL, hash TEXT NOT NULL, url TEXT NOT NULL, host TEXT NOT NULL,
+	depth INTEGER NOT NULL, score REAL NOT NULL, parent TEXT NOT NULL DEFAULT '',
+	discovered INTEGER NOT NULL, status TEXT NOT NULL,
+	ready_at INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (job, hash)
+);
+INSERT INTO urls (job, hash, url, host, depth, score, discovered, status) VALUES
+	('news', 'h1', 'https://example.com/left-over', 'example.com', 0, 0, 0, 'waiting');`); err != nil {
+		t.Fatalf("build the old schema: %v", err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	f, err := sqlite.Open(frontier.Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("open a database an older build made: %v", err)
+	}
+	defer f.Close()
+
+	req, err := f.Lease(ctx, "news", frontiertest.Origin, time.Minute)
+	if err != nil {
+		t.Fatalf("the URL the old database held is not leasable: %v", err)
+	}
+	if req == nil || req.URL != "https://example.com/left-over" {
+		t.Errorf("leased %v, want the URL the old database already held", req)
+	}
 }
 
 // TestAnOlderDepthIndexIsRebuilt.

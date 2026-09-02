@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,12 +36,22 @@ import (
 // site is a small site whose pages link to each other.
 func site(t *testing.T) *httptest.Server {
 	t.Helper()
+	server, _ := countedSite(t)
+	return server
+}
 
+// countedSite is [site] and how many pages it has been asked for, for the tests
+// that care whether a page was fetched twice.
+func countedSite(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+
+	var hits atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/robots.txt" {
 			http.NotFound(w, r)
 			return
 		}
+		hits.Add(1)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 		if r.URL.Path == "/" {
@@ -54,7 +65,7 @@ func site(t *testing.T) *httptest.Server {
 			strings.TrimPrefix(r.URL.Path, "/"))
 	}))
 	t.Cleanup(server.Close)
-	return server
+	return server, &hits
 }
 
 func document(server *httptest.Server, name string) []byte {
@@ -348,7 +359,7 @@ func TestASubmissionIsOneJob(t *testing.T) {
 func TestPauseKeepsTheFrontierAndResumeCarriesOn(t *testing.T) {
 	manager, _ := cluster(t)
 	ctx := context.Background()
-	server := site(t)
+	server, hits := countedSite(t)
 
 	if _, err := manager.Create(ctx, document(server, "news")); err != nil {
 		t.Fatalf("create: %v", err)
@@ -371,6 +382,26 @@ func TestPauseKeepsTheFrontierAndResumeCarriesOn(t *testing.T) {
 		t.Fatalf("resume: %v", err)
 	}
 	waitFor(t, manager, "news", bus.PhaseDone, bus.PhaseFailed)
+
+	// The queue survived, which is the thing this test is named for and the
+	// thing reaching a finished phase cannot show: a resume that threw the
+	// frontier away reaches it sooner, not later. Making Resume re-seed left
+	// this test passing.
+	//
+	// Four pages, each asked for once. Fewer would mean the pause lost what
+	// was queued; more would mean the resume fetched again what the first run
+	// had already done.
+	if got := hits.Load(); got != 4 {
+		t.Errorf("the site was asked for %d pages across a pause and a resume, want its 4", got)
+	}
+
+	stats, err := manager.Stats(ctx, "news")
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if stats.Waiting != 0 {
+		t.Errorf("%d urls left queued after the crawl finished", stats.Waiting)
+	}
 }
 
 // TestPausingMidCrawlLeavesNothingLeased.
