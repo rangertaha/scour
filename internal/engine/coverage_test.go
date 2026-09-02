@@ -1530,3 +1530,49 @@ func TestAnExternalPipelineIsRefusedWhenTheDocumentIsRead(t *testing.T) {
   }
 `, "external")
 }
+
+// TestANestedTagIsADimension.
+//
+// Tags walked the item's own properties and Fields flattens a tree of any
+// depth, so a `tag = true` on a nested property was validated - validation
+// recurses, and will even refuse a nested tag typed object or entity, so the
+// format plainly accepts it - and then filed as a measurement. Nobody could
+// group by it, and nothing said so.
+func TestANestedTagIsADimension(t *testing.T) {
+	j := mustValidate(t, `
+  item "price" {
+    of   = "company"
+    time = "observed"
+
+    property "market" {
+      type = object
+
+      property "sector" {
+        type = str
+        tag  = true
+      }
+
+      property "note" {
+        type = str
+      }
+    }
+
+    property "value" {
+      type = float
+    }
+
+    property "observed" {
+      type = date
+    }
+  }
+`)
+	item := j.Items[1]
+
+	if got := strings.Join(item.Tags(), ","); got != "market.sector,of" {
+		t.Errorf("tags = %q, want the nested tag among them", got)
+	}
+	// And it is not also a measurement: the two are a partition.
+	if got := strings.Join(item.Fields(), ","); got != "market.note,observed,value" {
+		t.Errorf("fields = %q, want the nested tag absent", got)
+	}
+}

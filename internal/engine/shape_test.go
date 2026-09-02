@@ -358,3 +358,152 @@ job "news" {
 		t.Errorf("the refusal does not name the field: %v", err)
 	}
 }
+
+// TestTagsAndFieldsPartitionEveryLeaf.
+//
+// Tags and Fields decide, for each of an item's leaves, whether it is
+// something a point is filed under or something the point measured. Every leaf
+// must be exactly one: a leaf in neither is extracted and never reaches a
+// measurement, and a leaf in both reaches it twice under one name.
+//
+// They were written as opposites and drifted, because each decided at the top
+// level and only one of them recursed. A `tag = true` on a nested property was
+// accepted by validation and then filed as a measurement, so nobody could
+// group by it and nothing said so. A class test rather than a case, because
+// the pair has to keep this for shapes nobody has written yet.
+func TestTagsAndFieldsPartitionEveryLeaf(t *testing.T) {
+	for name, src := range map[string]string{
+		"nested tag": `
+  item "price" {
+    property "market" {
+      type = object
+
+      property "sector" {
+        type = str
+        tag  = true
+      }
+
+      property "note" {
+        type = str
+      }
+    }
+  }
+`,
+		"entity with children": `
+  item "thing" {
+    property "author" {
+      entity = "person"
+
+      property "role" {
+        type = str
+      }
+    }
+
+    property "words" {
+      type = int
+    }
+  }
+`,
+		"tag under an entity": `
+  item "thing" {
+    property "author" {
+      entity = "person"
+
+      property "role" {
+        type = str
+      }
+    }
+  }
+`,
+		"deep": `
+  item "thing" {
+    property "a" {
+      type = object
+
+      property "b" {
+        type = object
+
+        property "c" {
+          type = str
+          tag  = true
+        }
+
+        property "d" {
+          type = str
+        }
+      }
+    }
+  }
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			doc := parse(t, minimal(src))
+			if err := doc.Validate(); err != nil {
+				t.Fatalf("did not validate: %v", err)
+			}
+
+			for _, item := range doc.Jobs[0].Items {
+				// What the document says each leaf is: a dimension if it or
+				// anything above it was declared one.
+				declared := map[string]bool{}
+				var walk func(prefix string, p *engine.Property, under bool)
+				walk = func(prefix string, p *engine.Property, under bool) {
+					under = under || p.Tag || p.PropertyType() == engine.TypeEntity
+					if len(p.Properties) == 0 || under {
+						for _, leaf := range engine.Flattened(prefix, p) {
+							declared[leaf] = under
+						}
+						if under {
+							return
+						}
+					}
+					for _, nested := range p.Properties {
+						walk(prefix+"."+nested.Name, nested, under)
+					}
+				}
+				for _, p := range item.Properties {
+					walk(p.Name, p, false)
+				}
+
+				seen := map[string]int{}
+				for _, n := range item.Tags() {
+					seen[n]++
+					if _, leaf := declared[n]; leaf && !declared[n] {
+						t.Errorf("item %q: %q is a measurement by the document and a dimension by Tags",
+							item.Name, n)
+					}
+				}
+				for _, n := range item.Fields() {
+					seen[n]++
+					if declared[n] {
+						t.Errorf("item %q: %q is declared a dimension and is filed as a measurement, "+
+							"so nobody can group by it: tags=%v fields=%v",
+							item.Name, n, item.Tags(), item.Fields())
+					}
+				}
+
+				// Relations and `of` are tags with no leaf of their own.
+				for _, n := range item.Relations {
+					delete(seen, n.Name)
+				}
+				delete(seen, "of")
+
+				for leaf := range declared {
+					switch seen[leaf] {
+					case 1:
+					case 0:
+						t.Errorf("item %q: leaf %q is neither a tag nor a field, so nothing carries it: tags=%v fields=%v",
+							item.Name, leaf, item.Tags(), item.Fields())
+					default:
+						t.Errorf("item %q: leaf %q is both a tag and a field: tags=%v fields=%v",
+							item.Name, leaf, item.Tags(), item.Fields())
+					}
+					delete(seen, leaf)
+				}
+				for name := range seen {
+					t.Errorf("item %q: %q is reported as a tag or a field and is not a leaf of the shape", item.Name, name)
+				}
+			}
+		})
+	}
+}

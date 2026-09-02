@@ -335,13 +335,38 @@ func (i *Item) Tags() []string {
 		out = append(out, r.Name)
 	}
 	for _, p := range i.Properties {
-		// The resolved type, so a property that names an entity kind without
-		// writing `type = entity` is a dimension like any other reference.
-		if p.Tag || p.PropertyType() == TypeEntity {
-			out = append(out, flattened(p.Name, p)...)
-		}
+		out = append(out, dimensions(p.Name, p)...)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// dimensions is the leaf names under one property that are dimensions.
+//
+// A property that is a dimension makes its whole subtree one: `author` with
+// `entity = "person"` and an `author.role` beneath it is a reference and the
+// things said about the thing referred to, and both are what a point is filed
+// under rather than what it measured.
+//
+// A property that is not a dimension may still have one beneath it, which is
+// why this recurses. Tags walked the item's own properties only, so a
+// `tag = true` on a nested property was validated - validation recurses, and
+// refuses a nested tag typed object or entity, so the format plainly accepts
+// the setting - and then filed as a measurement. Nobody could group by it and
+// nothing said so.
+//
+// [Item.Fields] is the mirror and the two are a partition of [flattened].
+func dimensions(prefix string, p *Property) []string {
+	// The resolved type, so a property that names an entity kind without
+	// writing `type = entity` is a dimension like any other reference.
+	if p.Tag || p.PropertyType() == TypeEntity {
+		return flattened(prefix, p)
+	}
+
+	var out []string
+	for _, nested := range p.Properties {
+		out = append(out, dimensions(prefix+"."+nested.Name, nested)...)
+	}
 	return out
 }
 
@@ -375,15 +400,34 @@ func (i *Item) Identity() []string {
 	return append(i.Tags(), i.Time)
 }
 
-// Fields are what this item measures: every property that is not a dimension.
+// Fields are what this item measures: every leaf that is not a dimension.
+//
+// The mirror of [Item.Tags], and the two are a partition of [flattened]: a
+// leaf is one or the other and never both. See [dimensions] for why this
+// recurses rather than deciding at the top level.
 func (i *Item) Fields() []string {
 	var out []string
 	for _, p := range i.Properties {
-		if !p.Tag && p.PropertyType() != TypeEntity {
-			out = append(out, flattened(p.Name, p)...)
-		}
+		out = append(out, measures(p.Name, p)...)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// measures is the leaf names under one property that are not dimensions, and
+// the mirror of [dimensions].
+func measures(prefix string, p *Property) []string {
+	if p.Tag || p.PropertyType() == TypeEntity {
+		return nil
+	}
+	if len(p.Properties) == 0 {
+		return []string{prefix}
+	}
+
+	var out []string
+	for _, nested := range p.Properties {
+		out = append(out, measures(prefix+"."+nested.Name, nested)...)
+	}
 	return out
 }
 
