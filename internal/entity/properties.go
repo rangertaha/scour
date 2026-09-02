@@ -285,13 +285,29 @@ SELECT r.id, r.from_id, r.to_id, r.kind, r.topic, r.position,
 // The other half of [Store.Kinds]: edges are typed the way nodes are, and a
 // graph you did not build is not readable until you can see both.
 func (s *graph) RelationKinds(ctx context.Context) ([]RelationKind, error) {
+	// Distinct over the whole of what makes an edge, which is the relations
+	// primary key with both ends resolved: from, to, kind and topic. Counting
+	// the pair alone folded every topic together, so an author asserted under
+	// three topics was one edge here and three in [Store.Relations] - and the
+	// count is the only thing that says how much of the graph a kind is.
+	//
+	// The ordering counts the same rows it reports. It was COUNT(*) over the
+	// raw rows while the column returned was the distinct count, so a list
+	// documented as "how many of each" could come back with the smaller number
+	// first.
+	//
+	// A subquery rather than concatenating the columns, because an entity id
+	// carries its kind and its name and either may contain the separator: two
+	// different edges could be spelled the same way and counted once.
 	rows, err := s.db.QueryContext(ctx, `
-SELECT r.kind, COUNT(DISTINCT rf.canonical || ':' || rt.canonical)
-  FROM relations r
-  JOIN resolved rf ON rf.id = r.from_id
-  JOIN resolved rt ON rt.id = r.to_id
- GROUP BY r.kind
- ORDER BY COUNT(*) DESC, r.kind`)
+SELECT kind, COUNT(*) AS edges FROM (
+  SELECT DISTINCT r.kind AS kind, rf.canonical AS f, rt.canonical AS t, r.topic AS topic
+    FROM relations r
+    JOIN resolved rf ON rf.id = r.from_id
+    JOIN resolved rt ON rt.id = r.to_id
+)
+ GROUP BY kind
+ ORDER BY edges DESC, kind`)
 	if err != nil {
 		return nil, fmt.Errorf("entity: relation kinds: %w", err)
 	}

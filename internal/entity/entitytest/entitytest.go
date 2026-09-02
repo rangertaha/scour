@@ -85,6 +85,7 @@ func Run(t *testing.T, open Open) {
 	t.Run("AMergeGoesToTheNameTheRuleActuallyFound", func(t *testing.T) { testAMergeGoesToTheNameTheRuleFound(t, open) })
 	t.Run("ARuleOnlyLicensesTheMergesItCouldHaveFound", func(t *testing.T) { testARuleOnlyLicensesTheMergesItCouldHaveFound(t, open) })
 	t.Run("AnUnknownRuleIsRefused", func(t *testing.T) { testAnUnknownRuleIsRefused(t, open) })
+	t.Run("RelationKindsCountsEveryEdge", func(t *testing.T) { testRelationKindsCountsEveryEdge(t, open) })
 }
 
 func said(job, url string) entity.Provenance {
@@ -886,6 +887,82 @@ func testAnUnknownRuleIsRefused(t *testing.T, open Open) {
 
 	if err := g.Merge(ctx, stranger, full, "whatever-the-caller-sent", from); err == nil {
 		t.Error("a rule the store has never heard of merged two entities unchecked")
+	}
+}
+
+// testRelationKindsCountsEveryEdge.
+//
+// A relation's identity is its two ends, its kind and its topic - that is the
+// relations primary key, and [Store.Relations] returns one row per edge. The
+// count folded the topic away, so an author asserted under three topics was
+// three edges to Relations and one to RelationKinds, and the count is the only
+// thing that says how much of the graph a kind is.
+//
+// The ordering is checked too: it counted the raw rows while reporting the
+// distinct ones, so a list documented as ordered by how many there are could
+// come back smallest first.
+func testRelationKindsCountsEveryEdge(t *testing.T, open Open) {
+	ctx := context.Background()
+	g := open(t)
+	from := said("news", "https://a.example/1")
+
+	paper, err := g.Assert(ctx, "article", "A paper", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alex, err := g.Assert(ctx, "person", "Alex Doe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := g.Assert(ctx, "person", "Bob Roe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cher, err := g.Assert(ctx, "person", "Cher Poe", from)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// One author under three topics: three edges by the primary key.
+	for i, topic := range []string{"climate", "energy", "policy"} {
+		if _, err := g.Relate(ctx, paper, alex, "author", topic, i, from); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Two editors, one topic each.
+	for i, who := range []string{bob, cher} {
+		if _, err := g.Relate(ctx, paper, who, "editor", "", i, from); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	edges, err := g.Relations(ctx, paper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 5 {
+		t.Fatalf("Relations returned %d edges, want 5", len(edges))
+	}
+
+	kinds, err := g.RelationKinds(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kinds) != 2 {
+		t.Fatalf("RelationKinds = %+v, want two kinds", kinds)
+	}
+	counted := map[string]int{}
+	for _, k := range kinds {
+		counted[k.Name] = k.Relations
+	}
+	if counted["author"] != 3 {
+		t.Errorf("author = %d edges, want 3: the topic is part of what makes an edge", counted["author"])
+	}
+	if counted["editor"] != 2 {
+		t.Errorf("editor = %d edges, want 2", counted["editor"])
+	}
+	if kinds[0].Name != "author" {
+		t.Errorf("RelationKinds = %+v, want the commonest kind first", kinds)
 	}
 }
 
