@@ -198,6 +198,20 @@ func declared(props []*engine.Property, prefix string, pages int, index map[stri
 	return out
 }
 
+// countMissing marks every required row beneath an absent property.
+//
+// The mirror of [propPlan.missing], which is what put those names in the item's
+// own total. The two have to agree or the report says a field is missing
+// without saying which.
+func countMissing(index map[string]*PropertyRates, props []*engine.Property, prefix string) {
+	for _, prop := range props {
+		if row := index[prefix+prop.Name]; row != nil && prop.Required {
+			row.Missing++
+		}
+		countMissing(index, prop.Properties, prefix+prop.Name+".")
+	}
+}
+
 // count folds one page's values into the rows.
 //
 // Only pages that produced the item are counted here. A page that produced
@@ -216,6 +230,13 @@ func count(index map[string]*PropertyRates, props []*engine.Property, values map
 			if prop.Required {
 				row.Missing++
 			}
+			// Everything required beneath it too, because an absent group
+			// takes its whole subtree with it. The item's own total counts
+			// those names - propPlan.missing reports them - so leaving the
+			// rows at zero made the report contradict itself: the header said
+			// one required property was missing and every row said none was,
+			// naming a count without naming the field.
+			countMissing(index, prop.Properties, prefix+prop.Name+".")
 			continue
 		}
 

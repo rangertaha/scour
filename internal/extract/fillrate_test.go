@@ -305,3 +305,44 @@ func TestAPageThatWillNotParseIsCountedNotFatal(t *testing.T) {
 		t.Errorf("the report does not say a page was unreadable:\n%s", report)
 	}
 }
+
+// TestTheReportsRowsAccountForItsTotal.
+//
+// The header says how many required properties were missing and the rows say
+// which. When an object property matched nothing, the item's total counted
+// every required name beneath it and the rows counted none, so the report named
+// a number without naming a field - which is the one thing a fill-rate report
+// is for.
+func TestTheReportsRowsAccountForItsTotal(t *testing.T) {
+	spec := &engine.Spec{Job: "news", Items: []*engine.Item{{
+		Name: "article",
+		Properties: []*engine.Property{
+			{Name: "title", Type: "str", CSS: []string{"h1"}},
+			{Name: "author", Type: "object", CSS: []string{".byline"}, Properties: []*engine.Property{
+				{Name: "name", Type: "str", Required: true, CSS: []string{".byline-name"}},
+			}},
+		},
+	}}}
+
+	report, err := extract.Rates(spec, []extract.Sample{{
+		URL:  "https://e.example/1",
+		Body: []byte(`<html><body><h1>Something happened</h1></body></html>`),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	item := report.Items[0]
+	if item.Missing == 0 {
+		t.Fatal("the item reports no required property missing, though one is")
+	}
+
+	var counted int
+	for _, prop := range item.Properties {
+		counted += prop.Missing
+	}
+	if counted != item.Missing {
+		t.Errorf("the item reports %d required properties missing and its rows account for %d:\n%s",
+			item.Missing, counted, report)
+	}
+}
