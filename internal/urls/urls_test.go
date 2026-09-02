@@ -443,6 +443,19 @@ func TestDotSegmentsFollowTheRFC(t *testing.T) {
 		"/../a":      "/a",
 		"/a/../../b": "/b",
 
+		// A `..` beside an empty segment. net/url and Python's urllib both
+		// answer "/" here; Node and a literal reading of section 5.2.4 answer
+		// "//": step 2C replaces the "/../" prefix, leaving "//", and step 2E
+		// then moves the leading slash and everything up to the next one,
+		// which for "//" is the slash by itself. Pinned by hand because the
+		// implementations disagree and the RFC does not, and because an empty
+		// segment being a segment is the whole reason this stopped calling
+		// path.Clean. FuzzCleanMatchesTheStandardLibrary skips this shape for
+		// the same reason.
+		"/..//":    "//",
+		"/a/..//b": "//b",
+		"//..":     "/",
+
 		// A relative path is made absolute, which is what every caller here
 		// wants: this only ever sees the path of an absolute URL.
 		"./a":  "/a",

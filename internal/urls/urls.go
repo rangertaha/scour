@@ -230,10 +230,18 @@ func clean(p string) string {
 	if p == "" {
 		return "/"
 	}
-	// A path with no dot segment is returned as it arrived. The loop below
-	// would return it unchanged too - this only avoids the copy, and it is
-	// correct exactly because the loop preserves everything else.
-	if !strings.Contains(p, "./") && !strings.HasSuffix(p, "/.") && !strings.HasSuffix(p, "/..") {
+	// An absolute path with no dot segment is returned as it arrived. The loop
+	// below would return it unchanged too - this only avoids the copy, and it
+	// is correct exactly because the loop preserves everything else.
+	//
+	// Absolute is part of the condition, not an assumption about the caller.
+	// The loop makes every answer absolute and this returned whatever it was
+	// given, so the two disagreed for a relative path with no dot segment:
+	// `clean("...")` came back as `...`, and everything downstream joins this
+	// to a host. A fast path that answers differently from the code it is a
+	// fast path for is the shape that put path.Clean here in the first place.
+	if strings.HasPrefix(p, "/") &&
+		!strings.Contains(p, "./") && !strings.HasSuffix(p, "/.") && !strings.HasSuffix(p, "/..") {
 		return p
 	}
 
