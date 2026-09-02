@@ -4,8 +4,11 @@ package engine_test
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/hashicorp/hcl/v2"
 
 	"github.com/rangertaha/scour/internal/engine"
 )
@@ -1575,4 +1578,72 @@ func TestANestedTagIsADimension(t *testing.T) {
 	if got := strings.Join(item.Fields(), ","); got != "market.note,observed,value" {
 		t.Errorf("fields = %q, want the nested tag absent", got)
 	}
+}
+
+// TestEveryDocumentFieldRendersUnderItsOwnName.
+//
+// `scour job show --json` marshals the resolved job, and a field with an hcl
+// tag and no json tag comes out under its Go name. The mutation block did:
+// it rendered "Costly" and "OutOfScope" while `scour defaults` and every
+// document call them `costly` and `out_of_scope`, so a script reading
+// `.mutation.out_of_scope` got nothing and nothing said why.
+//
+// A class test rather than four assertions, because the next block added to
+// the schema has the same chance of forgetting. It walks the job's whole type
+// and asserts that every field the document can write is rendered under the
+// name the document uses.
+// hclBody is the interface an HCL body field has, which JSON cannot carry.
+type hclBody = hcl.Body
+
+func TestEveryDocumentFieldRendersUnderItsOwnName(t *testing.T) {
+	seen := map[reflect.Type]bool{}
+
+	var walk func(path string, typ reflect.Type)
+	walk = func(path string, typ reflect.Type) {
+		for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice {
+			typ = typ.Elem()
+		}
+		if typ.Kind() != reflect.Struct || seen[typ] {
+			return
+		}
+		seen[typ] = true
+
+		for i := range typ.NumField() {
+			f := typ.Field(i)
+			hcl, ok := f.Tag.Lookup("hcl")
+			if !ok {
+				continue
+			}
+			// A label is the block's name and is written as one, not as an
+			// attribute; a body is raw HCL that JSON cannot carry either.
+			if strings.HasSuffix(hcl, ",label") || strings.HasSuffix(hcl, ",remain") ||
+				f.Type == reflect.TypeOf((*hclBody)(nil)).Elem() {
+				continue
+			}
+
+			name, kind, _ := strings.Cut(hcl, ",")
+
+			// Blocks only recursed into. A block is written singular and
+			// rendered as the plural collection it becomes - `item` in the
+			// document, `items` in the JSON - which is the convention and not
+			// a drift.
+			if kind == "block" {
+				walk(path+"."+name, f.Type)
+				continue
+			}
+
+			js, ok := f.Tag.Lookup("json")
+			if !ok {
+				t.Errorf("%s.%s is written as %q and has no json tag, so --json renders it as %q",
+					path, f.Name, name, f.Name)
+				continue
+			}
+			if got, _, _ := strings.Cut(js, ","); got != name && got != "-" {
+				t.Errorf("%s.%s is written as %q and rendered as %q", path, f.Name, name, got)
+			}
+			walk(path+"."+name, f.Type)
+		}
+	}
+
+	walk("job", reflect.TypeOf(engine.Job{}))
 }

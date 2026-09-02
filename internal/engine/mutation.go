@@ -29,19 +29,19 @@ type Mutation struct {
 	// Costly decides whether a change that is not free may be applied at all.
 	// It gates the three below: nothing is disposed of if the submission is
 	// refused.
-	Costly string `hcl:"costly,optional"`
+	Costly string `hcl:"costly,optional" json:"costly,omitempty"`
 
 	// OutOfScope is what happens to a URL already in the frontier that the new
 	// scope no longer admits.
-	OutOfScope string `hcl:"out_of_scope,optional"`
+	OutOfScope string `hcl:"out_of_scope,optional" json:"out_of_scope,omitempty"`
 
 	// StaleRecords is what happens to records written under a schema that has
 	// since changed.
-	StaleRecords string `hcl:"stale_records,optional"`
+	StaleRecords string `hcl:"stale_records,optional" json:"stale_records,omitempty"`
 
 	// OrphanedCache is what happens when the cache moves and every body
 	// already fetched is somewhere the job can no longer read.
-	OrphanedCache string `hcl:"orphaned_cache,optional"`
+	OrphanedCache string `hcl:"orphaned_cache,optional" json:"orphaned_cache,omitempty"`
 }
 
 // What Costly may be.
