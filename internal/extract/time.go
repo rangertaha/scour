@@ -37,6 +37,30 @@ var layouts = []string{
 	"20060102",
 }
 
+// zeroOffset is the zone abbreviations that really do mean UTC.
+//
+// # Why an abbreviation is not looked up
+//
+// Because time.Parse resolves one against the host's zone database, and
+// fabricates a zone with a zero offset when it does not find it. Two layouts
+// here end in the MST verb - RFC 1123 and RFC 822, which is how a great many
+// pages write a date - so the same page produced a different instant on
+// different machines: `Tue, 04 Aug 2026 09:15:00 EST` was 14:15Z on a box that
+// knew EST and 09:15Z on one that did not, and on one machine EST resolved
+// while PST did not. Two workers replaying one cached corpus disagreed about
+// when a page said it was published, and that value becomes the record's event
+// time.
+//
+// So the parse is done in UTC, where the database is never consulted, and an
+// abbreviation is accepted only if it is one of these. Anything else is
+// reported unreadable, which keeps the text the page wrote rather than
+// inventing an instant: a date that is wrong by five hours is worse than one
+// nobody has parsed yet, because nothing downstream can tell.
+//
+// A numeric offset is unambiguous and is read: RFC1123Z and RFC822Z are tried
+// before their named siblings.
+var zeroOffset = map[string]bool{"UTC": true, "GMT": true, "UT": true, "Z": true}
+
 // parseTime reads a date in whatever shape a page wrote it and returns RFC 3339
 // in UTC.
 //
@@ -50,9 +74,18 @@ func parseTime(value string) (string, bool) {
 	}
 
 	for _, layout := range layouts {
-		if when, err := time.Parse(layout, value); err == nil {
-			return when.UTC().Format(time.RFC3339), true
+		// ParseInLocation with UTC, so the host's zone database is never
+		// consulted. See [zeroOffset].
+		when, err := time.ParseInLocation(layout, value, time.UTC)
+		if err != nil {
+			continue
 		}
+		if name, offset := when.Zone(); offset == 0 && !zeroOffset[name] {
+			// A named zone whose offset this does not know. Reported as
+			// unreadable, which keeps the text the page wrote.
+			continue
+		}
+		return when.UTC().Format(time.RFC3339), true
 	}
 
 	// A timestamp in seconds, which is what an API embedded in a page writes.

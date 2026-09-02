@@ -626,6 +626,20 @@ func TestDatesInWhateverShapeThePageWroteThem(t *testing.T) {
 		"epoch":      {"1785835200", "2026-08-04T09:20:00Z"},
 		"unreadable": {"yesterday", "yesterday"},
 		"page count": {"812", "812"},
+
+		// A numeric offset is unambiguous and is read.
+		"offset": {"Tue, 04 Aug 2026 09:15:00 -0500", "2026-08-04T14:15:00Z"},
+
+		// A named zone that is not one of the zero-offset spellings is kept as
+		// written rather than turned into an instant. time.Parse resolves an
+		// abbreviation against the host's zone database, so this used to be
+		// 09:15Z on a UTC box, 14:15Z on one set to New York, and 09:15Z again
+		// on one set to Los Angeles: two workers replaying one cached corpus
+		// disagreed about when the same page said it was published, and the
+		// value became the record's event time. GMT hid it, being the one
+		// abbreviation whose offset is zero.
+		"named zone": {"Tue, 04 Aug 2026 09:15:00 EST", "Tue, 04 Aug 2026 09:15:00 EST"},
+		"rfc 822":    {"04 Aug 26 09:15 PST", "04 Aug 26 09:15 PST"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			item := one(t, `
