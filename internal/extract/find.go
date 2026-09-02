@@ -26,9 +26,12 @@ func (plan *itemPlan) extract(p *page) *Item {
 	for _, prop := range plan.props {
 		value := prop.find(p, p.root)
 		if value == nil {
-			if prop.prop.Required {
-				item.Missing = append(item.Missing, prop.prop.Name)
-			}
+			// Everything required beneath it, not just the property itself. A
+			// property whose whole subtree matched nothing is not a value, so
+			// there is no nested value to carry those names up - and without
+			// this the item said it was complete while a required field two
+			// levels down had found nothing at all. See [propPlan.missing].
+			item.Missing = append(item.Missing, prop.missing(prop.prop.Name)...)
 			continue
 		}
 		// A relation's pseudo-property contributes its fields and never the
@@ -440,9 +443,7 @@ func (p *propPlan) value(page *page, raw, from, how string, node *html.Node) *Va
 				// field said it was complete while the fill-rate report,
 				// counting the same pages, said the field was missing on all
 				// of them.
-				if nested.prop.Required {
-					v.Missing = append(v.Missing, p.prop.Name+"."+nested.prop.Name)
-				}
+				v.Missing = append(v.Missing, nested.missing(p.prop.Name+"."+nested.prop.Name)...)
 				continue
 			}
 			// A required field further down is this value's business too.

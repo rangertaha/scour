@@ -1018,3 +1018,43 @@ func TestARequiredFieldAnyDepthDownIsReported(t *testing.T) {
 		t.Errorf("missing = %v, want [%s] under the name the record and the fill-rate use", item.Missing, want)
 	}
 }
+
+// TestARequiredFieldUnderAnObjectThatFoundNothingIsReported.
+//
+// The other half of TestARequiredFieldAnyDepthDownIsReported, and the half that
+// fix missed. It carried a nested value's missing names up to the item, which
+// works while the intermediate value exists - but a property whose whole
+// subtree matched nothing is not a value at all, so it came back nil and every
+// required name beneath it went with it.
+//
+// The item then said it was complete: `scour scrape --strict` exited 0, the
+// pipeline's required check passed, and the export wrote a blank column for a
+// field the job had said it could not do without.
+func TestARequiredFieldUnderAnObjectThatFoundNothingIsReported(t *testing.T) {
+	item := one(t, `
+  item "article" {
+    property "title" {
+      type = str
+      css  = ["h1"]
+    }
+
+    property "author" {
+      type = object
+
+      property "name" {
+        type     = str
+        required = true
+        css      = [".byline-name"]
+      }
+    }
+  }
+`, `<html><body><h1>Something happened</h1></body></html>`)
+
+	if item.Complete() {
+		t.Errorf("an item whose required field matched nothing reported itself complete: %v", item.Missing)
+	}
+	want := "author.name"
+	if len(item.Missing) != 1 || item.Missing[0] != want {
+		t.Errorf("missing = %v, want [%s]", item.Missing, want)
+	}
+}

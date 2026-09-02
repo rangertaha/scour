@@ -185,3 +185,26 @@ func (p *propPlan) answersTo(name string) bool {
 	}
 	return false
 }
+
+// missing is every required name at or beneath this property, dotted under the
+// prefix, for a property that found nothing.
+//
+// The whole subtree, because a property that matched nothing is not a value and
+// so has no nested value to carry its children's names up. Reporting only the
+// property's own `required` meant an item with a required field two levels down
+// said it was complete when the object above it was absent: `scour scrape
+// --strict` exited 0 and the export wrote a blank column for a field the job
+// had said it could not do without.
+//
+// A required property reports itself as well as its children, because both are
+// true: the group is missing and so is everything in it.
+func (p *propPlan) missing(prefix string) []string {
+	var out []string
+	if p.prop.Required {
+		out = append(out, prefix)
+	}
+	for _, nested := range p.nested {
+		out = append(out, nested.missing(prefix+"."+nested.prop.Name)...)
+	}
+	return out
+}
