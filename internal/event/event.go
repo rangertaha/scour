@@ -174,6 +174,12 @@ CREATE TABLE IF NOT EXISTS events (
 -- Name and time together, because every query starts with "this measurement,
 -- over this window" and an index on either alone leaves the other a scan.
 CREATE INDEX IF NOT EXISTS events_name_at ON events (name, at);
+-- The ordering on its own, for a query that names no measurement. Without it
+-- such a query sorted the whole table before returning a row, which is the
+-- unbounded query DefaultLimit exists to prevent, and the sort was the part
+-- that grew: 2.3ms at 5,000 points and 26ms at 50,000, on a store with one
+-- connection, blocking every concurrent Put for the duration.
+CREATE INDEX IF NOT EXISTS events_at ON events (at DESC, id);
 CREATE INDEX IF NOT EXISTS events_job ON events (job);
 `
 	if _, err := db.Exec(ddl); err != nil {
@@ -324,11 +330,24 @@ func (s *log) List(ctx context.Context, q Query) ([]*Event, error) {
 	// above are what actually cut the scan down. The limit is applied after
 	// the match, so a tag filter cannot silently return fewer than asked for
 	// because the rows it wanted were beyond the cut.
+	// The limit goes into the query when there is no tag filter, which is when
+	// the rows SQLite returns are exactly the rows this keeps. With a filter
+	// it stays in Go, for the reason above.
+	//
+	// Without it, a query naming no measurement read and sorted the whole
+	// table to hand back ten rows. List is served over the bus, so any client
+	// could ask.
+	bound := ""
+	if len(q.Tags) == 0 {
+		bound = "\n LIMIT ?"
+		args = append(args, limit)
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, name, tags, fields, at, job, url, spec
   FROM events
  WHERE `+strings.Join(where, " AND ")+`
- ORDER BY at DESC, id`, args...)
+ ORDER BY at DESC, id`+bound, args...)
 	if err != nil {
 		return nil, fmt.Errorf("event: list: %w", err)
 	}
