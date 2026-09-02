@@ -52,6 +52,24 @@ type at struct {
 // The depth matters because the innermost element holding a headline is the
 // headline and its parents merely contain it. A selector for a container
 // happens to work until the container gains a second child.
+// collapse reduces a run of whitespace to one space, so the two sides of the
+// comparison in [holding] are normalised the same way.
+//
+// They were not. What extraction found keeps the page's own spacing and gains a
+// newline after every block element; the text this package reads off a node had
+// its whitespace collapsed already. So a value with a newline or a double space
+// in it - a headline a template wrapped, any multi-paragraph body - matched no
+// node at all, and no locator was ever proposed for it. Silently: `scour job
+// train` printed no line for the property, which reads as "nothing works on
+// this corpus" rather than "these could not be compared".
+//
+// Whitespace-insensitive is the right comparison here anyway: the question is
+// whether this node holds that value, and HTML does not preserve the difference
+// between a newline and a space in the first place.
+func collapse(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
 func holding(root *html.Node, want string) []at {
 	var found []at
 
@@ -60,7 +78,7 @@ func holding(root *html.Node, want string) []at {
 		for child := n.FirstChild; child != nil; child = child.NextSibling {
 			walk(child, depth+1)
 		}
-		if n.Type == html.ElementNode && strings.TrimSpace(nodeValue(n)) == want {
+		if n.Type == html.ElementNode && collapse(nodeValue(n)) == collapse(want) {
 			found = append(found, at{node: n, depth: depth})
 		}
 	}

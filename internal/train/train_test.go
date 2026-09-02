@@ -693,3 +693,134 @@ job "news" {
 		t.Errorf("the edited document no longer parses: %v\n%s", err, edited)
 	}
 }
+
+// TestALocatorGoesToTheItemsPropertyAndNotANestedOne.
+//
+// The same mistake as the relation case, through nested properties. An item's
+// property may hold properties of its own, spelled identically, and the scan
+// that finds where a locator goes walked into them: a proposal for the item's
+// `name` landed inside `author`'s `name` whenever the object was written
+// first.
+//
+// Nothing failed. The item's property still had no locator, so extraction went
+// on missing it on every page, while a nested field quietly gained a selector
+// induced for a different one - evaluated inside the author node, where it
+// matches nothing.
+func TestALocatorGoesToTheItemsPropertyAndNotANestedOne(t *testing.T) {
+	document := []byte(`
+job "news" {
+  item "article" {
+    property "author" {
+      type = "object"
+
+      property "name" {
+        type = "str"
+      }
+    }
+
+    property "name" {
+      type = "str"
+    }
+  }
+}
+`)
+
+	edited, written, err := train.Write(document, "news", []train.Proposal{{
+		Item: "article", Property: "name", Selector: ".headline",
+	}})
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if written != 1 {
+		t.Fatalf("wrote %d locators, want 1", written)
+	}
+
+	// The item's own property got it, and the nested one did not.
+	text := string(edited)
+	item := text[strings.LastIndex(text, `property "name"`):]
+	if !strings.Contains(item, ".headline") {
+		t.Errorf("the item's own property has no locator:\n%s", text)
+	}
+	author := text[strings.Index(text, `property "author"`):strings.LastIndex(text, `property "name"`)]
+	if strings.Contains(author, ".headline") {
+		t.Errorf("the locator went into the nested property:\n%s", text)
+	}
+}
+
+// TestAMarkerInANestedPropertyIsNotTheItemsMarker.
+//
+// The other half, exactly as with relations. MarkInduced recorded any
+// `property "` line it saw, nested ones included, so a marker inside
+// `author.name` reported the item's own `name` as induced - and a locator a
+// person had written by hand was then overwritten rather than learned from.
+func TestAMarkerInANestedPropertyIsNotTheItemsMarker(t *testing.T) {
+	document := []byte(`
+job "news" {
+  item "article" {
+    property "author" {
+      type = "object"
+
+      property "name" {
+        css = [".nested"] ` + train.Marker + `
+      }
+    }
+
+    property "name" {
+      css = [".written-by-hand"]
+    }
+  }
+}
+`)
+
+	if train.MarkInduced(document, "news")["article.name"] {
+		t.Error("a hand-written locator was reported as one scour had induced, " +
+			"on the strength of a marker in a nested property")
+	}
+}
+
+// TestAHeadlineWrittenOverTwoLinesStillGetsALocator.
+//
+// Induction compares the value extraction found against the text of each node,
+// and the two sides normalised whitespace differently: extraction keeps a
+// page's own spacing and adds a newline after every block element, while this
+// package collapsed runs of whitespace to single spaces. So a value with a
+// newline or a double space in it matched no node at all and no locator was
+// ever proposed for it.
+//
+// Silently: `scour job train` simply printed no line for the property, which
+// reads as "nothing works on this corpus" rather than "this cannot be
+// compared". Every headline a template wraps, and every multi-paragraph body,
+// was in that set.
+func TestAHeadlineWrittenOverTwoLinesStillGetsALocator(t *testing.T) {
+	pages := corpus(t, 5)
+	for i := range pages {
+		pages[i].Body = []byte(fmt.Sprintf(`<!doctype html>
+<html><head><title>Story %d | The Example</title></head>
+<body>
+  <nav><h1 class="site-name">The Example</h1></nav>
+  <article>
+    <h1 class="headline">Story %d
+       today</h1>
+    <div class="byline"><span class="author-name">Alex Doe</span></div>
+  </article>
+</body></html>`, i, i))
+	}
+
+	proposals, err := train.Learn(job(t, shape), pages, train.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var found bool
+	for _, p := range proposals {
+		if p.Property == "headline" {
+			found = true
+			if !strings.Contains(p.Selector, "headline") {
+				t.Errorf("proposed %q for a headline wrapped over two lines", p.Selector)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no locator was proposed for a headline wrapped over two lines: %v", proposals)
+	}
+}

@@ -233,7 +233,12 @@ func learnOne(reader *extract.Extractor, item *engine.Item, prop *engine.Propert
 
 	for selector := range scores {
 		for page, want := range targets {
-			if got, ok := valueOf(page.root, selector); ok && got == want {
+			// Collapsed on both sides, for the reason [collapse] gives: what
+			// extraction found keeps the page's own spacing and what a node
+			// reads as here does not, so a headline a template wrapped never
+			// matched itself. Both this comparison and the one in [holding]
+			// had it, and fixing one alone changed nothing.
+			if got, ok := valueOf(page.root, selector); ok && collapse(got) == collapse(want) {
 				scores[selector]++
 				if examples[selector] == "" {
 					examples[selector] = got

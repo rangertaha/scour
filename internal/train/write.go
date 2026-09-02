@@ -75,7 +75,40 @@ func Write(document []byte, job string, proposals []Proposal) ([]byte, int, erro
 	return []byte(strings.Join(lines, "\n")), written, nil
 }
 
+// stepping tracks a block a line scan is stepping over whole.
+//
+// An item holds property blocks and relation blocks; a relation holds property
+// blocks of its own, and a property may hold nested ones, all spelled
+// identically. A scan that does not step over them acts on the wrong field:
+// an induced locator went onto a relation's `role` instead of the item's, and
+// then into `author`'s `name` instead of the item's, whenever the containing
+// block was written first. Nothing failed either time - the item's property
+// still had none, so extraction went on missing it on every page, while some
+// other field quietly gained a selector induced for a different one.
+//
+// Stepped over rather than descended into because induction does not propose
+// locators for anything but an item's own properties: [Learn] walks
+// item.Properties and no deeper, so a name found inside another block is a
+// collision and never the thing being looked for.
+type stepping struct{ depth int }
+
+// over reports whether this line is inside a block being stepped over, and
+// keeps count. Ask it before looking at the line for anything else.
+func (s *stepping) over(line string) bool {
+	if s.depth <= 0 {
+		return false
+	}
+	s.depth += strings.Count(line, "{") - strings.Count(line, "}")
+	return true
+}
+
+// start steps over the block this line opens.
+func (s *stepping) start(line string) {
+	s.depth = strings.Count(line, "{") - strings.Count(line, "}")
+}
+
 // find locates where a property's locator goes: the line to replace if there is
+// an induced one, and otherwise the line to insert before.// find locates where a property's locator goes: the line to replace if there is
 // an induced one, and otherwise the line to insert before.
 //
 // Line-oriented and deliberately conservative. It looks for the property block
@@ -88,8 +121,9 @@ func find(lines []string, from, to int, proposal Proposal) (insertAt int, indent
 
 	inItem, depth := false, 0
 
-	// relation is the brace depth inside a relation block, zero when outside one.
-	relation := 0
+	// inner is any block below the item's own level: a relation, or one of the
+	// item's other properties.
+	var inner stepping
 	for i := from; i < to; i++ {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
@@ -101,26 +135,13 @@ func find(lines []string, from, to int, proposal Proposal) (insertAt int, indent
 			continue
 		}
 
-		// A relation is skipped whole, never looked inside.
-		//
-		// An item holds property blocks and relation blocks, and a relation
-		// holds property blocks of its own, spelled identically. So a scan
-		// looking for the item's `role` found `relation "author"`'s `role`
-		// whenever the relation was written first, and the induced locator went
-		// onto the edge. Nothing failed: the item's property still had none, so
-		// extraction went on missing it on every page while the edge quietly
-		// gained a selector induced for a different field.
-		//
-		// Skipped rather than descended into because induction does not propose
-		// locators for relation properties at all: [Learn] walks item.Properties
-		// and nothing else, so anything found in there is a name collision and
-		// never the thing being looked for.
-		if relation > 0 {
-			relation += strings.Count(line, "{") - strings.Count(line, "}")
+		// A relation or another property is stepped over whole, never looked
+		// inside. See [stepping].
+		if inner.over(line) {
 			continue
 		}
 		if strings.HasPrefix(trimmed, "relation ") {
-			relation = strings.Count(line, "{") - strings.Count(line, "}")
+			inner.start(line)
 			continue
 		}
 
@@ -158,6 +179,14 @@ func find(lines []string, from, to int, proposal Proposal) (insertAt int, indent
 				}
 			}
 			return -1, "", -1
+		}
+
+		// One of the item's other properties, stepped over whole so that a
+		// nested block inside it is never mistaken for the item's own. See
+		// [stepping].
+		if strings.HasPrefix(trimmed, `property "`) {
+			inner.start(line)
+			continue
 		}
 
 		// Track the item block so a property of the same name in another item
@@ -272,22 +301,24 @@ func MarkInduced(document []byte, job string) map[string]bool {
 		return induced
 	}
 
-	// Relations are skipped whole, for the reason [find] skips them: they hold
-	// property blocks of their own, spelled identically to the item's. A marker
-	// inside `relation "author"`'s `role` reported the ITEM's `role` as
-	// induced, so a locator a person had written by hand was offered for
-	// replacement on the strength of a marker belonging to a different field.
+	// A relation, and a property below the item's own level, are stepped over
+	// whole. See [stepping]: both hold property blocks spelled identically to
+	// the item's, so a marker inside `relation "author"`'s `role`, or inside
+	// `author`'s `name`, reported the ITEM's property as induced - and a
+	// locator a person had written by hand was then overwritten rather than
+	// learned from, on the strength of a marker belonging to a different
+	// field.
 	var item, property string
-	relation := 0
+	var inner stepping
+
 	for _, line := range lines[from:to] {
 		trimmed := strings.TrimSpace(line)
 
-		if relation > 0 {
-			relation += strings.Count(line, "{") - strings.Count(line, "}")
+		if inner.over(line) {
 			continue
 		}
 		if strings.HasPrefix(trimmed, "relation ") {
-			relation = strings.Count(line, "{") - strings.Count(line, "}")
+			inner.start(line)
 			continue
 		}
 
@@ -295,9 +326,20 @@ func MarkInduced(document []byte, job string) map[string]bool {
 		case strings.HasPrefix(trimmed, `item "`):
 			item, property = quoted(trimmed), ""
 		case strings.HasPrefix(trimmed, `property "`):
+			if property != "" {
+				// Nested: the item's own property is still open. Only an
+				// item's own properties are ever induced for, so a marker
+				// under this one belongs to nothing this reports.
+				inner.start(line)
+				continue
+			}
 			property = quoted(trimmed)
 		case strings.Contains(line, Mark) && item != "" && property != "":
 			induced[item+"."+property] = true
+		case trimmed == "}":
+			// The end of the item's own property, so the next one is at the
+			// item's level again.
+			property = ""
 		}
 	}
 	return induced
