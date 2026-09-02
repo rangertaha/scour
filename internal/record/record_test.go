@@ -94,6 +94,13 @@ job "markets" {
     of   = "company"
     time = "observed"
 
+    # Which company. "of" names the kind and a property names the one, which
+    # is what makes this price,company=acme rather than a price of nothing in
+    # particular. "of" is not itself a tag: nothing extracts a value for it.
+    property "company" {
+      entity = "company"
+    }
+
     property "value" {
       type = float
     }
@@ -128,7 +135,7 @@ job "markets" {
 			"value":    "178.23",
 			"currency": "gbp",
 			"observed": "2026-08-04T09:15:00Z",
-			"of":       "acme",
+			"company":  "acme",
 			"exchange": "lse",
 		},
 	}
@@ -137,7 +144,7 @@ job "markets" {
 	if m.Name != "price" {
 		t.Errorf("name = %q", m.Name)
 	}
-	for name, want := range map[string]string{"of": "acme", "exchange": "lse", "currency": "gbp"} {
+	for name, want := range map[string]string{"company": "acme", "exchange": "lse", "currency": "gbp"} {
 		if m.Tags[name] != want {
 			t.Errorf("tag %s = %q, want %q", name, m.Tags[name], want)
 		}

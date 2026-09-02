@@ -171,7 +171,7 @@ func (s *stream) Write(_ context.Context, records ...*record.Record) error {
 			return fmt.Errorf("exporter/nats: %s: %w", s.subject, err)
 		}
 
-		subject := subjectFor(s.subject, measurement)
+		subject := subjectFor(s.subject, s.shape, measurement)
 		if err := s.conn.Publish(subject, body); err != nil {
 			return fmt.Errorf("exporter/nats: %s: %w", subject, err)
 		}
@@ -206,14 +206,27 @@ func (s *stream) Close() error {
 
 // subjectFor is where one measurement goes.
 //
-// The entity is read from the measurement's tags rather than from the shape,
-// because the rule has already been applied there: `of` is a tag when the item
-// declared one and is absent when it did not. A record whose item shape is
-// unknown is measured with no tags at all, since nothing has said which of its
-// values are dimensions and guessing would invent series that cannot be
-// un-invented, so it publishes to the root subject with everything as fields.
-func subjectFor(root string, m *record.Measurement) string {
-	entity := m.Tags["of"]
+// The shape says which kind of entity the item observes and the measurement
+// says which one it is: `item "price" { of = "company" }` beside a property
+// declaring `entity = "company"` gives `price,company=acme`, so the tag to read
+// is the one named by the shape's `of`.
+//
+// This used to read a tag literally called "of", which no record has ever had:
+// "of" is not a property, nothing extracts it, and [engine.Item.Tags] listed it
+// as a name with no value behind it. So every price published to the root
+// subject and the per-entity subject - the whole point of the feature - never
+// fired. The test written for it hand-built a record with an "of" value, which
+// no extraction path produces, so it stayed green.
+//
+// A record whose item shape is unknown is measured with no tags at all, since
+// nothing has said which of its values are dimensions and guessing would invent
+// series that cannot be un-invented, so it publishes to the root subject with
+// everything as fields.
+func subjectFor(root string, shape *engine.Item, m *record.Measurement) string {
+	if shape == nil || shape.Of == "" {
+		return root
+	}
+	entity := m.Tags[shape.Of]
 	if entity == "" {
 		return root
 	}

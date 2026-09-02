@@ -67,6 +67,13 @@ job "markets" {
     of   = "company"
     time = "observed"
 
+    # Which company. "of" names the kind and this names the one, which is
+    # what makes the measurement price,company=acme rather than a price of
+    # nothing in particular.
+    property "company" {
+      entity = "company"
+    }
+
     property "value" {
       type = float
     }
@@ -100,7 +107,7 @@ func headline(url, title string) *record.Record {
 func price(url, company, value string) *record.Record {
 	return &record.Record{
 		Item: "price", URL: url, Spec: "abc123", Fetched: fetched,
-		Values: map[string]string{"of": company, "value": value, "observed": "2026-08-04T09:15:00Z"},
+		Values: map[string]string{"company": company, "value": value, "observed": "2026-08-04T09:15:00Z"},
 	}
 }
 
@@ -206,7 +213,7 @@ func TestAPriceGetsOneSubjectPerCompany(t *testing.T) {
 		t.Fatalf("the company's own subject received nothing: %v", err)
 	}
 	m := measurement(t, msg.Data)
-	if m.Tags["of"] != "acme" || m.Fields["value"] != "178.23" {
+	if m.Tags["company"] != "acme" || m.Fields["value"] != "178.23" {
 		t.Errorf("measurement = %+v", m)
 	}
 
@@ -365,7 +372,7 @@ func TestAnEntityCannotAddASubjectLevel(t *testing.T) {
 
 	// The name itself is untouched in the measurement: the subject is where it
 	// had to be made safe, not the data.
-	if m := measurement(t, msg.Data); m.Tags["of"] != "acme.co uk" {
+	if m := measurement(t, msg.Data); m.Tags["company"] != "acme.co uk" {
 		t.Errorf("the entity's name was changed in the payload: %+v", m)
 	}
 }

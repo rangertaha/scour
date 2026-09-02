@@ -1355,7 +1355,7 @@ func TestTagsAndFields(t *testing.T) {
 
 	// Dimensions: what it observes, what it relates to, and the scalar
 	// declared a dimension.
-	if got := strings.Join(item.Tags(), ","); got != "currency,exchange,of" {
+	if got := strings.Join(item.Tags(), ","); got != "currency,exchange" {
 		t.Errorf("tags = %q", got)
 	}
 	// Measurements: everything else.
@@ -1376,7 +1376,7 @@ func TestIdentityIsDimensionsAndInstantForASeries(t *testing.T) {
 	}
 
 	item := doc.Jobs[0].Items[0]
-	if got := strings.Join(item.Identity(), ","); got != "currency,exchange,of,observed" {
+	if got := strings.Join(item.Identity(), ","); got != "currency,exchange,observed" {
 		t.Errorf("identity = %q", got)
 	}
 }
@@ -1571,7 +1571,7 @@ func TestANestedTagIsADimension(t *testing.T) {
 `)
 	item := j.Items[1]
 
-	if got := strings.Join(item.Tags(), ","); got != "market.sector,of" {
+	if got := strings.Join(item.Tags(), ","); got != "market.sector" {
 		t.Errorf("tags = %q, want the nested tag among them", got)
 	}
 	// And it is not also a measurement: the two are a partition.

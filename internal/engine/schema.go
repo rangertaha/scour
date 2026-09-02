@@ -328,9 +328,18 @@ func (i *Item) Names() []string {
 // relations, and any property declared a tag.
 func (i *Item) Tags() []string {
 	var out []string
-	if i.Of != "" {
-		out = append(out, "of")
-	}
+	// Not a literal "of". The tag is the entity kind the item observes, and
+	// its value is whatever property names which one - `price,company=acme`,
+	// which is the example this type's own doc gives. Emitting "of" put a tag
+	// name in the list that no record can ever have a value for, because "of"
+	// is not a property and nothing extracts it: every measurement came out
+	// without it, and the nats exporter's per-entity subject, which reads that
+	// tag, never fired once.
+	//
+	// The kind itself is not added either: a property declaring
+	// `entity = "company"` is already a dimension by [Property.PropertyType],
+	// so the tag is there when the document says which company and absent when
+	// it does not.
 	for _, r := range i.Relations {
 		out = append(out, r.Name)
 	}
