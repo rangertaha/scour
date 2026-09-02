@@ -110,7 +110,11 @@ func runCrawl(ctx context.Context, a *App, path, jobName, dir string, verbose, f
 	if dir == "" {
 		dir = filepath.Join(filepath.Dir(path), ".scour")
 	}
-	job = withCache(job, filepath.Dir(path))
+	// Under the state directory, so --dir moves the cache as the flag says it
+	// does. It used to be built from the document's directory regardless, so
+	// `--dir` moved the frontier and left the cached bodies beside the
+	// document - and --fresh then cleared one and not the other.
+	job = withCache(job, filepath.Join(dir, "cache"))
 
 	// The job's own monitoring block, with --verbose overriding it, because a
 	// flag is what somebody types for one run and a document is what they mean

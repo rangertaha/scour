@@ -127,7 +127,7 @@ func runTry(ctx context.Context, a *App, opts tryOptions) error {
 
 	// A job with no cache of its own still gets one, beside the document,
 	// because the loop this exists for is worthless if every run refetches.
-	job = withCache(job, filepath.Dir(opts.path))
+	job = withCache(job, filepath.Join(filepath.Dir(opts.path), ".scour", "cache"))
 
 	fetcher, err := downloader.New(ctx, job, downloader.Options{})
 	if err != nil {
@@ -187,6 +187,14 @@ func runTry(ctx context.Context, a *App, opts tryOptions) error {
 //
 // Edited on a copy: the document on disk is what somebody wrote, and a command
 // that quietly rewrote it would be a command nobody could trust with a file.
+// withCache gives a job a body cache at `dir`, unless it already has one.
+//
+// The directory is the cache's own, not a parent to hang `.scour/cache` off.
+// It was the parent, which made it impossible for a caller to put the cache
+// anywhere but beside the document: `scour crawl --dir` says it moves "the
+// frontier and the cache" and moved only the frontier, so the cached bodies
+// stayed under the document, and --fresh cleared the frontier while the cache
+// beside it survived.
 func withCache(job *engine.Job, dir string) *engine.Job {
 	for _, p := range job.Chain(engine.StageDownloader) {
 		if p.Name == "cache" {
@@ -202,7 +210,7 @@ func withCache(job *engine.Job, dir string) *engine.Job {
 	}
 	down.Plugins = append(append([]*engine.Plugin(nil), down.Plugins...), &engine.Plugin{
 		Name:   "cache",
-		Config: cacheBody(filepath.Join(dir, ".scour", "cache")),
+		Config: cacheBody(dir),
 	})
 	copied.Downloader = down
 	return &copied

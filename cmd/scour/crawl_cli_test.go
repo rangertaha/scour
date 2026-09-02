@@ -160,3 +160,35 @@ func TestFreshForgetsWhatWasQueued(t *testing.T) {
 		t.Errorf("the summary does not say the pages came from the cache:\n%s", out)
 	}
 }
+
+// TestCrawlDirMovesTheCacheToo.
+//
+// --dir says "where to keep the frontier and the cache", and the cache was
+// built from the document's directory regardless: the frontier moved and the
+// cached bodies stayed beside the document. So --dir did not isolate a run,
+// and --fresh cleared one and left the other.
+func TestCrawlDirMovesTheCacheToo(t *testing.T) {
+	server, _ := linked(t)
+	path := crawlJob(t, server)
+
+	back, _ := os.Getwd()
+	if err := os.Chdir(filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(back) })
+
+	state := t.TempDir()
+	out, errOut, code := run(t, "crawl", "--dir", state, path)
+	if code != 0 {
+		t.Fatalf("exit %d\n%s%s", code, out, errOut)
+	}
+
+	// The bodies are under the directory that was asked for.
+	if entries, err := os.ReadDir(filepath.Join(state, "cache")); err != nil || len(entries) == 0 {
+		t.Errorf("--dir did not move the cache: %v", err)
+	}
+	// And not beside the document, which is where they used to go.
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), ".scour", "cache")); err == nil {
+		t.Error("the cache was written beside the document as well as under --dir")
+	}
+}
