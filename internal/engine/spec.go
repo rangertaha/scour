@@ -98,6 +98,17 @@ func (s *Spec) HCL() []byte {
 	fmt.Fprintf(&b, "# Extraction spec for job %s, fingerprint %s.\n", HCLString(s.Job), s.Fingerprint())
 	b.WriteString("# Generated. The job document is the source.\n")
 
+	// The job's name as an attribute and not only in the comment above it.
+	//
+	// [Spec.Job] is declared `hcl:"job,optional"`, so ParseSpec reads one -
+	// and nothing ever wrote one, so every spec a spider parsed came back with
+	// an empty Job. A comment is for a person; the field is what the format
+	// promises, and the two disagreed. See
+	// TestARenderedSpecReadsBackAsItself.
+	if s.Job != "" {
+		fmt.Fprintf(&b, "\njob = %s\n", HCLString(s.Job))
+	}
+
 	for _, item := range s.Items {
 		b.WriteString("\n")
 		writeItem(&b, item, 0)
