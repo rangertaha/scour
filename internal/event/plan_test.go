@@ -4,13 +4,9 @@ package event_test
 
 import (
 	"context"
-	"database/sql"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	_ "modernc.org/sqlite"
 
 	"github.com/rangertaha/scour/internal/event"
 )
@@ -52,43 +48,44 @@ func TestAQueryThatNamesNoMeasurementIsStillBounded(t *testing.T) {
 	if len(got) != 10 {
 		t.Errorf("List returned %d points, want the 10 asked for", len(got))
 	}
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
+	// The plan of the query List actually builds, asked of the store.
+	//
+	// This used to run SQL written out in the test with `LIMIT 10` baked into
+	// it, which says nothing about whether List puts one there: deleting the
+	// limit from the query left this passing, and the Go-side break kept the
+	// row count at ten either way. Only the index half of it bound anything.
+	planner, ok := store.(interface {
+		Plan(context.Context, event.Query) ([]string, error)
+	})
+	if !ok {
+		t.Fatal("the store cannot explain its own query, so this checks nothing")
 	}
 
-	// And the ordering is walked rather than sorted. A temp B-tree here is the
-	// whole table being read before the first row comes back.
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, event.File))
+	plan, err := planner.Plan(ctx, event.Query{Limit: 10})
 	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Close() }()
-
-	rows, err := db.Query(`EXPLAIN QUERY PLAN
-SELECT id, name, tags, fields, at, job, url, spec
-  FROM events
- WHERE 1=1
- ORDER BY at DESC, id
- LIMIT 10`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var plan []string
-	for rows.Next() {
-		var id, parent, notused int
-		var detail string
-		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
-			t.Fatal(err)
-		}
-		plan = append(plan, detail)
-	}
-	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
 
 	joined := strings.Join(plan, "\n")
+	if !strings.Contains(joined, "USING") {
+		t.Errorf("the query reads no index at all:\n%s", joined)
+	}
+
+	// And the bound is in the query, not only in the loop that reads the rows.
+	// A plan cannot show this - the index walk is the same either way - so it
+	// is asked of the query text, which is what the store hands to SQLite.
+	query, _, _ := event.Listing(event.Query{Limit: 10})
+	if !strings.Contains(query, "LIMIT ?") {
+		t.Errorf("a query with no tag filter carries no LIMIT, so it reads every row:\n%s", query)
+	}
+
+	// With a tag filter it deliberately does not, because the rows SQLite
+	// returns are then not the rows List keeps: cutting in SQL would return
+	// fewer than asked for whenever the matching rows lay beyond the cut.
+	tagged, _, _ := event.Listing(event.Query{Limit: 10, Tags: map[string]string{"company": "acme"}})
+	if strings.Contains(tagged, "LIMIT") {
+		t.Errorf("a query with a tag filter cuts in SQL, so it can return fewer than asked for:\n%s", tagged)
+	}
 	if strings.Contains(joined, "TEMP B-TREE") {
 		t.Errorf("a query naming no measurement sorts the whole table:\n%s", joined)
 	}

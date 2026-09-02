@@ -596,14 +596,26 @@ func TestEveryChapterIsWholeAndAccessible(t *testing.T) {
 				t.Error("an em dash got in")
 			}
 
-			// A mermaid diagram renders as a picture and nothing else, so
-			// somebody who cannot see it gets nothing unless the chapter says
-			// what it shows. That description is the alt text this book used to
-			// carry in aria-label, and it must not be lost.
-			drawings := len(blocks(page, "mermaid"))
-			described := strings.Count(page, "<summary>What this diagram shows</summary>")
-			if drawings != described {
-				t.Errorf("%d diagrams and %d descriptions of one", drawings, described)
+			// A diagram is a picture and nothing else, so somebody who cannot
+			// see it gets nothing unless the book says what it shows.
+			//
+			// The alt text is where that description lives. It used to be a
+			// `<summary>What this diagram shows</summary>` block beside a
+			// fenced mermaid diagram, and this counted those two things and
+			// compared them - so when the book moved to referenced SVGs, both
+			// counts became zero and the check passed on every chapter while
+			// asserting nothing. A twelfth figure with `alt="x"` would have
+			// gone in unnoticed.
+			//
+			// Substance rather than presence, because an alt attribute that
+			// exists and says nothing is the failure this guards against, not
+			// a missing attribute. The shortest description in the book runs
+			// to about two hundred characters.
+			for _, found := range figure.FindAllStringSubmatch(page, -1) {
+				if len(strings.Fields(found[2])) < 8 {
+					t.Errorf("the figure %s is described as %q, which tells a reader who cannot see it nothing",
+						found[1], found[2])
+				}
 			}
 		})
 	}

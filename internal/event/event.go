@@ -299,8 +299,26 @@ func (s *log) Get(ctx context.Context, id string) (*Event, error) {
 // asking, and because a bounded query that returned the oldest would answer
 // "what happened when this started" to a question about now.
 func (s *log) List(ctx context.Context, q Query) ([]*Event, error) {
+	query, args, limit := listing(q)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("event: list: %w", err)
+	}
+	defer rows.Close()
+
+	return s.collect(rows, q, limit)
+}
+
+// listing builds the query List runs, and the limit it still has to apply in
+// Go.
+//
+// Separated so that [log.Plan] explains the query this actually runs rather
+// than a copy of it kept in step by hand. The test that pins the plan wrote its
+// own SQL with the LIMIT baked in, so it said nothing about whether List built
+// one: removing the limit from the query left it passing.
+func listing(q Query) (query string, args []any, limit int) {
 	where := []string{"1 = 1"}
-	var args []any
 
 	if q.Name != "" {
 		where = append(where, "name = ?")
@@ -319,7 +337,7 @@ func (s *log) List(ctx context.Context, q Query) ([]*Event, error) {
 		args = append(args, q.Until.UTC().UnixNano())
 	}
 
-	limit := q.Limit
+	limit = q.Limit
 	if limit <= 0 {
 		limit = DefaultLimit
 	}
@@ -343,16 +361,43 @@ func (s *log) List(ctx context.Context, q Query) ([]*Event, error) {
 		args = append(args, limit)
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
+	return `
 SELECT id, name, tags, fields, at, job, url, spec
   FROM events
- WHERE `+strings.Join(where, " AND ")+`
- ORDER BY at DESC, id`+bound, args...)
+ WHERE ` + strings.Join(where, " AND ") + `
+ ORDER BY at DESC, id` + bound, args, limit
+}
+
+// Plan is SQLite's query plan for a listing.
+//
+// Exported for the same reason the frontier's is: whether a query walks an
+// index or sorts the table is a property worth a test rather than a benchmark
+// somebody remembers to read, and this one is served over the bus to any
+// client that asks.
+func (s *log) Plan(ctx context.Context, q Query) ([]string, error) {
+	query, args, _ := listing(q)
+
+	rows, err := s.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("event: list: %w", err)
+		return nil, fmt.Errorf("event: plan: %w", err)
 	}
 	defer rows.Close()
 
+	var out []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			return nil, fmt.Errorf("event: plan: %w", err)
+		}
+		out = append(out, detail)
+	}
+	return out, rows.Err()
+}
+
+// collect reads the rows a listing returned, applying the tag filter and the
+// limit that could not go into the query.
+func (s *log) collect(rows *sql.Rows, q Query, limit int) ([]*Event, error) {
 	out := make([]*Event, 0, min(limit, 64))
 	for rows.Next() {
 		one, err := scan(rows.Scan)
