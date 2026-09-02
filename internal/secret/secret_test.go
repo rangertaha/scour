@@ -15,11 +15,21 @@ import (
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
 
+	"github.com/nats-io/nats.go/jetstream"
+
 	"github.com/rangertaha/scour/internal/bus"
 	"github.com/rangertaha/scour/internal/secret"
 )
 
 func store(t *testing.T) *secret.Store {
+	t.Helper()
+	s, _ := storeOn(t)
+	return s
+}
+
+// storeOn is [store] and also the connection under it, for the test that has to
+// write into the bucket the way an attacker who has it would.
+func storeOn(t *testing.T) (*secret.Store, *bus.Conn) {
 	t.Helper()
 
 	conn, err := bus.Connect(bus.Options{Name: "test", StoreDir: t.TempDir()})
@@ -41,7 +51,7 @@ func store(t *testing.T) *secret.Store {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	return s
+	return s, conn
 }
 
 func TestASecretGoesInSealedAndComesOutWhole(t *testing.T) {
@@ -106,7 +116,7 @@ func TestWhatIsStoredIsNotTheValue(t *testing.T) {
 // TestASealedValueCannotBeMovedBetweenNames, so whoever can write to the bucket
 // cannot swap one credential for another.
 func TestASealedValueCannotBeMovedBetweenNames(t *testing.T) {
-	s := store(t)
+	s, conn := storeOn(t)
 	ctx := context.Background()
 
 	if err := s.Set(ctx, "staging", []byte("staging-key")); err != nil {
@@ -116,13 +126,43 @@ func TestASealedValueCannotBeMovedBetweenNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Both open under their own names and neither under the other's, which is
-	// what authenticating the name buys.
+	// Both open under their own names, which holds whether or not the name is
+	// authenticated and so says nothing on its own. That was the whole of this
+	// test, and removing the name from both Seal and Open left it passing.
 	if value, err := s.Resolve(ctx, "staging"); err != nil || string(value) != "staging-key" {
 		t.Errorf("staging = %q, %v", value, err)
 	}
 	if value, err := s.Resolve(ctx, "production"); err != nil || string(value) != "production-key" {
 		t.Errorf("production = %q, %v", value, err)
+	}
+
+	// The claim is about somebody who can write to the bucket, so this writes
+	// to the bucket: staging's sealed bytes, stored under production's name.
+	// Nothing about them is forged - they are exactly what the store wrote -
+	// and the only thing standing between them and being served as the
+	// production credential is that the name is authenticated.
+	js, err := jetstream.New(conn.Conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kv, err := js.KeyValue(ctx, secret.Bucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := kv.Get(ctx, "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kv.Put(ctx, "production", entry.Value()); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err := s.Resolve(ctx, "production")
+	if err == nil {
+		t.Errorf("a value sealed as %q was served as %q: %q", "staging", "production", value)
+	}
+	if !errors.Is(err, secret.ErrSealed) {
+		t.Errorf("moving a sealed value between names reports %v, want ErrSealed", err)
 	}
 }
 

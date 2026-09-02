@@ -256,6 +256,22 @@ func TestABodyNeverCrossesTheBus(t *testing.T) {
 	if string(stored) != string(resp.Body) {
 		t.Error("what the client returned is not what the cache holds")
 	}
+
+	// And it could not have come any other way. A client whose cache is not
+	// the one the server put the body in has nothing to read, so a fetch that
+	// still produces a body is a body that travelled on the wire.
+	//
+	// The assertions above are true either way - the body arrived, and the
+	// server's cache holds it - so they say nothing about how it arrived. That
+	// is the whole claim of this test, and it went unchecked: putting the HTML
+	// into the reply made every one of them pass.
+	elsewhere := conn.NewDownloader(j.Name, bodies(t), 0)
+	if got, err := elsewhere.Handle(ctx, &downloader.Request{
+		URL: server.URL + "/story/2", Job: j.Name,
+	}); err == nil && len(got.Body) > 0 {
+		t.Errorf("a client with an empty cache still received %d bytes of body, "+
+			"so the body crossed the bus", len(got.Body))
+	}
 }
 
 // TestADropTravelsAsADrop. A refusal is an ordinary outcome and a caller has to
