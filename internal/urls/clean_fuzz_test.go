@@ -122,3 +122,50 @@ func FuzzCleanHoldsItsInvariants(f *testing.F) {
 		}
 	})
 }
+
+// FuzzNormaliseIsClosedOverItsOutput.
+//
+// Normalising is applied to URLs that have already been normalised: every
+// caller that resolves a link on a page hands the result to a scope, a
+// frontier or a cache key, and those normalise again. So a second pass that
+// moves the string means one page with two spellings and two hashes, and the
+// dupefilter reads it as two pages.
+//
+// TestNormalisingIsClosedOverItsOwnOutput pins the shapes somebody thought of.
+// This one looks for the ones nobody did: it found a query that the parser
+// could not read and so passed through verbatim, which is the one part of a
+// URL that reaches the output unescaped, carrying a trailing space that the
+// input side had been trimming all along.
+func FuzzNormaliseIsClosedOverItsOutput(f *testing.F) {
+	for _, seed := range []string{
+		"https://example.com", "https://example.com/", "http://EXAMPLE.com:80/a",
+		"https://example.com//a/./p", "https://example.com/?b=2&a=1",
+		"https://example.com/?q=1% #f", "https://example.com/a#frag",
+		"https://user:pw@example.com/a", "https://example.com/%2Fa",
+		"https://example.com/a?utm_source=x", "https://example.com/a/../b",
+
+		// The three this found. A query the parser cannot read is passed
+		// through as it arrived, which made it the one part of a URL where a
+		// literal space could survive to the output; and url.Parse is content
+		// to read ":80" as a port and leave "0:A" as the host name, so
+		// stripping the default port produced a URL this could not read back.
+		"http://0?0& #", "http://0?0 &", "http://0:A:80",
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, raw string) {
+		once, err := urls.Normalise(raw, urls.Options{})
+		if err != nil {
+			return
+		}
+
+		twice, err := urls.Normalise(once, urls.Options{})
+		if err != nil {
+			t.Fatalf("Normalise(%q) = %q, which does not normalise: %v", raw, once, err)
+		}
+		if twice != once {
+			t.Errorf("Normalise(%q) = %q, and normalising that gives %q: one page, two hashes", raw, once, twice)
+		}
+	})
+}

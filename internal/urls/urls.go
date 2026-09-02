@@ -113,6 +113,22 @@ func normalise(u *url.URL, opts Options) (string, error) {
 		// be queueing.
 		return "", fmt.Errorf("urls: %q: scheme %q is not one this fetches", u.String(), u.Scheme)
 	}
+	// A host whose name carries a colon and is not a bracketed IPv6 literal is
+	// not a host.
+	//
+	// url.Parse accepts "http://0:A:80": it reads ":80" as a valid port and is
+	// content to leave "0:A" as the name. Stripping the default port below
+	// then left "0:a", which is a host with an invalid port in it, and the
+	// result was a URL this function could not read back - normalising it a
+	// second time fails outright.
+	//
+	// The third instance of the shape the two comments below describe, and the
+	// first found by fuzzing for it rather than by a crawl going wrong. See
+	// FuzzNormaliseIsClosedOverItsOutput.
+	if name := u.Hostname(); strings.Contains(name, ":") && !strings.HasPrefix(u.Host, "[") {
+		return "", fmt.Errorf("urls: %q has a host that is not one", u.String())
+	}
+
 	// A default port is what the scheme already means.
 	//
 	// Stripped before the host is checked, not after. url.Parse accepts ":80"
@@ -306,6 +322,25 @@ func clean(p string) string {
 }
 
 func query(raw string, opts Options) string {
+	// A literal space is escaped, and this is the one part of a URL where one
+	// can survive: the path is rebuilt from its escaped form and the host
+	// cannot hold one, but an unparseable query is passed through as it
+	// arrived.
+	//
+	// It has to go, because normalising is applied to URLs that have already
+	// been normalised and Normalise trims what it is given. Given
+	// `https://example.com?q=1% #f` the fragment is dropped and the space that
+	// preceded it ended at the end of the result, which the next pass trimmed:
+	// one page, two spellings, two hashes, and the dupefilter read it as two
+	// pages.
+	//
+	// Escaped rather than trimmed, which was the first attempt and only moved
+	// the problem: `?0 &` kept its space in the middle, where trimming does
+	// not reach, and the rebuilt query ended in one anyway. Escaping is also
+	// what actually happens to a URL - no client sends a literal space - so
+	// the identity this computes is the one the server will see.
+	raw = strings.ReplaceAll(strings.TrimSpace(raw), " ", "%20")
+
 	values, err := url.ParseQuery(raw)
 	if err != nil {
 		// Unparseable, so it is left exactly as it arrived: a query this does
