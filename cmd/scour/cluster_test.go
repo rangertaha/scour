@@ -71,8 +71,28 @@ func TestANodeServesAndASecondOneJoinsIt(t *testing.T) {
 // addresses and the parsing on the hosts with the cores. A flag that was
 // accepted and ignored would be invisible until the cluster was busy.
 func TestANodeServesOnlyTheStagesItWasTold(t *testing.T) {
-	node := start(t, t.TempDir(), "server", "--name", "downloaders", "--stages", "download")
+	dir := t.TempDir()
+	node := start(t, dir, "server", "--name", "downloaders", "--stages", "download")
+	address := waitFor(t, node, "join it with: scour server --join ")
 	waitFor(t, node, "downloaders is serving")
+
+	// What it announced, which is what the cluster acts on and the only thing
+	// an operator can see. This test used to assert that the node printed that
+	// it was serving and later that it had left, both of which are true of a
+	// node that read --stages and threw it away: overwriting the stage set
+	// after validating the flag and before announcing it left every assertion
+	// here passing, so the flag could be accepted and ignored exactly as the
+	// paragraph above says it must not be.
+	got := scour(t, dir, "cluster", "list", "--join", address)
+	if got.code != 0 {
+		t.Fatalf("cluster list: exit %d\n%s%s", got.code, got.stdout, got.stderr)
+	}
+	if !strings.Contains(got.stdout, "download") {
+		t.Errorf("the node does not offer the stage it was told to serve:\n%s", got.stdout)
+	}
+	if strings.Contains(got.stdout, "read") {
+		t.Errorf("the node offers a stage it was not told to serve:\n%s", got.stdout)
+	}
 
 	node.stop(t)
 	if said := node.output.String(); !strings.Contains(said, "downloaders has left") {

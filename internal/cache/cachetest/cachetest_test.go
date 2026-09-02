@@ -137,11 +137,16 @@ func TestSuiteCatchesABrokenBackend(t *testing.T) {
 		t.Fatalf("the contract passed a backend that fails all of it:\n%s", out)
 	}
 
-	// Not merely that it failed, but that it failed for the right reasons.
+	// Not merely that it failed, but that each case failed. Matching the name
+	// alone matched the `=== RUN` line that -test.v prints for every subtest
+	// whether it passes or fails, so this said nothing: gutting a case to do
+	// no work at all left the child reporting PASS for it and this test green.
+	//
+	// The failure line is what distinguishes them, so that is what is matched.
 	for _, want := range []string{
 		"RoundTrip", "MissingIsNotFound", "Has", "Delete", "Keys", "BadKeysRejected",
 	} {
-		if !strings.Contains(string(out), want) {
+		if !strings.Contains(string(out), "--- FAIL: TestSuiteCatchesABrokenBackend/"+want) {
 			t.Errorf("the contract did not report %s against a backend that breaks it", want)
 		}
 	}

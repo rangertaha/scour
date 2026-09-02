@@ -136,6 +136,50 @@ func TestALocatorThatOnlyWorksSometimesIsNotProposed(t *testing.T) {
 			t.Errorf("proposed %q, which works on one page in ten", p.Selector)
 		}
 	}
+
+	// And the threshold is what refused it, not the presence of a better
+	// candidate. This is the only test in the repo that sets Least - the
+	// `--min` flag - and the corpus above gives `headline` a nine-in-ten
+	// selector alongside the one-off, so the best-scorer wins before the
+	// threshold is ever consulted: deleting the threshold entirely left this
+	// test passing, and Least: 0.9 and Least: 0.001 produced identical
+	// proposals.
+	//
+	// A corpus where the only candidate works on one page in ten has nothing
+	// better to fall back on, so the threshold is the whole of the answer.
+	// A different tag and a different class on every page, so no candidate -
+	// by tag, by class or by position - works on more than one of them.
+	tags := []string{"h1", "h2", "h3", "h4", "h5", "h6", "p", "span", "div", "strong"}
+	sparse := corpus(t, len(tags))
+	for i, tag := range tags {
+		sparse[i].Body = fmt.Appendf(nil, `<html><body><article>
+		  <%s class="headline-%d">Story %d</%s>
+		</article></body></html>`, tag, i, i, tag)
+	}
+
+	strict, err := train.Learn(job(t, shape), sparse, train.Options{Least: 0.9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range strict {
+		if p.Property == "headline" {
+			t.Errorf("proposed %q for a headline no selector finds twice, under --min 0.9", p.Selector)
+		}
+	}
+
+	lax, err := train.Learn(job(t, shape), sparse, train.Options{Least: 0.05})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var offered bool
+	for _, p := range lax {
+		if p.Property == "headline" {
+			offered = true
+		}
+	}
+	if !offered {
+		t.Error("under --min 0.05 the same corpus proposed nothing, so the threshold is not what decided")
+	}
 }
 
 // TestExamplesTeachWithoutASelector. Given the answer, induction can look for

@@ -276,7 +276,19 @@ func TestAScoreSomethingElseSetIsNotClobbered(t *testing.T) {
 
 	// An off-topic slug that something upstream was sure about. The topic
 	// score is near zero, and it must not pull the request down.
-	if _, _, err := s.Submit(ctx, &scheduler.Request{URL: offTopic, Score: 0.9, Discovered: origin}); err != nil {
+	//
+	// With a parent, which is what makes this test about anything: a request
+	// without one is returned before it is ever scored - a start URL has no
+	// slug to read and no parent to borrow words from - so the max this pins
+	// was never reached, and changing it to a plain assignment left the test
+	// passing. Every other test in this file goes through the urls helper,
+	// which sets a parent for exactly this reason.
+	if _, _, err := s.Submit(ctx, &scheduler.Request{
+		URL:        offTopic,
+		Parent:     "https://example.com/",
+		Score:      0.9,
+		Discovered: origin,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
