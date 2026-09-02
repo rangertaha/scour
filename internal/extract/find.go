@@ -445,6 +445,20 @@ func (p *propPlan) value(page *page, raw, from, how string, node *html.Node) *Va
 				}
 				continue
 			}
+			// A required field further down is this value's business too.
+			// Only the immediate children were collected, so a required field
+			// two levels down left its name on the intermediate value - under
+			// a prefix naming the wrong parent - and never reached the item:
+			// Complete() said yes and --strict passed a record with a hole.
+			//
+			// Moved rather than copied, so the item holds exactly one entry
+			// per missing field, under the dotted name the record and the
+			// fill-rate report use.
+			for _, name := range inner.Missing {
+				v.Missing = append(v.Missing, p.prop.Name+"."+name)
+			}
+			inner.Missing = nil
+
 			if how != "" || inner.outside {
 				// Found outside the parent, so it is a guess about the page
 				// rather than a reading of the parent, whatever found it. The

@@ -245,8 +245,18 @@ func printScrape(a *App, resp *downloader.Response, out *spider.Output, elapsed 
 			a.Printf("  %-*s  %-34s  %s\n", width, name, quote(value.Text), value.From)
 			found++
 			wanted++
-			for _, inner := range sorted(value.Nested) {
-				nested := value.Nested[inner]
+			// Every depth, by the dotted name each is known by, which is the
+			// name the record and every export use. A single range over
+			// Nested showed one level, so a property three deep was found and
+			// not shown. See [extract.Value.Each].
+			deep := map[string]*extract.Value{}
+			for inner, nested := range value.Nested {
+				nested.Each(inner, func(name string, v *extract.Value) {
+					deep[name] = v
+				})
+			}
+			for _, inner := range sorted(deep) {
+				nested := deep[inner]
 				a.Printf("    %-*s  %-32s  %s\n", width, inner, quote(nested.Text), nested.From)
 			}
 		}
@@ -297,9 +307,14 @@ func printTryJSON(a *App, resp *downloader.Response, out *spider.Output) error {
 				out.Raw = v.Raw
 			}
 			if len(v.Nested) > 0 {
+				// Flat and dotted, at every depth. A one-level copy left a
+				// property three deep out of --json altogether. See
+				// [extract.Value.Each].
 				out.Nested = map[string]string{}
 				for inner, nested := range v.Nested {
-					out.Nested[inner] = nested.Text
+					nested.Each(inner, func(name string, nested *extract.Value) {
+						out.Nested[name] = nested.Text
+					})
 				}
 			}
 			converted.Values[name] = out

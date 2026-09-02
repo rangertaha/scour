@@ -956,3 +956,51 @@ func TestARequiredNestedFieldIsReportedMissing(t *testing.T) {
 		t.Error("the item reports itself complete with a required field missing")
 	}
 }
+
+// TestARequiredFieldAnyDepthDownIsReported.
+//
+// The depth-2 case was fixed once, at depth 2: a nested value collected the
+// required fields of its immediate children and never those of theirs. So a
+// required field three deep left its name stranded on the intermediate value,
+// under a prefix that named the wrong parent, and the item said it was
+// complete - `scour scrape --strict` passed, and a record with a hole in it
+// was exported.
+func TestARequiredFieldAnyDepthDownIsReported(t *testing.T) {
+	item := one(t, `
+  item "article" {
+    property "title" {
+      type = str
+    }
+
+    property "author" {
+      type = object
+
+      property "address" {
+        type = object
+
+        property "city" {
+          type = str
+          css  = [".city"]
+        }
+
+        property "postcode" {
+          type     = str
+          required = true
+          css      = [".postcode"]
+        }
+      }
+    }
+  }
+`, `<!doctype html><html><body>
+  <h1>Something happened yesterday</h1>
+  <div class="byline"><span class="city">Leeds</span></div>
+</body></html>`)
+
+	if item.Complete() {
+		t.Errorf("an item missing a required field three deep reported itself complete: %v", item.Missing)
+	}
+	want := "author.address.postcode"
+	if len(item.Missing) != 1 || item.Missing[0] != want {
+		t.Errorf("missing = %v, want [%s] under the name the record and the fill-rate use", item.Missing, want)
+	}
+}

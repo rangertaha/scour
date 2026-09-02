@@ -227,3 +227,45 @@ job "news" {
 		t.Errorf("Fields[title] = %q", got)
 	}
 }
+
+// TestARecordCarriesEveryDepthOfNesting.
+//
+// An extracted value's Nested holds values that have a Nested of their own, and
+// engine.Item.Fields flattens a property tree of any depth, so a shape may name
+// `author.address.city`. From flattened exactly one level, so a property three
+// deep was extracted, reported found by the fill-rate, named by Fields, and
+// never reached the record: the measurement came back with no field for it at
+// all, and the csv, parquet and sqlite exports wrote an empty column.
+//
+// The depth-2 case was fixed once already, at depth 2 only. See
+// TestAMeasurementCarriesNestedProperties.
+func TestARecordCarriesEveryDepthOfNesting(t *testing.T) {
+	records := record.From("https://example.com/a", "abc123", fetched, []*extract.Item{{
+		Name: "article",
+		Values: map[string]*extract.Value{
+			"author": {
+				Text: "Alex Doe",
+				Nested: map[string]*extract.Value{
+					"address": {
+						Text: "Leeds",
+						Nested: map[string]*extract.Value{
+							"city":     {Text: "Leeds"},
+							"postcode": {Text: "LS1 1AA"},
+						},
+					},
+				},
+			},
+		},
+	}})
+
+	for name, want := range map[string]string{
+		"author":                  "Alex Doe",
+		"author.address":          "Leeds",
+		"author.address.city":     "Leeds",
+		"author.address.postcode": "LS1 1AA",
+	} {
+		if got := records[0].Values[name]; got != want {
+			t.Errorf("Values[%q] = %q, want %q: %v", name, got, want, records[0].Values)
+		}
+	}
+}

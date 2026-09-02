@@ -99,7 +99,36 @@ type Value struct {
 	outside bool
 
 	// Nested holds the fields of an object property.
+	//
+	// A nested value has a Nested of its own: the tree is as deep as the shape
+	// the job declared, and [engine.Item.Fields] flattens one of any depth. Use
+	// [Value.Each] to walk it rather than ranging over this once.
 	Nested map[string]*Value
+}
+
+// Each calls fn for this value and for every value nested under it, at any
+// depth, with the dotted name each is known by.
+//
+// # Why this exists rather than a range over Nested
+//
+// Because three callers ranged over it once each and so saw one level. The
+// tree is as deep as the shape, and a property three deep was extracted,
+// counted as found by the fill-rate report, named by the item's own Fields -
+// and then never reached the record: the measurement had no field for it, and
+// the csv, parquet and sqlite exports wrote an empty column for a value the
+// crawl had in its hand. `scour scrape --json` dropped it too.
+//
+// The depth-2 case was found and fixed once already, at depth 2. Walking is
+// now the type's own business, so the next caller inherits it instead of
+// writing the fourth one-level loop.
+func (v *Value) Each(name string, fn func(name string, value *Value)) {
+	if v == nil {
+		return
+	}
+	fn(name, v)
+	for inner, nested := range v.Nested {
+		nested.Each(name+"."+inner, fn)
+	}
 }
 
 // How a value was found. Ordered as they are tried: taught first, guessed

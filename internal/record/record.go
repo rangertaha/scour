@@ -65,11 +65,14 @@ func From(url, spec string, fetched time.Time, items []*extract.Item) []*Record 
 			Fetched: fetched,
 			Values:  map[string]string{},
 		}
+		// Every depth, not one. See [extract.Value.Each]: the shape decides
+		// how deep the tree is, and engine.Item.Fields names a leaf at any
+		// depth, so a one-level walk here made a declared field that was
+		// extracted absent from the record and from every export built on it.
 		for name, value := range item.Values {
-			r.Values[name] = value.Text
-			for inner, nested := range value.Nested {
-				r.Values[name+"."+inner] = nested.Text
-			}
+			value.Each(name, func(name string, value *extract.Value) {
+				r.Values[name] = value.Text
+			})
 		}
 		out = append(out, r)
 	}
