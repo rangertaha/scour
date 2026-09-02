@@ -20,6 +20,7 @@
 package record
 
 import (
+	"encoding/json"
 	"maps"
 	"sort"
 	"time"
@@ -79,7 +80,46 @@ func From(url, spec string, fetched time.Time, items []*extract.Item) []*Record 
 	return out
 }
 
-// Identity is what makes two records the same record.
+// Stamp is the one rendering of a fetch time, and [Record.MarshalJSON] is what
+// makes it the only one.
+//
+// Every export of a crawl writes it this way, so a join between two of them
+// matches. It had drifted twice. The table formats each formatted it and the
+// document formats marshalled [time.Time] directly, which emits RFC 3339 nano
+// in whatever offset the machine was in: one file said
+// 2026-08-05T14:23:45.123456789+02:00 and the other 2026-08-05T12:23:45Z for
+// the same record, and joining them matched nothing at all. That was noticed,
+// a shared renderer was written, and the document formats went on marshalling
+// the record - so the drift was still there, with a constant and a test above
+// it saying otherwise.
+//
+// So it lives on the record rather than beside the formats. A format cannot
+// write this field a different way without saying so, because marshalling the
+// record is what produces it.
+//
+// Seconds and UTC, because the exports are copies of one crawl and have to
+// agree more than they have to be precise. The record carries the full time in
+// memory, so nothing is lost that a reader of the record cannot get.
+const Stamp = "2006-01-02T15:04:05Z"
+
+// Stamped is a fetch time as every format writes it.
+func Stamped(t time.Time) string { return t.UTC().Format(Stamp) }
+
+// MarshalJSON writes the fetch time as [Stamp] and everything else as usual.
+func (r *Record) MarshalJSON() ([]byte, error) {
+	// An alias, so marshalling the shadow does not call this again.
+	type plain Record
+
+	return json.Marshal(struct {
+		*plain
+		Fetched string `json:"fetched"`
+	}{
+		plain:   (*plain)(r),
+		Fetched: Stamped(r.Fetched),
+	})
+}
+
+// Identity is what makes two records the same record.// Identity is what makes two records the same record.
 //
 // The item and the page, and deliberately not the values. A pipeline step
 // transforms values, so an identity derived from them changes when a step runs,

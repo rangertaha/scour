@@ -3,6 +3,7 @@
 package exporter_test
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -122,15 +123,38 @@ func TestEveryFormatRendersAFetchTimeTheSameWay(t *testing.T) {
 		Values:  map[string]string{"title": "One"},
 	}
 
-	l, err := exporter.NewLayout("csv", shape(t, oneItem), []string{"url", "fetched"})
+	const want = "2026-08-05T12:23:45Z"
+
+	// The table formats, through the shared layout.
+	for _, format := range []string{"csv", "sqlite", "parquet"} {
+		l, err := exporter.NewLayout(format, shape(t, oneItem), []string{"url", "fetched"})
+		if err != nil {
+			t.Fatalf("%s: %v", format, err)
+		}
+		if got := l.Value(r, "fetched"); got != want {
+			t.Errorf("%s: Value(fetched) = %q, want %q", format, got, want)
+		}
+	}
+
+	// And the document formats, which do not go through the layout at all:
+	// they marshal the record. This test said "every format" and checked one,
+	// plus a helper with no caller outside a test - so the drift it was
+	// written for was live in the repo underneath it, jsonlines writing
+	// 2026-08-05T14:23:45.123456789+02:00 while csv wrote the line above.
+	encoded, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	const want = "2026-08-05T12:23:45Z"
-	if got := l.Value(r, "fetched"); got != want {
-		t.Errorf("Value(fetched) = %q, want %q", got, want)
+	var got struct {
+		Fetched string `json:"fetched"`
 	}
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Fetched != want {
+		t.Errorf("marshalling the record writes fetched as %q, want %q", got.Fetched, want)
+	}
+
 	if got := exporter.Stamped(r.Fetched); got != want {
 		t.Errorf("Stamped() = %q, want %q", got, want)
 	}

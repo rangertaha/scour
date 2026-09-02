@@ -10,19 +10,11 @@ import (
 	"github.com/rangertaha/scour/internal/record"
 )
 
-// Stamp is the one rendering of a fetch time.
-//
-// Every format writes it this way, so a join between two exports of one crawl
-// matches. It had drifted: the table formats each formatted it like this while
-// json and jsonlines marshalled [time.Time] directly, which emits RFC 3339 nano
-// in whatever offset the machine was in. One file said
-// 2026-08-05T14:23:45.123456789+02:00 and the other 2026-08-05T12:23:45Z for the
-// same record, so joining them matched nothing at all.
-//
-// Seconds and UTC, because the exports are copies of one crawl and have to agree
-// more than they have to be precise. [record.Record] carries the full time, so
-// nothing is lost that a reader of the record cannot get.
-const Stamp = "2006-01-02T15:04:05Z"
+// Stamp is the one rendering of a fetch time. See [record.Stamp], which is
+// where it lives now and why: the document formats went on marshalling the
+// record directly for as long as this constant sat beside the formats rather
+// than on the thing being written.
+const Stamp = record.Stamp
 
 // Layout is what an exporter writes: which columns, in which order, and what
 // each one holds for a given record.
@@ -129,4 +121,4 @@ func (l *Layout) Value(r *record.Record, column string) string {
 }
 
 // Stamped is a fetch time as every format writes it.
-func Stamped(t time.Time) string { return t.UTC().Format(Stamp) }
+func Stamped(t time.Time) string { return record.Stamped(t) }
