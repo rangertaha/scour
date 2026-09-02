@@ -111,7 +111,9 @@ func normalise(u *url.URL, opts Options) (string, error) {
 		// Not a refusal on politeness grounds but on plain capability: this
 		// crawler speaks HTTP and a URL it cannot fetch is not a URL it should
 		// be queueing.
-		return "", fmt.Errorf("urls: %q: scheme %q is not one this fetches", u.String(), u.Scheme)
+		return "", fmt.Errorf(
+			"urls: %q: scheme %q is not one this fetches. Only http and https are crawled",
+			u.String(), u.Scheme)
 	}
 	// A host whose name carries a colon and is not a bracketed IPv6 literal is
 	// not a host.

@@ -1647,3 +1647,42 @@ func TestEveryDocumentFieldRendersUnderItsOwnName(t *testing.T) {
 
 	walk("job", reflect.TypeOf(engine.Job{}))
 }
+
+// TestAStartURLTheCrawlerCannotHoldIsRefused.
+//
+// Validation checked a start URL by parsing it and looking at the scheme and
+// the host, which is a subset of what urls.Normalise refuses - and the two
+// drifted. A URL the crawler cannot hold at all passed that check, was then
+// skipped by the scope check on the grounds that it had "already been
+// reported", and reached nobody: the job validated clean, `scour job create`
+// stored it, and the crawl seeded nothing and exited zero.
+//
+// The scheduler drops such a URL as out of scope and Submit swallows drops, so
+// there is no message anywhere. That is the "success that did nothing" both of
+// these checks exist to prevent.
+func TestAStartURLTheCrawlerCannotHoldIsRefused(t *testing.T) {
+	for name, start := range map[string]string{
+		// url.Parse reads ":80" as a valid port and leaves "0:A" as the name.
+		"a host that is not one": "http://0:A:80/a",
+		// A host that is only a port.
+		"a port with no host": "http://:8080/a",
+	} {
+		t.Run(name, func(t *testing.T) {
+			doc := parse(t, `
+job "news" {
+  domains = ["example.com"]
+  start   = ["`+start+`"]
+
+  item "article" {
+    property "title" {
+      type = str
+    }
+  }
+}
+`)
+			if err := doc.Validate(); err == nil {
+				t.Error("accepted a start URL the crawler cannot hold, so the crawl seeds nothing and reports success")
+			}
+		})
+	}
+}

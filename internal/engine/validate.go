@@ -5,7 +5,6 @@ package engine
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -66,7 +65,7 @@ func (j *Job) validate() []error {
 		problems = append(problems, prefix(errors.New("no start URLs, so there is nowhere to begin")))
 	}
 	for i, raw := range j.Start {
-		if err := checkStartURL(raw); err != nil {
+		if err := checkStartURL(raw, j.Canonical()); err != nil {
 			problems = append(problems, prefix(fmt.Errorf("start[%d] %q: %w", i, raw, err)))
 		}
 	}
@@ -202,15 +201,21 @@ func (j *Job) validateStartIsInScope() []error {
 // A crawler that followed file:// would read the disk of whichever machine
 // picked the job up, which is a submitted job reaching somewhere it was never
 // given.
-func checkStartURL(raw string) error {
-	u, err := url.Parse(raw)
-	switch {
-	case err != nil:
+// checkStartURL reports why a start URL is not one the crawler can hold.
+//
+// Asked of [urls.Normalise] rather than re-derived, because that is the
+// function every URL in a crawl passes through and the only one whose answer
+// matters. This used to parse the URL and look at the scheme and the host,
+// which is a subset of what Normalise refuses, and the two drifted: a host that
+// is only a port, and later a host name carrying a colon, passed here and were
+// then skipped by the scope check on the grounds that they had "already been
+// reported". Neither check reported them. The job validated clean, `scour job
+// create` stored it, the scheduler dropped the URL as out of scope, Submit
+// swallowed the drop, and the crawl seeded nothing and exited zero - the
+// "success that did nothing" both checks exist to prevent.
+func checkStartURL(raw string, canon urls.Options) error {
+	if _, err := urls.Normalise(raw, canon); err != nil {
 		return err
-	case u.Scheme != "http" && u.Scheme != "https":
-		return errors.New("only http and https are crawled")
-	case u.Host == "":
-		return errors.New("no host")
 	}
 	return nil
 }
