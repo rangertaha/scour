@@ -11,6 +11,7 @@ import (
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/cli"
+	"github.com/rangertaha/scour/internal/templates"
 )
 
 // docs/cli.md is checked against the binary rather than trusted.
@@ -106,9 +107,24 @@ func TestEveryFlagIsDocumented(t *testing.T) {
 		// A command's subcommands are documented in its own section, as one
 		// table: `--corpus` belongs to `topic propose` and `topic train`, and
 		// splitting the table three ways would say less.
+		//
+		// Which is also why the subcommands are walked here. This checked the
+		// top level only, and `job`, `cluster`, `topic` and `secret` declare
+		// no flags of their own - so the whole second level, where nearly
+		// every flag in the program lives, was checked by nothing at all. Its
+		// mirror below already walked them, and the asymmetry was the bug:
+		// `scour job init --template` and `--out` were undocumented and both
+		// tests passed.
 		for _, name := range flagNames(cmd) {
 			if !strings.Contains(section, "--"+name) {
 				t.Errorf("`scour %s --%s` is not documented", cmd.Name, name)
+			}
+		}
+		for _, sub := range cmd.Commands {
+			for _, name := range flagNames(sub) {
+				if !strings.Contains(section, "--"+name) {
+					t.Errorf("`scour %s %s --%s` is not documented", cmd.Name, sub.Name, name)
+				}
 			}
 		}
 	}
@@ -213,4 +229,51 @@ func between(t *testing.T, src, start string, toEnd bool) string {
 		return rest[:j]
 	}
 	return rest
+}
+
+// commandRe matches a command named in prose: `scour job valid`, "scour crawl".
+var commandRe = regexp.MustCompile(`scour ((?:[a-z]+)(?: [a-z]+)?)`)
+
+// TestATemplateOnlyNamesCommandsThatExist.
+//
+// A starter document is the first thing most people see, and its header tells
+// them what to run next. It told them to run `scour validate`, `scour show` and
+// `scour try`, none of which has ever existed - the real ones are `scour job
+// valid`, `scour job show --file` and `scour scrape` - and two templates said
+// `scour train` for `scour job train`. Every one of those was a rename that
+// reached the command tree and not the prose beside it, and nothing checked,
+// because the templates are data files and the doc tests read docs/.
+//
+// Checked against the tree rather than a list, so the next rename fails here
+// instead of shipping.
+func TestATemplateOnlyNamesCommandsThatExist(t *testing.T) {
+	a := &cli.App{Out: os.Stdout, Err: os.Stderr}
+
+	known := map[string]bool{}
+	for _, cmd := range root(a).Commands {
+		known[cmd.Name] = true
+		for _, sub := range cmd.Commands {
+			known[cmd.Name+" "+sub.Name] = true
+		}
+	}
+
+	for _, tmpl := range templates.All() {
+		src, err := templates.Render(tmpl.Name, "example")
+		if err != nil {
+			t.Fatalf("render %s: %v", tmpl.Name, err)
+		}
+
+		for _, m := range commandRe.FindAllStringSubmatch(string(src), -1) {
+			named := m[1]
+			// Two words if that is a command, one if it is not: "scour job
+			// valid example.hcl" and "scour crawl example.hcl" both appear.
+			if known[named] {
+				continue
+			}
+			if first, _, ok := strings.Cut(named, " "); ok && known[first] {
+				continue
+			}
+			t.Errorf("template %s tells the reader to run `scour %s`, which is not a command", tmpl.Name, named)
+		}
+	}
 }

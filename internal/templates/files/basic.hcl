@@ -1,9 +1,9 @@
 # A scour job. Everything a crawl needs is in here, so this document is the
 # whole of what it does: nothing is inherited from the server that runs it.
 #
-#   scour validate {{.Name}}.hcl    check it
-#   scour show     {{.Name}}.hcl    see it with every default filled in
-#   scour try      {{.Name}}.hcl    run one page and see what came out
+#   scour job valid {{.Name}}.hcl               check it
+#   scour job show --file {{.Name}}.hcl         see it with every default filled in
+#   scour scrape {{.Name}}.hcl                  run one page and see what came out
 
 job {{.Name | quote}} {
   # Where the crawl starts, and how far it may wander.
@@ -17,7 +17,7 @@ job {{.Name | quote}} {
 
   # What to pull out of a page. Aliases are the other names a field goes by,
   # which is what lets it be found on a site that calls it something else.
-  # Leave xpath and css empty and let `scour train` propose them.
+  # Leave xpath and css empty and let `scour job train` propose them.
   item "article" {
     property "url" {
       type       = str

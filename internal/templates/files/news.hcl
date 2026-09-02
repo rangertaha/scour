@@ -2,7 +2,7 @@
 #
 # The properties are the ones a news site is most likely to mark up, under the
 # names it is most likely to use. Nothing here is site-specific: run
-# `scour train` over a few hundred cached pages and it will propose the xpath
+# `scour job train` over a few hundred cached pages and it will propose the xpath
 # and css that actually work on the site in front of you.
 
 job {{.Name | quote}} {

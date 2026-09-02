@@ -27,7 +27,7 @@ listing    A directory of entries: jobs, venues, courses
 news       Articles: headline, byline, dates, body
 product    A shop: name, price, availability, images
 
-$ scour job init news > news.hcl
+$ scour job init --template news news > news.hcl
 $ scour job valid news.hcl
 news.hcl: ok, 1 job(s): news
 ```
@@ -124,7 +124,9 @@ lists them under what somebody is doing rather than alphabetically.
 | --- | --- |
 | `--join <url>` | The cluster, as `nats://host:port`. Every cluster subcommand takes it |
 | `--file <path>` | `show`, `spec` and `train` only: read a document instead of asking the cluster |
+| `--template <name>`, `-t` | `init` only: which starting point. The positional argument is the job's *name*, not the template |
 | `--list` | `init` only: list the templates and what they are for |
+| `--out <path>`, `-o` | `init` only: write to a file instead of stdout |
 | `--force` | `init` only: overwrite the file if it is already there |
 | `--fresh` | `start` and `run`: forget what a previous run queued |
 | `--json` | `show` only: print as JSON |
