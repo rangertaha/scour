@@ -146,15 +146,30 @@ func (p *propPlan) find(page *page, within *html.Node) *Value {
 		}
 	}
 
+	// The text of whatever this is searching inside, which for a nested
+	// property is the node its parent matched.
+	//
+	// css and xpath were already scoped to `within` and this was not: it read
+	// the whole page every time, so `author.name` could take the name out of a
+	// related-articles box while `author` itself came from the byline. It came
+	// back marked ByRegex with no sign of having been found outside the parent,
+	// so nothing downstream could tell a reading of the byline from a guess
+	// about the page - which is the distinction the whole `outside` marking
+	// exists to preserve.
+	text, from := page.text, "page text"
+	if within != nil && within != page.root {
+		text, from = textOf(within), "text of "+describe(within)
+	}
+
 	for _, pattern := range p.regex {
-		if match := pattern.FindStringSubmatch(page.text); match != nil {
+		if match := pattern.FindStringSubmatch(text); match != nil {
 			// The first capturing group if there is one, because a pattern
 			// with a group was written to say which part is the value.
 			found := match[0]
 			if len(match) > 1 {
 				found = match[1]
 			}
-			if v := p.value(page, found, "page text", ByRegex, nil); v != nil {
+			if v := p.value(page, found, from, ByRegex, nil); v != nil {
 				return v
 			}
 		}

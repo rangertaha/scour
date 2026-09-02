@@ -1058,3 +1058,49 @@ func TestARequiredFieldUnderAnObjectThatFoundNothingIsReported(t *testing.T) {
 		t.Errorf("missing = %v, want [%s]", item.Missing, want)
 	}
 }
+
+// TestANestedRegexSearchesInsideItsParent.
+//
+// A nested property's css and xpath are evaluated inside the node the parent
+// matched, which is what makes `author.name` the name in the byline rather than
+// whichever name appears first on the page. The regex candidate matched the
+// whole page's text regardless, so a nested field could take a value from
+// somewhere else entirely - and it came back marked as found by a taught
+// locator, with no sign that it had come from outside the parent, so nothing
+// downstream could tell.
+func TestANestedRegexSearchesInsideItsParent(t *testing.T) {
+	item := one(t, `
+  item "article" {
+    property "title" {
+      type = str
+      css  = ["h1"]
+    }
+
+    property "author" {
+      type = object
+      css  = [".byline"]
+
+      property "name" {
+        type    = str
+        regexes = ["By ([A-Z][a-z]+ [A-Z][a-z]+)"]
+      }
+    }
+  }
+`, `<html><body>
+  <h1>Something happened</h1>
+  <div class="related">By Jane Smith</div>
+  <div class="byline">By Alex Doe</div>
+</body></html>`)
+
+	author, ok := item.Get("author")
+	if !ok {
+		t.Fatalf("the byline was not found: %v", item.Values)
+	}
+	name, ok := author.Nested["name"]
+	if !ok {
+		t.Fatalf("the nested name was not found: %v", author.Nested)
+	}
+	if name.Text != "Alex Doe" {
+		t.Errorf("author.name = %q, want the name in the byline the parent matched", name.Text)
+	}
+}
