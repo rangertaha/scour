@@ -295,3 +295,47 @@ func TestAPatternsHostIsFoldedLikeEveryOtherHost(t *testing.T) {
 		t.Error("an exclusion written /Admin/ also refused /admin/, which is a different path")
 	}
 }
+
+// TestAWildcardPathPatternKeepsItsCase.
+//
+// foldHost lowercases a pattern's host and must leave its path alone, because
+// a URL path is case-sensitive and `*/Print/*` means that path. It decided
+// what was a host by looking for a `/`, `?` or `#` - so a glob with none of
+// them, like `*Print*` or `*.PDF`, was read as a host and folded.
+//
+// That is the failure the function exists to avoid, arriving through the
+// branch meant to prevent it: the exclusion was silently widened to `*print*`,
+// matched nothing on a path that keeps its case, and the crawl fetched the
+// subtree the job said never to touch. In the other direction an inclusion
+// written `*News*` matched nothing at all, so a crawl of that site included
+// nothing.
+func TestAWildcardPathPatternKeepsItsCase(t *testing.T) {
+	excluded, err := scope.New([]string{"example.com"}, nil, []string{"*Print*"}, urls.Options{})
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	if excluded.Allows("https://example.com/Print/a") {
+		t.Error("a scope excluding *Print* allowed /Print/a, so the crawl fetches what it was told never to")
+	}
+	// And it is not widened: /print/a is a different path.
+	if !excluded.Allows("https://example.com/print/a") {
+		t.Error("an exclusion written *Print* also refused /print/a, which is a different path")
+	}
+
+	included, err := scope.New([]string{"example.com"}, []string{"*News*"}, nil, urls.Options{})
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	if !included.Allows("https://example.com/News/a") {
+		t.Error("a scope including *News* allowed nothing, so a crawl of that site includes nothing")
+	}
+
+	// A host-shaped pattern is still folded, which is the case foldHost is for.
+	host, err := scope.New([]string{"example.com"}, nil, []string{"*.Internal.example.com"}, urls.Options{})
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	if host.Allows("https://db.internal.example.com/x") {
+		t.Error("a host-shaped pattern stopped being folded")
+	}
+}

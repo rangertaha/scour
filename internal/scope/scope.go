@@ -192,26 +192,37 @@ func (s *Scope) Domains() []string {
 	return append([]string(nil), s.domains...)
 }
 
-// foldHost lowercases the host of a pattern and leaves the rest as written.
+// foldHost lowercases the authority of a URL-shaped pattern and leaves the rest
+// as written.
 //
 // [urls.Normalise] lowercases the scheme and the host of every URL, and New
-// folds every entry in `domains`, so a pattern left as written could name a
-// host no URL reaching here will ever spell the same way:
-// `excluded = ["*.Internal.example.com"]` matched nothing at all, and the job
-// had said in as many words which host it must never fetch.
+// folds every entry in `domains`, so a pattern naming a host in another case
+// could match no URL that ever reaches here.
 //
 // The path is deliberately not folded. A URL path is case-sensitive, so
 // `excluded = ["*/Print/*"]` means that path and not `/print/`, and folding it
 // would silently widen every exclusion somebody wrote.
+//
+// # Why only a pattern with a scheme
+//
+// Because the two cannot be told apart otherwise, and guessing got it wrong.
+// This used to treat any pattern with no `/`, `?` or `#` as host-shaped, which
+// is true of `*.example.com` and equally true of `*Print*` and `*.PDF`. So a
+// wildcard path pattern was folded to `*print*`, matched nothing against a
+// path that keeps its case, and the crawl fetched the subtree the job said
+// never to touch - the exact failure the paragraph above says this avoids,
+// arriving through the branch meant to prevent it. An `included = ["*News*"]`
+// matched nothing either, so a crawl of that site included nothing.
+//
+// A pattern with a scheme has an authority that is unmistakably an authority.
+// Everything else is left as written and the host comparison in [matches]
+// folds instead, which is where the case-insensitivity actually belongs: a
+// host is case-insensitive by specification and a path is not, so it is a
+// property of what is being compared and not of the pattern.
 func foldHost(pattern string) string {
 	scheme := strings.Index(pattern, "://")
 	if scheme < 0 {
-		if strings.ContainsAny(pattern, "/?#") {
-			// A path with no scheme. Nothing here is the host.
-			return pattern
-		}
-		// Host-shaped, which is what `*.example.com` is.
-		return strings.ToLower(pattern)
+		return pattern
 	}
 
 	host := scheme + len("://")
@@ -255,8 +266,10 @@ func matches(pattern, normalised string) bool {
 	// matched no `included` pattern and so included nothing.
 	bare := withoutPort(normalised)
 
+	// The host comparisons fold and the URL comparisons do not, because a host
+	// is case-insensitive by specification and a path is not. See [foldHost].
 	if glob(pattern, normalised) || glob(pattern, bare) ||
-		glob(pattern, host) || glob(pattern, urls.WithoutPort(host)) {
+		globFold(pattern, host) || globFold(pattern, urls.WithoutPort(host)) {
 		return true
 	}
 
@@ -281,6 +294,11 @@ func withoutPort(normalised string) string {
 		return normalised
 	}
 	return strings.Replace(normalised, host, bare, 1)
+}
+
+// globFold is [glob] against a host, which is case-insensitive.
+func globFold(pattern, host string) bool {
+	return glob(strings.ToLower(pattern), strings.ToLower(host))
 }
 
 // glob matches `*` and `?` against a whole string.
