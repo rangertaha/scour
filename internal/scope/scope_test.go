@@ -339,3 +339,38 @@ func TestAWildcardPathPatternKeepsItsCase(t *testing.T) {
 		t.Error("a host-shaped pattern stopped being folded")
 	}
 }
+
+// TestAStarInTheURLDoesNotEatTheWildcard.
+//
+// `*` is a legal character in a path, and the matcher compared a pattern byte
+// against a URL byte before checking whether that pattern byte was a wildcard.
+// So a `*` in the URL matched the `*` in the pattern literally and consumed it:
+// the wildcard was spent on one byte instead of standing for the rest, and the
+// match failed.
+//
+// A site chooses its own URLs, so this is an exclusion a site can walk past by
+// putting one character in a path.
+func TestAStarInTheURLDoesNotEatTheWildcard(t *testing.T) {
+	excluded, err := scope.New([]string{"example.com"}, nil, []string{"*/print/*"}, urls.Options{})
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	for _, u := range []string{
+		"https://example.com/a/print/b",
+		"https://example.com/*/print/b",
+		"https://example.com/a/print/*b",
+	} {
+		if excluded.Allows(u) {
+			t.Errorf("%q is allowed by a scope that excludes */print/*", u)
+		}
+	}
+
+	// And the plain "everything" pattern still means everything.
+	all, err := scope.New(nil, []string{"*"}, nil, urls.Options{})
+	if err != nil {
+		t.Fatalf("scope: %v", err)
+	}
+	if !all.Allows("https://example.com/a*b") {
+		t.Error(`a scope including "*" refused a URL with a star in it`)
+	}
+}

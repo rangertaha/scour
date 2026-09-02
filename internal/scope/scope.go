@@ -319,11 +319,19 @@ func glob(pattern, s string) bool {
 
 	for i < len(s) {
 		switch {
-		case j < len(pattern) && (pattern[j] == '?' || pattern[j] == s[i]):
-			i++
-			j++
+		// The wildcard is tested first, because `*` in a pattern is always a
+		// wildcard and never a literal. Tested second, the literal comparison
+		// matched a `*` in the pattern against a `*` in the URL and consumed
+		// the wildcard: `*` did not match `*0`, and `*` is a legal character
+		// in a path. So a site could put one in a URL and walk past an
+		// exclusion written to catch it. There is no way to write a literal
+		// `*` in a pattern, which is what "only * and ? are patterns here"
+		// means. Found by fuzzing against the obvious implementation.
 		case j < len(pattern) && pattern[j] == '*':
 			star, mark = j, i
+			j++
+		case j < len(pattern) && (pattern[j] == '?' || pattern[j] == s[i]):
+			i++
 			j++
 		case star >= 0:
 			// Backtrack: let the last * swallow one more byte.
