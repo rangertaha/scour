@@ -196,12 +196,11 @@ func (j *Job) validateStartIsInScope() []error {
 		strings.Join(refused, ", "), j.Domains, j.Included, j.Excluded)}
 }
 
-// checkStartURL refuses anything that is not a page on the web.
-//
-// A crawler that followed file:// would read the disk of whichever machine
-// picked the job up, which is a submitted job reaching somewhere it was never
-// given.
 // checkStartURL reports why a start URL is not one the crawler can hold.
+//
+// It refuses anything that is not a page on the web: a crawler that followed
+// file:// would read the disk of whichever machine picked the job up, which is
+// a submitted job reaching somewhere it was never given.
 //
 // Asked of [urls.Normalise] rather than re-derived, because that is the
 // function every URL in a crawl passes through and the only one whose answer

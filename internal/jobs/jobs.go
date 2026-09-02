@@ -226,6 +226,26 @@ func New(ctx context.Context, conn *bus.Conn, opts Options) (*Manager, error) {
 		claimed: map[string]string{},
 	}
 
+	// Any state row that says this manager is driving a job is a row from
+	// before this manager existed, because it has not started anything yet.
+	//
+	// Without this a crash was permanent. [Manager.elsewhere] decides whether a
+	// running row is true by asking whether the node it names is still in the
+	// cluster, and a node that is SIGKILLed and restarted by its supervisor
+	// re-announces under the same name well inside the registry's TTL. The row
+	// then looked live to every other driver: start, stop and delete were all
+	// refused, from every node except the one that had just come back and knew
+	// it was not driving it - and control requests are queue-distributed, so
+	// which node answered was NATS's choice, not the operator's. The doc on
+	// elsewhere says "a driver that is gone is gone", and that is exactly the
+	// case where the name outlives the process.
+	//
+	// Only the node holding the name may say this, which is what makes it safe:
+	// nobody else can tell a restart from a peer that is still working.
+	if err := m.reconcile(own); err != nil {
+		return nil, err
+	}
+
 	// The manager still dies with the process. Close is what a caller should
 	// use, and this is what happens when the caller is a signal handler that
 	// cancelled its context and went away.
@@ -557,7 +577,41 @@ func (m *Manager) Pause(ctx context.Context, name string) (bus.JobStatus, error)
 	return m.halt(ctx, name, bus.PhasePaused)
 }
 
-// elsewhere names the node driving this job, when that node is not this one.
+// reconcile clears the running rows this manager's own name is on.
+//
+// See the call site for why. A row that cannot be read is left alone and
+// reported: refusing to start is better than starting a second driver on a
+// guess.
+func (m *Manager) reconcile(ctx context.Context) error {
+	names, err := m.jobs.Names(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, name := range names {
+		state, err := m.states.Get(ctx, name)
+		if err != nil {
+			return err
+		}
+		if state.Phase != bus.PhaseRunning || state.Driver != m.opts.Name {
+			continue
+		}
+
+		m.log.WarnContext(ctx, "a previous run of this driver did not finish; recording it as stopped",
+			"job", name, "since", state.Since)
+
+		state.Phase = bus.PhaseStopped
+		state.Since = time.Now().UTC()
+		state.Driver = ""
+		state.Ending = "the driver stopped without recording an ending"
+		if err := m.states.Put(ctx, name, state); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// elsewhere names the node driving this job, when that node is not this one.// elsewhere names the node driving this job, when that node is not this one.
 //
 // Empty when this manager holds the driver, when nothing is driving the job,
 // and when the node the state row names has left the cluster.

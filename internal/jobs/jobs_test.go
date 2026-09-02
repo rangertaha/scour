@@ -1509,3 +1509,76 @@ func TestTheDocumentsExternalTimeoutBoundsTheStage(t *testing.T) {
 		t.Error("a 10s external timeout fetched nothing from a site that takes 300ms")
 	}
 }
+
+// TestARestartedDriverDoesNotStrandItsJobs.
+//
+// A running state row says which node is driving the job, and another node
+// decides whether to believe it by asking the registry whether that node is
+// still in the cluster. A node that is killed and restarted by its supervisor
+// re-announces under the same name well inside the registry's TTL, so the row
+// it left behind looked live to everyone.
+//
+// The job was then permanently stuck: start, stop and delete were all refused
+// from every other node, and control requests are queue-distributed, so which
+// node answered - and therefore whether the operator got a refusal - was NATS's
+// choice. Only the node holding the name can tell a restart from a peer that is
+// still working, so it clears its own rows when it starts.
+func TestARestartedDriverDoesNotStrandItsJobs(t *testing.T) {
+	driver, conn, dir := clusterIn(t)
+	ctx := context.Background()
+
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(site.Close)
+
+	if _, err := driver.Create(ctx, document(site, "news")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// The row a killed driver leaves behind: running, and naming itself.
+	states, err := conn.OpenStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := states.Put(ctx, "news", bus.JobState{
+		Phase:  bus.PhaseRunning,
+		Driver: "test",
+		Since:  time.Now().UTC().Add(-time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A standby cannot tell, and must not: the name is in the registry.
+	other := standby(t, conn)
+	if _, err := other.Start(ctx, "news", true); err == nil {
+		t.Error("a standby started a job another node's row says it is driving")
+	}
+
+	// The node whose name it is comes back, and knows it is not driving it.
+	restarted, err := jobs.New(ctx, conn, jobs.Options{
+		Dir:    dir,
+		Bodies: bodies(t),
+		Name:   "test",
+	})
+	if err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	t.Cleanup(func() { _ = restarted.Close() })
+
+	status, err := restarted.Status(ctx, "news")
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.State.Phase == bus.PhaseRunning {
+		t.Error("a restarted driver still reports the job it never started as running")
+	}
+
+	// And every node can act on it again.
+	if _, err := other.Start(ctx, "news", true); err != nil {
+		t.Errorf("the job is still stranded after its driver came back: %v", err)
+	}
+	if _, err := other.Stop(ctx, "news"); err != nil && !strings.Contains(err.Error(), "not running") {
+		t.Errorf("stop: %v", err)
+	}
+}
