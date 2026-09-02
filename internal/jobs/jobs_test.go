@@ -120,7 +120,13 @@ func clusterIn(t *testing.T) (*jobs.Manager, *bus.Conn, string) {
 	// fetched it puts it there and the driver takes it out.
 	shared := bodies(t)
 
-	joined, err := node.Join(ctx, conn, node.Options{Name: "worker", Bodies: shared})
+	// One name for the node and the manager, which is what `scour server`
+	// does: it passes a single --name to both. The manager records that name
+	// as the job's driver, and another manager asking whether that driver is
+	// still in the cluster looks it up in the node registry. Two names here
+	// would make every such lookup answer "gone", and the check would pass
+	// while proving nothing.
+	joined, err := node.Join(ctx, conn, node.Options{Name: "test", Bodies: shared})
 	if err != nil {
 		t.Fatalf("join: %v", err)
 	}
@@ -1300,4 +1306,206 @@ func TestAStandbyReviewsAnUpdateAgainstTheRunningJob(t *testing.T) {
 	}
 
 	once.Do(func() { close(release) })
+}
+
+// standby is a second manager on one bus, which is what a second
+// `scour server --drive` is: it joins the same control queue group and any
+// request can land on it.
+func standby(t *testing.T, conn *bus.Conn) *jobs.Manager {
+	t.Helper()
+
+	m, err := jobs.New(context.Background(), conn, jobs.Options{
+		Dir:    t.TempDir(),
+		Bodies: bodies(t),
+		Name:   "standby",
+	})
+	if err != nil {
+		t.Fatalf("standby: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Close() })
+	return m
+}
+
+// heldSite blocks every request until the returned func is called, so a crawl
+// is definitely still running while something else is tried against it.
+func heldSite(t *testing.T) (*httptest.Server, func()) {
+	t.Helper()
+
+	release := make(chan struct{})
+	var once sync.Once
+	let := func() { once.Do(func() { close(release) }) }
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		<-release
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<html><head><title>Held</title></head><body></body></html>`)
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(let)
+	return server, let
+}
+
+// TestAStandbyDoesNotStartASecondCrawl.
+//
+// One driver per job is the politeness rule, not a simplification: two
+// schedulers handing out the same host cannot honour a crawl delay between
+// them. It was enforced by a map that belongs to one process, and control
+// requests are answered in a queue group - so a start landing on a standby
+// found no local driver, built its own frontier, seeded it, and crawled the
+// same site again. The site would have been the first to notice.
+func TestAStandbyDoesNotStartASecondCrawl(t *testing.T) {
+	driver, conn, _ := clusterIn(t)
+	other := standby(t, conn)
+	ctx := context.Background()
+
+	held, let := heldSite(t)
+
+	if _, err := driver.Create(ctx, document(held, "news")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := driver.Start(ctx, "news", true); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	waitFor(t, driver, "news", bus.PhaseRunning)
+
+	_, err := other.Start(ctx, "news", true)
+	if err == nil {
+		t.Fatal("a standby started a second crawl on a job already being driven")
+	}
+	if !strings.Contains(err.Error(), "already running") {
+		t.Errorf("refused for another reason: %v", err)
+	}
+	// And it says where, which is the thing an operator needs next.
+	if !strings.Contains(err.Error(), "test") {
+		t.Errorf("the refusal does not name the node driving it: %v", err)
+	}
+
+	let()
+}
+
+// TestAStandbyDoesNotReportALiveCrawlAsStopped.
+//
+// stop and pause answered from the local driver map, so a standby said "is not
+// running" while the pages kept arriving and `scour job status` said running:
+// two contradictory answers and no command that worked. delete swallowed the
+// same answer, removed the document and the state row, and left the crawl
+// going - and when it ended it wrote a state row for a document that no longer
+// existed, which is the row nothing can ever clear.
+func TestAStandbyDoesNotReportALiveCrawlAsStopped(t *testing.T) {
+	driver, conn, _ := clusterIn(t)
+	other := standby(t, conn)
+	ctx := context.Background()
+
+	held, let := heldSite(t)
+
+	if _, err := driver.Create(ctx, document(held, "news")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := driver.Start(ctx, "news", true); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	waitFor(t, driver, "news", bus.PhaseRunning)
+
+	for name, call := range map[string]func() error{
+		"stop":   func() error { _, err := other.Stop(ctx, "news"); return err },
+		"pause":  func() error { _, err := other.Pause(ctx, "news"); return err },
+		"delete": func() error { return other.Delete(ctx, "news") },
+	} {
+		err := call()
+		if err == nil {
+			t.Errorf("%s on a standby reported success for a crawl running on another node", name)
+			continue
+		}
+		if strings.Contains(err.Error(), "is not running") {
+			t.Errorf("%s said the job is not running while it is: %v", name, err)
+		}
+		if !strings.Contains(err.Error(), "test") {
+			t.Errorf("%s does not name the node driving it: %v", name, err)
+		}
+	}
+
+	// The document is still there, which is the half that mattered for delete.
+	if _, err := driver.Status(ctx, "news"); err != nil {
+		t.Errorf("the job was deleted out from under the crawl: %v", err)
+	}
+
+	let()
+}
+
+// TestTheDocumentsExternalTimeoutBoundsTheStage.
+//
+// `external_timeout` says how long a stage somewhere else has to answer. It was
+// parsed, defaulted, validated and printed by `scour job show`, and the request
+// was bounded by bus.Timeout regardless, because the manager built its stage
+// clients with a manager-wide wait of zero. A job asking for a long timeout had
+// its pages failed at two minutes and a job asking for a short one waited two.
+//
+// This is the third time the field has been found unwired, and twice the fix
+// wired it into something that displays it. So it is pinned by what actually
+// happens rather than by what is reported: a site slower than the timeout fails
+// the page, and the same site under a generous timeout does not.
+func TestTheDocumentsExternalTimeoutBoundsTheStage(t *testing.T) {
+	manager, _, _ := clusterIn(t)
+	ctx := context.Background()
+
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		time.Sleep(300 * time.Millisecond)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<html><head><title>Slow</title></head><body></body></html>`)
+	}))
+	t.Cleanup(slow.Close)
+
+	withTimeout := func(name, timeout string) []byte {
+		doc := string(document(slow, name))
+		block := "  downloader {\n    external         = true\n" +
+			"    external_timeout = \"" + timeout + "\"\n  }\n\n  scheduler {"
+		out := strings.Replace(doc, "  scheduler {", block, 1)
+		if out == doc {
+			t.Fatal("the fixture changed shape and this test no longer sets a timeout")
+		}
+		return []byte(out)
+	}
+
+	// Short enough that the site cannot answer in time.
+	if _, err := manager.Create(ctx, withTimeout("tight", "20ms")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := manager.Start(ctx, "tight", true); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	waitFor(t, manager, "tight", bus.PhaseDone, bus.PhaseFailed, bus.PhaseStopped)
+
+	tight, err := manager.Stats(ctx, "tight")
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if tight.Fetched != 0 {
+		t.Errorf("a 20ms external timeout fetched %d pages from a site that takes 300ms, "+
+			"so the document's timeout is not what bounds the request", tight.Fetched)
+	}
+
+	// Generous enough that it can.
+	if _, err := manager.Create(ctx, withTimeout("roomy", "10s")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := manager.Start(ctx, "roomy", true); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	waitFor(t, manager, "roomy", bus.PhaseDone, bus.PhaseFailed, bus.PhaseStopped)
+
+	roomy, err := manager.Stats(ctx, "roomy")
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if roomy.Fetched == 0 {
+		t.Error("a 10s external timeout fetched nothing from a site that takes 300ms")
+	}
 }

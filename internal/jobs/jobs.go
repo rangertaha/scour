@@ -126,6 +126,11 @@ type Manager struct {
 	jobs   *bus.Jobs
 	states *bus.States
 
+	// nodes is who is in the cluster, with a TTL. Consulted only to tell a
+	// state row that is true from one whose driver has died: see
+	// [Manager.elsewhere].
+	nodes *bus.Nodes
+
 	// ctx is the manager's own lifetime, and every crawl runs under it. Held
 	// rather than taken per call because a crawl must outlive the request that
 	// started it: driving from the caller's context meant a crawl that ended
@@ -198,6 +203,10 @@ func New(ctx context.Context, conn *bus.Conn, opts Options) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
+	nodes, err := conn.OpenNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	// Detached from the caller's context on purpose, and cancelled by Close.
 	// A crawl that ended when the request that started it returned is what
@@ -210,6 +219,7 @@ func New(ctx context.Context, conn *bus.Conn, opts Options) (*Manager, error) {
 		log:     opts.Log.With("service", opts.Name),
 		jobs:    jobsKV,
 		states:  states,
+		nodes:   nodes,
 		ctx:     own,
 		stop:    stop,
 		running: map[string]*driver{},
@@ -415,11 +425,11 @@ func (m *Manager) Update(ctx context.Context, document []byte) (bus.JobStatus, e
 	// it, for the reason [Manager.Status] gives: they agree unless a manager
 	// died between starting a crawl and recording it, and then the crawl in
 	// front of us is the truth.
-	state, err := m.states.Get(ctx, submitted.Name)
+	driver, err := m.elsewhere(ctx, submitted.Name)
 	if err != nil {
 		return bus.JobStatus{}, err
 	}
-	live := state.Phase == bus.PhaseRunning
+	live := driver != ""
 
 	m.mu.Lock()
 	if m.running[submitted.Name] != nil {
@@ -547,7 +557,80 @@ func (m *Manager) Pause(ctx context.Context, name string) (bus.JobStatus, error)
 	return m.halt(ctx, name, bus.PhasePaused)
 }
 
-// claim reserves a job name for one operation and returns what gives it back.
+// elsewhere names the node driving this job, when that node is not this one.
+//
+// Empty when this manager holds the driver, when nothing is driving the job,
+// and when the node the state row names has left the cluster.
+//
+// # Why this exists
+//
+// Because "is this job running" was asked three times and answered from
+// `m.running`, which is this process's own map. Control requests are answered
+// in a NATS queue group, so a second `scour server --drive` is a standby that
+// shares the load and any request for a job can land on the node that is not
+// driving it. Each of the three then did something wrong:
+//
+//   - start built a second driver on its own frontier and crawled the same
+//     site again. Two schedulers handing out one host cannot honour a crawl
+//     delay between them, which is the politeness rule the single-driver
+//     design exists for, and the site would have been the first to notice.
+//   - stop and pause answered "is not running" while the crawl carried on,
+//     and `scour job status` said running, so the operator was told two
+//     contradictory things and had no command that worked.
+//   - delete swallowed that same "is not running", removed the document and
+//     the state row, and left the crawl running: when it ended it wrote a
+//     state row for a document that no longer existed - the row nothing can
+//     ever clear, reached from the cluster side instead of the concurrency
+//     side.
+//
+// Update was fixed for this one pass earlier by reading the recorded phase.
+// Fixing that one site did not retire the class, so the question is asked in
+// one place now and the answer is the same wherever it is asked.
+//
+// # Why the node registry
+//
+// Because the phase alone cannot tell a crawl that is running from a manager
+// that died holding one. That row outlives the process that wrote it, and
+// refusing every operation on its say-so would strand the job for good.
+// [bus.NodesBucket] has a TTL for exactly this: a driver that is gone is gone,
+// and its state row is then a fact about the past.
+func (m *Manager) elsewhere(ctx context.Context, name string) (string, error) {
+	m.mu.Lock()
+	mine := m.running[name] != nil
+	m.mu.Unlock()
+	if mine {
+		return "", nil
+	}
+
+	state, err := m.states.Get(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if state.Phase != bus.PhaseRunning || state.Driver == "" || state.Driver == m.opts.Name {
+		// A running phase with no driver recorded is from a build old enough
+		// not to have written one. Treated as nothing driving it, because the
+		// alternative is refusing every operation on a job nobody can name a
+		// driver for.
+		return "", nil
+	}
+
+	here, err := m.nodes.Here(ctx)
+	if err != nil {
+		// The registry is not reachable. Reported rather than guessed: saying
+		// "nothing is driving it" would start a second crawl and saying
+		// "something is" would strand the job.
+		return "", fmt.Errorf("jobs: %q: cannot tell whether %s is still driving it: %w",
+			name, state.Driver, err)
+	}
+	if _, alive := here[state.Driver]; !alive {
+		m.log.InfoContext(ctx, "the driver recorded for this job has left the cluster",
+			"job", name, "driver", state.Driver)
+		return "", nil
+	}
+	return state.Driver, nil
+}
+
+// claim reserves a job name for one operation and returns what gives it back.// claim reserves a job name for one operation and returns what gives it back.
 //
 // # Why a claim and not a check
 //
@@ -634,11 +717,44 @@ func (m *Manager) launch(ctx context.Context, name string, fresh, seed bool) (bu
 		return bus.JobStatus{}, fmt.Errorf("jobs: %q is already running", name)
 	}
 
+	// And not on another node either. See [Manager.elsewhere]: this used to
+	// ask the local map alone, so a start answered by a standby built a second
+	// driver on its own frontier and crawled the same site again.
+	if driver, err := m.elsewhere(ctx, name); err != nil {
+		return bus.JobStatus{}, err
+	} else if driver != "" {
+		return bus.JobStatus{}, fmt.Errorf("jobs: %q is already running on %s", name, driver)
+	}
+
 	dir := m.dir(name)
 	if fresh {
 		if err := m.forget(ctx, name); err != nil {
 			return bus.JobStatus{}, err
 		}
+	}
+
+	// How long each stage has to answer, from the document rather than from a
+	// manager-wide default.
+	//
+	// This is the third time the class has been found: the document's
+	// `external_timeout` was parsed, defaulted, validated and printed by
+	// `scour job show`, and the request was bounded by bus.Timeout regardless.
+	// Twice it was fixed by wiring the value somewhere that displays it. A job
+	// saying `external_timeout = "10m"` had its pages failed at two minutes,
+	// each failure spending a frontier attempt, until the URL was abandoned -
+	// while the node answered every time.
+	fetchWait, err := job.Downloader.ExternalWait()
+	if err != nil {
+		return bus.JobStatus{}, fmt.Errorf("jobs: %q: %w", name, err)
+	}
+	readWait, err := job.Spider.ExternalWait()
+	if err != nil {
+		return bus.JobStatus{}, fmt.Errorf("jobs: %q: %w", name, err)
+	}
+	// A manager-wide override still wins, which is what a test setting a short
+	// wait is asking for.
+	if m.opts.Wait > 0 {
+		fetchWait, readWait = m.opts.Wait, m.opts.Wait
 	}
 
 	// The stages are somewhere else, always, and that is what makes this a
@@ -650,8 +766,8 @@ func (m *Manager) launch(ctx context.Context, name string, fresh, seed bool) (bu
 		Log:   m.log,
 		Eval:  m.opts.Eval,
 		Open:  func(cfg frontier.Config) (frontier.Frontier, error) { return sqlite.Open(cfg) },
-		Fetch: m.conn.NewDownloader(job.Name, m.opts.Bodies, m.opts.Wait),
-		Read:  m.conn.NewSpider(job.Name, m.opts.Bodies, m.opts.Wait),
+		Fetch: m.conn.NewDownloader(job.Name, m.opts.Bodies, fetchWait),
+		Read:  m.conn.NewSpider(job.Name, m.opts.Bodies, readWait),
 	})
 	if err != nil {
 		return bus.JobStatus{}, fmt.Errorf("jobs: %q: %w", name, err)
@@ -928,6 +1044,20 @@ func (m *Manager) end(ctx context.Context, name string, intent bus.Phase) (bus.J
 
 		if _, _, err := m.jobs.Get(ctx, name); err != nil {
 			return bus.JobStatus{}, err
+		}
+
+		// A crawl this node cannot reach is not a crawl that is not running.
+		// Saying so was worse than useless: `scour job stop` reported "is not
+		// running" while the pages kept arriving and `scour job status` said
+		// running, and delete swallowed the same answer and removed the
+		// document out from under the crawl. See [Manager.elsewhere].
+		driver, err := m.elsewhere(ctx, name)
+		if err != nil {
+			return bus.JobStatus{}, err
+		}
+		if driver != "" {
+			return bus.JobStatus{}, fmt.Errorf(
+				"jobs: %q is running on %s, and this is %s. Ask that node", name, driver, m.opts.Name)
 		}
 		return bus.JobStatus{}, fmt.Errorf("jobs: %q %w", name, errNotRunning)
 	}
