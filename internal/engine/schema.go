@@ -409,7 +409,36 @@ func (i *Item) Identity() []string {
 	return append(i.Tags(), i.Time)
 }
 
-// Fields are what this item measures: every leaf that is not a dimension.
+// Subject is the property that says which entity this item observes, or empty
+// when the shape does not say.
+//
+// [Item.Of] names the kind - `of = "company"` - and a property declaring
+// `entity = "company"` names which one. A measurement's tags are keyed by
+// property name, so a consumer wanting the entity has to be told which key
+// holds it, and that is this.
+//
+// # Why it is not the kind
+//
+// Because the kind and the property name are different namespaces and coincide
+// only by chance. The nats exporter's per-entity subject read a tag literally
+// called "of", which no record ever has; corrected to read the tag named by
+// `of`, it then worked for `property "company"` and for nothing else, so
+// `property "issuer" { entity = "company" }` still published every point to the
+// root subject. Both times the feature looked right in a test whose fixture
+// happened to use the same word twice.
+func (i *Item) Subject() string {
+	if i.Of == "" {
+		return ""
+	}
+	for _, p := range i.Properties {
+		if p.PropertyType() == TypeEntity && p.Entity == i.Of {
+			return p.Name
+		}
+	}
+	return ""
+}
+
+// Fields are what this item measures: every leaf that is not a dimension.// Fields are what this item measures: every leaf that is not a dimension.
 //
 // The mirror of [Item.Tags], and the two are a partition of [flattened]: a
 // leaf is one or the other and never both. See [dimensions] for why this

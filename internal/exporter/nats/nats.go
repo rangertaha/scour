@@ -206,27 +206,31 @@ func (s *stream) Close() error {
 
 // subjectFor is where one measurement goes.
 //
-// The shape says which kind of entity the item observes and the measurement
-// says which one it is: `item "price" { of = "company" }` beside a property
-// declaring `entity = "company"` gives `price,company=acme`, so the tag to read
-// is the one named by the shape's `of`.
+// The shape says which property names the entity it observes, and the
+// measurement says which entity that is. See [engine.Item.Subject].
 //
-// This used to read a tag literally called "of", which no record has ever had:
-// "of" is not a property, nothing extracts it, and [engine.Item.Tags] listed it
-// as a name with no value behind it. So every price published to the root
-// subject and the per-entity subject - the whole point of the feature - never
-// fired. The test written for it hand-built a record with an "of" value, which
-// no extraction path produces, so it stayed green.
+// Twice wrong before that. It read a tag literally called "of", which no record
+// has ever had: "of" is not a property, nothing extracts it, and Item.Tags
+// listed it as a name with no value behind it - so every point published to the
+// root subject and the per-entity subject, the whole point of the feature,
+// never fired. Corrected to read the tag named by the shape's `of`, it then
+// worked only where the property happened to share the entity kind's name,
+// because tags are keyed by property name and `of` is a kind. Both times a
+// fixture that used the same word twice made it look right.
 //
 // A record whose item shape is unknown is measured with no tags at all, since
 // nothing has said which of its values are dimensions and guessing would invent
 // series that cannot be un-invented, so it publishes to the root subject with
 // everything as fields.
 func subjectFor(root string, shape *engine.Item, m *record.Measurement) string {
-	if shape == nil || shape.Of == "" {
+	if shape == nil {
 		return root
 	}
-	entity := m.Tags[shape.Of]
+	subject := shape.Subject()
+	if subject == "" {
+		return root
+	}
+	entity := m.Tags[subject]
 	if entity == "" {
 		return root
 	}
