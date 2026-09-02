@@ -1227,3 +1227,77 @@ func TestEveryMutatingOperationWaitsItsTurn(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 }
+
+// TestAStandbyReviewsAnUpdateAgainstTheRunningJob.
+//
+// Control requests are answered in a queue group, so a second `scour server`
+// is a standby that shares the load: a job running on one node can have its
+// update answered by another. The running map is per-manager, so a standby saw
+// no driver, decided the job was not running and skipped the mutation review
+// entirely - the policy bypassed on exactly the crawl it exists to protect,
+// decided by which node NATS happened to pick.
+//
+// Both managers share one bus here, which is what two servers in a cluster
+// are.
+func TestAStandbyReviewsAnUpdateAgainstTheRunningJob(t *testing.T) {
+	driver, conn, _ := clusterIn(t)
+	ctx := context.Background()
+
+	standby, err := jobs.New(ctx, conn, jobs.Options{
+		Dir:    t.TempDir(),
+		Bodies: bodies(t),
+		Name:   "standby",
+	})
+	if err != nil {
+		t.Fatalf("standby: %v", err)
+	}
+	t.Cleanup(func() { _ = standby.Close() })
+
+	release := make(chan struct{})
+	var once sync.Once
+
+	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		<-release
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<html><head><title>Held</title></head><body></body></html>`)
+	}))
+	t.Cleanup(held.Close)
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+
+	doc := document(held, "news")
+	if _, err := driver.Create(ctx, doc); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := driver.Start(ctx, "news", true); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	waitFor(t, driver, "news", bus.PhaseRunning)
+
+	// A scope change, which the default `costly = "refuse"` refuses on a
+	// running job.
+	widened := strings.Replace(string(doc),
+		`start   = ["`+held.URL+`/"]`,
+		`start   = ["`+held.URL+`/", "`+held.URL+`/other"]`, 1)
+	if widened == string(doc) {
+		t.Fatal("the fixture changed shape and this test no longer widens the scope")
+	}
+
+	if _, err := standby.Update(ctx, []byte(widened)); err == nil {
+		t.Error("a standby applied a change the mutation policy refuses, " +
+			"because the crawl was running on the other node")
+	} else if !strings.Contains(err.Error(), "mutation policy") {
+		t.Errorf("refused for another reason: %v", err)
+	}
+
+	// The node holding the crawl refuses it too, which is the answer both
+	// should give.
+	if _, err := driver.Update(ctx, []byte(widened)); err == nil {
+		t.Error("the node running the crawl applied a change its policy refuses")
+	}
+
+	once.Do(func() { close(release) })
+}

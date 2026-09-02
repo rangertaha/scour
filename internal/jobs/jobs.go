@@ -397,15 +397,34 @@ func (m *Manager) Update(ctx context.Context, document []byte) (bus.JobStatus, e
 	}
 	defer release()
 
-	// The running map alone, not "is anything working on this job". Nothing
-	// else can be working on it: this holds the claim, and that is what the
-	// claim means. Asking the broader question here meant asking about a
-	// reservation this call had just taken, so the answer was always yes -
-	// every stopped job was reviewed as if it were running, the default
-	// `costly = "refuse"` refused every scope change to one, and the refusal
-	// said the job was running when it was not.
+	// Is this job running, anywhere.
+	//
+	// Not "is anything working on it": this holds the claim, and asking the
+	// broader question meant asking about a reservation this call had just
+	// taken, so the answer was always yes - every stopped job was reviewed as
+	// if it were running, and the refusal said so when it was not.
+	//
+	// And not the local driver map either. Control requests are answered in a
+	// queue group, so a second `scour server` is a standby that shares the
+	// load and a job running on one node has its update answered by another.
+	// The map is per-manager; a standby saw no driver, skipped the review, and
+	// wrote the document - the `mutation` policy bypassed on exactly the crawl
+	// it exists to protect, by which node NATS happened to pick.
+	//
+	// The recorded phase is the shared truth. The local driver still wins over
+	// it, for the reason [Manager.Status] gives: they agree unless a manager
+	// died between starting a crawl and recording it, and then the crawl in
+	// front of us is the truth.
+	state, err := m.states.Get(ctx, submitted.Name)
+	if err != nil {
+		return bus.JobStatus{}, err
+	}
+	live := state.Phase == bus.PhaseRunning
+
 	m.mu.Lock()
-	live := m.running[submitted.Name] != nil
+	if m.running[submitted.Name] != nil {
+		live = true
+	}
 	m.mu.Unlock()
 
 	if live {
