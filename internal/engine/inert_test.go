@@ -26,6 +26,20 @@ const (
 	// checkPrefix names the validators, which read a setting to decide whether
 	// it is allowed and then do nothing with it. See reachedFromOutside.
 	checkPrefix = "validate"
+
+	// writePrefix renders a job back as the text somebody would have written,
+	// which is describing a setting rather than acting on one - the same
+	// exclusion as reportPath and for the same reason.
+	//
+	// Without it this test asserted nothing at all. Spec.HCL walks every
+	// attribute an item and a property can carry, and it lives inside the
+	// engine, so every field it prints counted as reached from outside: all 99
+	// tagged fields were reachable and the inert list was empty by
+	// construction. A test written to catch "a setting accepted and ignored"
+	// had been passing whatever the answer was, which is how external_timeout
+	// came to be unwired for a third time with an exemption on the list saying
+	// so.
+	writePrefix = "write"
 )
 
 // A setting the document accepts that nothing acts on.
@@ -96,65 +110,104 @@ func TestNoSettingIsAcceptedAndIgnored(t *testing.T) {
 		// spider in another language reads.
 		"Item.Description":     "written into the rendered spec",
 		"Property.Description": "written into the rendered spec",
-
-		// Read by Plugin.On and by the plugin fingerprint, both in this
-		// package, and both of whose results are consumed outside it.
-		"Plugin.Enabled": "read by Plugin.On and the chain fingerprint",
-
-		// Resolved into the pipeline's waves by Job.Waves, in this package.
-		// The waves are what the pipeline runs.
-		"Step.Requires": "resolved into the pipeline's waves",
-
-		// Nothing publishes measurements yet. This is a real instance of the
-		// class, kept deliberately: the block is documented and the feature is
-		// not built, and the honest options are to build it or to delete the
-		// field. Recorded rather than hidden.
-		"Monitoring.Metrics": "no metrics are published yet: tracked, not resolved",
-
-		// The next eight are one cause, not eight, and the same kind of
-		// deliberate record as the line above.
-		//
-		// Nothing outside a test drives a crawl over the bus:
-		// bus.Conn.NewDownloader and bus.Conn.NewSpider have no caller but
-		// internal/bus's own tests, and both are always passed a zero wait. So
-		// the length of time a document says an external stage may take is
-		// never the length of time anything waits. That is the oldest instance
-		// of this class and the one the test was written for, which is worth
-		// saying plainly: it was retired, and it came back, because the fix
-		// wired the value into `scour job show` rather than into a crawl.
-		//
-		// `external` itself does act, so it is not on this list: a run that
-		// cannot reach the stage refuses rather than crawling locally.
-		"Downloader.ExternalTimeout": "no command runs a crawl over the bus yet: tracked, not resolved",
-		"Spider.ExternalTimeout":     "no command runs a crawl over the bus yet: tracked, not resolved",
-		"Pipeline.ExternalTimeout":   "an external pipeline is refused outright: tracked, not resolved",
-
-		// Applying a change to a running job is unwired the same way. Diff and
-		// the Effect it reports have no caller but this package's own tests, so
-		// the policy for what to do about a change that is not free is never
-		// consulted. Five fields, one cause.
-		"Job.Mutation":           "nothing applies a change to a running job yet: tracked, not resolved",
-		"Mutation.Costly":        "nothing applies a change to a running job yet: tracked, not resolved",
-		"Mutation.OutOfScope":    "nothing applies a change to a running job yet: tracked, not resolved",
-		"Mutation.StaleRecords":  "nothing applies a change to a running job yet: tracked, not resolved",
-		"Mutation.OrphanedCache": "nothing applies a change to a running job yet: tracked, not resolved",
 	}
+
+	// Settings something reads and nothing acts on, which this check cannot
+	// see and so does not try to.
+	//
+	// It follows reads. A field read by reachable code counts as wired even
+	// when the value is then dropped, so these are recorded here in prose
+	// rather than in the list above - an entry there would be flagged as
+	// stale, and rightly, because they are read:
+	//
+	//   - Monitoring.Metrics: nothing publishes measurements yet. The block is
+	//     documented and the feature is not built, and the honest options are
+	//     to build it or to delete the field.
+	//   - Pipeline.ExternalTimeout: an external pipeline is refused outright,
+	//     so how long one may take is a setting for something that cannot
+	//     happen.
+	//   - Mutation.OutOfScope and Mutation.StaleRecords: jobs.Update reviews a
+	//     change and then discards Review.Actions, so what to do about a URL
+	//     the new scope no longer admits, or a record written under a schema
+	//     that has since changed, is decided by nothing. Their three siblings
+	//     - Job.Mutation, Mutation.Costly, Mutation.OrphanedCache - do act,
+	//     through the refusal.
+	//   - Plugin.Enabled and Step.Requires do act, through Plugin.On and
+	//     Job.Waves. They were on the list above for years, which is how a
+	//     list nothing checks back drifts.
 
 	loaded := load(t)
 	reached := reachedFromOutside(t, loaded)
 
 	var inert []string
+	// Every exemption is checked back the other way, because the list is
+	// otherwise write-only: an entry skips its field for good, so it hides a
+	// field that has since been wired up exactly as readily as it records one
+	// that has not, and nothing notices when the reason stops being true.
+	//
+	// Three entries were stale when this was added. Job.Mutation,
+	// Mutation.Costly and Mutation.OrphanedCache had been live since
+	// jobs.Update began reviewing a change against the running revision, so
+	// the list was quietly promising that a policy nobody consulted was not
+	// consulted - and would not have noticed if Update stopped consulting it.
+	// The two ExternalTimeout entries were worse: they were stale AND their
+	// stated reason ("nothing runs a crawl over the bus") had been false since
+	// the job service was written, which is how the field came to be unwired a
+	// third time behind an exemption that said it was expected.
+	// Aggregated by name before anything is decided, because a package can be
+	// loaded more than once - as a root and again as a dependency - and each
+	// copy has type objects of its own. One copy of a field is reached and the
+	// other is not, so asking about a single object answers about a copy
+	// rather than about the setting.
+	var wired, gone []string
+	live := map[string]bool{}
+	tags := map[string]string{}
+
 	for field, tag := range taggedFields(t, loaded) {
-		if reached[field] {
-			continue
-		}
 		key := owner(field) + "." + field.Name()
-		if _, ok := exempt[key]; ok {
-			continue
+		tags[key] = tag
+		live[key] = live[key] || reached[field]
+	}
+
+	for key, isLive := range live {
+		_, exempted := exempt[key]
+		switch {
+		case isLive && exempted:
+			wired = append(wired, key)
+		case isLive, exempted:
+		default:
+			inert = append(inert, key+" (hcl "+tags[key]+")")
 		}
-		inert = append(inert, key+" (hcl "+tag+")")
+	}
+	for key := range exempt {
+		if _, ok := live[key]; !ok {
+			gone = append(gone, key)
+		}
 	}
 	sort.Strings(inert)
+	sort.Strings(wired)
+	sort.Strings(gone)
+
+	if len(gone) > 0 {
+		t.Errorf(`these are on the exempt list above and are not settings any more:
+
+  %s
+
+Renamed or deleted, and the entry outlived them. An exemption that names
+nothing exempts nothing, and reads as a record of work still outstanding.`,
+			strings.Join(gone, "\n  "))
+	}
+
+	if len(wired) > 0 {
+		t.Errorf(`these settings are on the exempt list above and are read outside this package:
+
+  %s
+
+An exemption records a setting nothing acts on. One that names a setting
+something does act on is a promise nobody is keeping: take it off the list, so
+that the list goes on meaning what it says.`,
+			strings.Join(wired, "\n  "))
+	}
 
 	if len(inert) > 0 {
 		t.Errorf(`these settings are accepted by a document and read by nothing outside this package:
@@ -293,7 +346,8 @@ func reachedFromOutside(t *testing.T, loaded []*packages.Package) map[types.Obje
 					roots = append(roots, engineReads(pkg.TypesInfo, decl)...)
 					continue
 				}
-				if strings.HasPrefix(strings.ToLower(fn.Name.Name), checkPrefix) {
+				name := strings.ToLower(fn.Name.Name)
+				if strings.HasPrefix(name, checkPrefix) || strings.HasPrefix(name, writePrefix) {
 					continue
 				}
 				if defined := pkg.TypesInfo.Defs[fn.Name]; defined != nil {
