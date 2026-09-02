@@ -322,10 +322,16 @@ func TestRobotsIsCheckedOutsideEverything(t *testing.T) {
 // job that will not download a megabyte of HTML still has to be able to read
 // what a site permits.
 func TestRobotsIsReadToItsOwnLimit(t *testing.T) {
-	rules := "User-agent: *\nDisallow: /private\n" +
-		"# " + strings.Repeat("padding ", 40) + "\n"
-	if len(rules) < 200 {
-		t.Fatalf("the fixture is only %d bytes, which does not exceed the limit under test", len(rules))
+	// The padding comes first, so the rule itself lies past the job's
+	// max_body. It used to come after, which meant the rule survived the cut:
+	// robots.txt is read with Truncate set - RFC 9309 says to parse the first
+	// 500 KiB and ignore the rest - so a reader honouring max_body would still
+	// have parsed the first hundred bytes and found `Disallow: /private` among
+	// them. Replacing the robots limit with the page limit left this passing.
+	rules := "# " + strings.Repeat("padding ", 40) + "\n" +
+		"User-agent: *\nDisallow: /private\n"
+	if before := strings.Index(rules, "Disallow"); before < 100 {
+		t.Fatalf("the rule sits at byte %d, inside the %d-byte limit under test", before, 100)
 	}
 
 	server := site(t, saying(rules))

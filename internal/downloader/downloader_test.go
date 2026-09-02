@@ -761,25 +761,30 @@ func TestMain(m *testing.M) { registrytest.Main(m, downloader.Registered) }
 func TestTheStageSaysHowLongOneFetchCanTake(t *testing.T) {
 	const timeout = 30 * time.Second
 
+	// robots.txt is a fetch of its own AND follows redirects of its own, so it
+	// costs six, not one. That is the term the doc above calls the property of
+	// how the chain is assembled, and it is what these numbers have to carry.
+	const robotsCost = 6
+
 	for name, tc := range map[string]struct {
 		blocks string
-		least  time.Duration
+		want   time.Duration
 	}{
 		// One page fetch, with nothing wrapping it.
 		"no robots, no redirects": {
 			blocks: "robots = false\n    max_redirects = 0",
-			least:  timeout,
+			want:   timeout,
 		},
 		// The guard loads robots.txt, following redirects of its own.
 		"robots, no redirects": {
 			blocks: "robots = true\n    max_redirects = 0",
-			least:  2 * timeout,
+			want:   (1 + robotsCost) * timeout,
 		},
 		// Every hop re-enters from the top, robots and all, which is the term
 		// a formula over the job document could never have known about.
 		"robots and redirects": {
 			blocks: "robots = true\n    max_redirects = 10",
-			least:  11 * 2 * timeout,
+			want:   11 * (1 + robotsCost) * timeout,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -794,10 +799,20 @@ func TestTheStageSaysHowLongOneFetchCanTake(t *testing.T) {
 			}
 			defer stage.Close()
 
-			if got := stage.Worst(); got < tc.least {
-				t.Errorf("the stage says one fetch takes at most %s, and it can take %s: "+
-					"a lease sized from this expires while a worker is still fetching",
-					got, tc.least)
+			// Exactly, in both directions. This asked only that the bound was
+			// not too small, and its numbers counted robots.txt as one fetch
+			// rather than six - so dropping the redirect allowance took Worst
+			// from 77 timeouts to 22 and the test went on passing, while the
+			// bound it exists to size is the one a lease is cut from.
+			//
+			// Too large matters as well: a lease sized from a bound five times
+			// what a fetch can take is a URL nothing else may have for five
+			// times as long after a worker dies.
+			if got := stage.Worst(); got != tc.want {
+				t.Errorf("the stage says one fetch takes at most %s, want %s: "+
+					"a lease is cut from this, so too small expires under a live worker "+
+					"and too large strands a URL when one dies",
+					got, tc.want)
 			}
 		})
 	}

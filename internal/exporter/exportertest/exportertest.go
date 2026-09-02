@@ -34,6 +34,7 @@ package exportertest
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -149,8 +150,18 @@ func testWriteAfterClose(t *testing.T, open Open) {
 	if err := e.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	if err := e.Write(context.Background(), one()); err == nil {
+	err := e.Write(context.Background(), one())
+	if err == nil {
 		t.Error("a record written after Close was accepted, so a caller was told it landed")
+	}
+	// The exporter's own refusal, not whatever the file, database or
+	// connection under it happens to say once closed. Asserting only that
+	// something went wrong let the guard be deleted from three of the five
+	// backends with this suite still green - and the guard is what holds on
+	// the path where the destination is not a file that errors, which is
+	// `scour crawl` writing to stdout.
+	if !errors.Is(err, exporter.ErrClosed) {
+		t.Errorf("writing after Close reports %v, want exporter.ErrClosed", err)
 	}
 }
 

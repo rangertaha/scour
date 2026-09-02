@@ -160,7 +160,7 @@ func (s *stream) Write(_ context.Context, records ...*record.Record) error {
 	defer s.mu.Unlock()
 
 	if s.closed {
-		return fmt.Errorf("exporter/nats: %s: already closed", s.subject)
+		return fmt.Errorf("exporter/nats: %s: %w", s.subject, exporter.ErrClosed)
 	}
 
 	for _, r := range records {

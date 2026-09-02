@@ -214,11 +214,23 @@ func TestBayesRefusesOneSidedExamples(t *testing.T) {
 func TestBayesIsNotFooledByLength(t *testing.T) {
 	b := trained(t)
 
-	short := score(t, b, "The transfer fee was a record.")
-	long := score(t, b, strings.Repeat("The transfer fee was a record. ", 60))
+	// On topic as well as off, because the two move in opposite directions and
+	// only one of them can show this. Length sensitivity drives an off-topic
+	// page's evidence *down*, so `long > short+0.2` could never fire for one:
+	// removing both length defences left the off-topic pair at 0.14 and 0.00
+	// and this test green, while the on-topic pair went from 0.83 to a
+	// saturated 1.00 - every long page scoring high whatever it says, which is
+	// the failure named above.
+	for name, text := range map[string]string{
+		"on topic":  "The climate committee criticised the pace of decarbonisation. ",
+		"off topic": "The transfer fee was a record. ",
+	} {
+		short := score(t, b, text)
+		long := score(t, b, strings.Repeat(text, 60))
 
-	if long > short+0.2 {
-		t.Errorf("the same off-topic text scored %.2f short and %.2f long", short, long)
+		if diff := long - short; diff > 0.2 || diff < -0.2 {
+			t.Errorf("the same %s text scored %.2f short and %.2f long", name, short, long)
+		}
 	}
 }
 

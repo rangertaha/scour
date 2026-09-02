@@ -289,7 +289,7 @@ func (f *file) Write(_ context.Context, records ...*record.Record) error {
 	defer f.mu.Unlock()
 
 	if f.closed {
-		return fmt.Errorf("exporter/parquet: %s: already closed", f.path)
+		return fmt.Errorf("exporter/parquet: %s: %w", f.path, exporter.ErrClosed)
 	}
 	if len(records) == 0 {
 		return nil

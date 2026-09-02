@@ -118,7 +118,7 @@ func (l *lines) Write(_ context.Context, records ...*record.Record) error {
 	defer l.mu.Unlock()
 
 	if l.closed {
-		return fmt.Errorf("%s: already closed", l.path)
+		return fmt.Errorf("%s: %w", l.path, exporter.ErrClosed)
 	}
 
 	for _, r := range records {
@@ -166,7 +166,7 @@ func (a *array) Write(_ context.Context, records ...*record.Record) error {
 	defer a.mu.Unlock()
 
 	if a.closed {
-		return fmt.Errorf("%s: already closed", a.path)
+		return fmt.Errorf("%s: %w", a.path, exporter.ErrClosed)
 	}
 
 	for _, r := range records {
@@ -261,7 +261,7 @@ func (t *table) Write(_ context.Context, records ...*record.Record) error {
 	defer t.mu.Unlock()
 
 	if t.closed {
-		return fmt.Errorf("%s: already closed", t.path)
+		return fmt.Errorf("%s: %w", t.path, exporter.ErrClosed)
 	}
 
 	for _, r := range records {

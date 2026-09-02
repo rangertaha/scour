@@ -52,6 +52,21 @@ type Exporter interface {
 	Close() error
 }
 
+// ErrClosed is a write to an exporter that has already been closed.
+//
+// A sentinel because the contract suite has to tell this refusal from any other
+// error, and it could not: the case asserted only that Write returned
+// something, and every backend is built over a real file, database or
+// connection that supplies an error of its own once closed. So the guard could
+// be deleted from three of the five and the suite stayed green - while the
+// guard is load-bearing on the path where the destination is not a file that
+// errors, which is `scour crawl` writing to stdout.
+//
+// The whole point of refusing is that a run must not be told a record landed
+// when the file is finished: an export that looks complete and is short is the
+// worst outcome available here.
+var ErrClosed = errors.New("exporter: already closed")
+
 // Config is what an exporter is built from.
 type Config struct {
 	// Format is the first label: json, csv, parquet.

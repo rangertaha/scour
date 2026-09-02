@@ -261,7 +261,7 @@ func (t *table) Write(ctx context.Context, records ...*record.Record) error {
 	defer t.mu.Unlock()
 
 	if t.closed {
-		return fmt.Errorf("exporter/sqlite: %s: already closed", t.path)
+		return fmt.Errorf("exporter/sqlite: %s: %w", t.path, exporter.ErrClosed)
 	}
 
 	for _, r := range records {
