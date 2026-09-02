@@ -96,16 +96,40 @@ func TestEmptyBody(t *testing.T) {
 	}
 }
 
-// TestUndecodableKeepsThePage: a crawl that dropped a page over an encoding it
-// did not recognise would lose evidence to make a point.
-func TestUndecodableKeepsThePage(t *testing.T) {
+// TestAnEncodingNothingRecognisesFallsBackToSniffing.
+//
+// This was written as "undecodable keeps the page" and could not observe that:
+// charset.NewReader does not fail on a name it has never heard of, it falls
+// through to the sniffer, so the only assertion - that the text was not empty -
+// was satisfied by the ordinary success path, and the error it discarded was
+// always nil. Bytes' two error branches are unreachable from here: nothing in
+// the standard library errors on a bytes.Reader either.
+//
+// What actually happens is worth pinning, because it is what a crawl relies
+// on: the page survives, the charset reported is the one that was used rather
+// than the one that was asked for, and it is not reported as declared.
+func TestAnEncodingNothingRecognisesFallsBackToSniffing(t *testing.T) {
 	body := []byte("some bytes")
 
-	got, err := decode.Bytes(body, "text/html; charset=x-nonesuch-9000")
-	if len(got.Text) == 0 {
-		t.Error("the page was thrown away")
+	for _, contentType := range []string{
+		"text/html; charset=x-nonesuch-9000",
+		"text/html; charset=",
+		"garbage",
+	} {
+		got, err := decode.Bytes(body, contentType)
+		if err != nil {
+			t.Errorf("%q: %v", contentType, err)
+		}
+		if string(got.Text) != string(body) {
+			t.Errorf("%q: the page was changed or thrown away: %q", contentType, got.Text)
+		}
+		if got.Charset == "x-nonesuch-9000" {
+			t.Errorf("%q: reported the charset nobody implements as the one used", contentType)
+		}
+		if got.Declared {
+			t.Errorf("%q: a sniffed encoding was reported as declared", contentType)
+		}
 	}
-	_ = err // reported for the log, not fatal
 }
 
 func TestCharsetWithoutDecoding(t *testing.T) {

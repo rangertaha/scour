@@ -44,6 +44,19 @@ type Report struct {
 	// Items are one entry per declared shape, in the order the document
 	// declares them.
 	Items []*ItemRates
+
+	// Unreadable is how many samples could not be parsed at all. They are in
+	// Pages, because a page the parser refuses is a page the crawl will get
+	// nothing from and a rate that left it out would read better than the
+	// corpus does.
+	//
+	// Counted rather than fatal. x/net/html does not fail on bad markup, which
+	// is the point of it, but it does refuse a document nested more than 512
+	// elements deep - a quoted forum thread reaches that - and one such page
+	// in a corpus used to return no report at all. A report is a measurement
+	// over a corpus, and losing the measurement because one sample was strange
+	// is the opposite of what it is for.
+	Unreadable int
 }
 
 // ItemRates is one shape's results over the corpus.
@@ -144,7 +157,9 @@ func Rates(spec *engine.Spec, samples []Sample) (*Report, error) {
 	for _, sample := range samples {
 		result, err := e.Page(sample.URL, sample.Body)
 		if err != nil {
-			return nil, err
+			// Counted, not fatal. See [Report.Unreadable].
+			report.Unreadable++
+			continue
 		}
 
 		for i, item := range spec.Items {
@@ -287,6 +302,12 @@ func (r *Report) String() string {
 	var b strings.Builder
 
 	_, _ = fmt.Fprintf(&b, "fill rates over %d pages\n", r.Pages)
+	if r.Unreadable > 0 {
+		// Said, because a rate computed over a corpus that partly would not
+		// parse is a different number from one over a corpus that did, and
+		// silently dropping the difference reads as full coverage.
+		_, _ = fmt.Fprintf(&b, "%d of them could not be parsed and found nothing\n", r.Unreadable)
+	}
 
 	for _, item := range r.Items {
 		_, _ = fmt.Fprintf(&b, "\nitem %q: on %d pages (%s), complete on %d, %d required properties missing\n\n",

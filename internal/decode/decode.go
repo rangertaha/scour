@@ -44,9 +44,14 @@ type Result struct {
 	// Charset is the encoding that was used, as it is named in IANA's
 	// registry: "utf-8", "windows-1251". Empty when the body was empty.
 	Charset string
-	// Declared reports whether the encoding was stated by the response or the
-	// document, rather than guessed from the bytes. A guess that turns out
-	// wrong is worth being able to find later.
+	// Declared reports whether the encoding was stated by the response's
+	// Content-Type or by a byte order mark, rather than guessed.
+	//
+	// Not "or by the document", which this used to say. A meta element is read
+	// and believed - see [detect] for the order - but the library reports it
+	// the same way it reports a guess, so a page that stated its own encoding
+	// is indistinguishable here from one that stated nothing. A caller must
+	// not read a false as "the page said nothing".
 	Declared bool
 }
 
@@ -109,12 +114,18 @@ func Charset(body []byte, contentType string) (name string, declared bool) {
 	return detect(body, contentType)
 }
 
-// detect names the encoding, and says whether anything declared it.
+// detect names the encoding, and says whether it was declared in a way this can
+// tell apart from a guess.
 //
 // The order is the one the HTML specification requires: what the response said,
 // then a byte order mark, then a meta element, then the bytes. Sniffing the
 // bytes is last because it is a guess, and a site that bothered to say should
 // be believed over a detector that has seen a kilobyte.
+//
+// The second result is narrower than that order suggests: the library sets it
+// for the response and for a byte order mark, and not for a meta element. So a
+// document that stated its own encoding comes back with the encoding it stated
+// and a false. See [Result.Declared].
 func detect(body []byte, contentType string) (string, bool) {
 	_, name, certain := charset.DetermineEncoding(body, contentType)
 	return strings.ToLower(name), certain

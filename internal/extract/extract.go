@@ -183,8 +183,13 @@ func (e *Extractor) Spec() *engine.Spec { return e.spec }
 func (e *Extractor) Page(url string, body []byte) (*Result, error) {
 	doc, err := html.Parse(strings.NewReader(string(body)))
 	if err != nil {
-		// x/net/html does not fail on bad markup, which is the point of it, so
-		// this is a read error rather than a parse error.
+		// x/net/html does not fail on bad markup, which is the point of it,
+		// but it does refuse a document nested more than 512 elements deep -
+		// a quoted forum or mail thread reaches that. So this is a page the
+		// parser will not hold rather than a read error, and it is the
+		// caller's to decide about: [Rates] counts one and carries on, because
+		// a measurement over a corpus should not be lost to its strangest
+		// sample.
 		return nil, fmt.Errorf("extract: %s: %w", url, err)
 	}
 

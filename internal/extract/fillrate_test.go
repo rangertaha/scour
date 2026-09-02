@@ -262,3 +262,46 @@ func TestRatesRefusesASpecItCannotCompile(t *testing.T) {
 		t.Fatal("a spec with a selector that is not one was measured rather than refused")
 	}
 }
+
+// TestAPageThatWillNotParseIsCountedNotFatal.
+//
+// x/net/html does not fail on bad markup, which is the point of it, but it does
+// refuse a document nested more than 512 elements deep - a quoted forum or mail
+// thread reaches that. One such page in a corpus made Rates return no report at
+// all, so a measurement over a thousand pages was lost to the strangest one of
+// them.
+//
+// It is counted instead, and said: a rate over a corpus that partly would not
+// parse is a different number from one over a corpus that did, and dropping the
+// difference silently reads as full coverage.
+func TestAPageThatWillNotParseIsCountedNotFatal(t *testing.T) {
+	deep := []byte("<html><body>" + strings.Repeat("<blockquote>", 600) +
+		"hi" + strings.Repeat("</blockquote>", 600) + "</body></html>")
+	good := []byte(`<html><head><title>One</title></head><body><h1 class="t">One</h1></body></html>`)
+
+	spec := &engine.Spec{Job: "news", Items: []*engine.Item{{
+		Name:       "article",
+		Properties: []*engine.Property{{Name: "t", Type: "str", CSS: []string{".t"}}},
+	}}}
+
+	report, err := extract.Rates(spec, []extract.Sample{
+		{URL: "https://e.example/1", Body: good},
+		{URL: "https://e.example/2", Body: deep},
+		{URL: "https://e.example/3", Body: good},
+	})
+	if err != nil {
+		t.Fatalf("one unparseable page lost the whole report: %v", err)
+	}
+	if report.Pages != 3 {
+		t.Errorf("pages = %d, want every sample counted", report.Pages)
+	}
+	if report.Unreadable != 1 {
+		t.Errorf("unreadable = %d, want 1", report.Unreadable)
+	}
+	if got := report.Items[0].Found; got != 2 {
+		t.Errorf("found on %d pages, want the two that parsed", got)
+	}
+	if !strings.Contains(report.String(), "could not be parsed") {
+		t.Errorf("the report does not say a page was unreadable:\n%s", report)
+	}
+}
