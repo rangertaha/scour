@@ -119,7 +119,7 @@ func (r *Record) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// Identity is what makes two records the same record.// Identity is what makes two records the same record.
+// Identity is what makes two records the same record.
 //
 // The item and the page, and deliberately not the values. A pipeline step
 // transforms values, so an identity derived from them changes when a step runs,

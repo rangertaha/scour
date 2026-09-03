@@ -108,7 +108,6 @@ func (s *stepping) start(line string) {
 }
 
 // find locates where a property's locator goes: the line to replace if there is
-// an induced one, and otherwise the line to insert before.// find locates where a property's locator goes: the line to replace if there is
 // an induced one, and otherwise the line to insert before.
 //
 // Line-oriented and deliberately conservative. It looks for the property block

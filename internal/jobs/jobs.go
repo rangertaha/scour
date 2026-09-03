@@ -45,6 +45,8 @@ package jobs
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -131,6 +133,21 @@ type Manager struct {
 	// [Manager.elsewhere].
 	nodes *bus.Nodes
 
+	// instance identifies this process, where opts.Name identifies the
+	// machine. Announced in the registry for as long as this manager lives,
+	// and written into every state row it starts, so another node can ask
+	// whether the process that wrote a row is still there.
+	//
+	// A name cannot answer that: a supervisor restarting a node hands the new
+	// process the old one's name, and two started by hand share it outright.
+	// Deciding on the name alone made a restart strand a job, and then made a
+	// second manager sharing a name clear the first one's live row and put two
+	// drivers on one crawl.
+	instance string
+
+	// leave stops announcing this instance.
+	leave func()
+
 	// ctx is the manager's own lifetime, and every crawl runs under it. Held
 	// rather than taken per call because a crawl must outlive the request that
 	// started it: driving from the caller's context meant a crawl that ended
@@ -213,18 +230,37 @@ func New(ctx context.Context, conn *bus.Conn, opts Options) (*Manager, error) {
 	// deriving from the caller gets you.
 	own, stop := context.WithCancel(context.WithoutCancel(ctx))
 
-	m := &Manager{
-		conn:    conn,
-		opts:    opts,
-		log:     opts.Log.With("service", opts.Name),
-		jobs:    jobsKV,
-		states:  states,
-		nodes:   nodes,
-		ctx:     own,
-		stop:    stop,
-		running: map[string]*driver{},
-		claimed: map[string]string{},
+	// This process's own identity, which is what another node asks about
+	// before acting on a row this one wrote. See [Manager.instance].
+	instance, err := newInstance()
+	if err != nil {
+		stop()
+		return nil, err
 	}
+
+	m := &Manager{
+		conn:     conn,
+		opts:     opts,
+		log:      opts.Log.With("service", opts.Name, "instance", instance),
+		jobs:     jobsKV,
+		states:   states,
+		nodes:    nodes,
+		instance: instance,
+		ctx:      own,
+		stop:     stop,
+		running:  map[string]*driver{},
+		claimed:  map[string]string{},
+	}
+
+	// Announced for as long as this manager lives, and gone when it is. The
+	// registry's TTL is what makes "is the process that wrote this row still
+	// there" a question any node can answer.
+	leave, err := nodes.Announce(own, DriverKey(instance), []byte(opts.Name))
+	if err != nil {
+		stop()
+		return nil, err
+	}
+	m.leave = leave
 
 	// Any state row that says this manager is driving a job is a row from
 	// before this manager existed, because it has not started anything yet.
@@ -301,6 +337,7 @@ func (m *Manager) Status(ctx context.Context, name string) (bus.JobStatus, error
 		state.Revision = d.revision
 		state.Since = d.started
 		state.Driver = m.opts.Name
+		state.Instance = m.instance
 		state.Ending = ""
 		state.Error = ""
 	}
@@ -325,6 +362,23 @@ func (m *Manager) Stats(ctx context.Context, name string) (bus.JobStats, error) 
 
 	if d != nil {
 		return m.snapshot(ctx, d), nil
+	}
+
+	// Not this node's to answer. The counters live in the driver and the
+	// frontier lives on its disk, so a node that is not driving this job has
+	// neither: it reported the previous run's counters, or nothing at all,
+	// plus whatever its own local frontier directory happened to hold.
+	//
+	// Control requests are queue-distributed, so `scour job stats` landed on
+	// whichever node NATS picked and returned zeros for a crawl that was
+	// fetching - while `scour job status` on that same node correctly said it
+	// was running. Two contradictory answers from one node is what asking the
+	// question in one place was meant to retire. See [Manager.elsewhere].
+	if driver, err := m.elsewhere(ctx, name); err != nil {
+		return bus.JobStats{}, err
+	} else if driver != "" {
+		return bus.JobStats{}, fmt.Errorf(
+			"jobs: %q is running on %s, and this is %s. Ask that node", name, driver, m.opts.Name)
 	}
 
 	// What the last run did, plus what is left now. The counters are a record
@@ -564,6 +618,20 @@ func (m *Manager) Resume(ctx context.Context, name string) (bus.JobStatus, error
 		return bus.JobStatus{}, fmt.Errorf(
 			"jobs: %q is %s, not paused. Use start", name, state.Phase)
 	}
+
+	// The queue is on the disk of the node that paused it, and resuming means
+	// carrying on with it. A paused row is not running, so [Manager.elsewhere]
+	// says nothing about it - and a resume answered by another node opened an
+	// empty frontier, seeded nothing, finished immediately and wrote "done"
+	// over the paused row. The operator was told the crawl had finished the
+	// site, and the URLs it had queued could never be resumed, because the row
+	// that said where they were was gone.
+	if state.Driver != "" && state.Driver != m.opts.Name {
+		return bus.JobStatus{}, fmt.Errorf(
+			"jobs: %q was paused on %s and its queue is there, and this is %s. Ask that node, "+
+				"or use start --fresh to begin again here", name, state.Driver, m.opts.Name)
+	}
+
 	return m.launch(ctx, name, false, false)
 }
 
@@ -588,6 +656,11 @@ func (m *Manager) reconcile(ctx context.Context) error {
 		return err
 	}
 
+	here, err := m.nodes.Here(ctx)
+	if err != nil {
+		return fmt.Errorf("jobs: cannot read the cluster to reconcile: %w", err)
+	}
+
 	for _, name := range names {
 		state, err := m.states.Get(ctx, name)
 		if err != nil {
@@ -595,6 +668,17 @@ func (m *Manager) reconcile(ctx context.Context) error {
 		}
 		if state.Phase != bus.PhaseRunning || state.Driver != m.opts.Name {
 			continue
+		}
+		// And the process that wrote it is gone. Clearing on the name alone
+		// cleared a live row whenever two managers shared a name - the default
+		// is the hostname, so two `scour server --drive` on one machine
+		// collide by default - and the standby was then free to start a second
+		// driver on a job that was still being crawled, which is the one thing
+		// the whole arrangement exists to prevent.
+		if state.Instance != "" {
+			if _, alive := here[DriverKey(state.Instance)]; alive {
+				continue
+			}
 		}
 
 		m.log.WarnContext(ctx, "a previous run of this driver did not finish; recording it as stopped",
@@ -611,7 +695,23 @@ func (m *Manager) reconcile(ctx context.Context) error {
 	return nil
 }
 
-// elsewhere names the node driving this job, when that node is not this one.// elsewhere names the node driving this job, when that node is not this one.
+// DriverKey is how a driving manager appears in the node registry.
+//
+// Prefixed so it cannot collide with a node's own entry, and so that
+// `scour cluster list` can leave it out: it is not a machine an operator would
+// go and look at, it is a liveness token for one process.
+func DriverKey(instance string) string { return "drive-" + instance }
+
+// newInstance is a fresh identity for one manager process.
+func newInstance() (string, error) {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("jobs: %w", err)
+	}
+	return hex.EncodeToString(raw[:]), nil
+}
+
+// elsewhere names the node driving this job, when that node is not this one.
 //
 // Empty when this manager holds the driver, when nothing is driving the job,
 // and when the node the state row names has left the cluster.
@@ -660,7 +760,18 @@ func (m *Manager) elsewhere(ctx context.Context, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if state.Phase != bus.PhaseRunning || state.Driver == "" || state.Driver == m.opts.Name {
+	// Mine by instance, not by name. Two managers can share a name - the
+	// default is the hostname - and one that read a twin's row as its own
+	// answered "nothing is driving it" and started a second crawl on a job the
+	// twin was still fetching.
+	//
+	// A row with no instance came from an older build, and the name is the
+	// best that can be said about it.
+	ours := state.Instance == m.instance
+	if state.Instance == "" {
+		ours = state.Driver == m.opts.Name
+	}
+	if state.Phase != bus.PhaseRunning || state.Driver == "" || ours {
 		// A running phase with no driver recorded is from a build old enough
 		// not to have written one. Treated as nothing driving it, because the
 		// alternative is refusing every operation on a job nobody can name a
@@ -676,15 +787,27 @@ func (m *Manager) elsewhere(ctx context.Context, name string) (string, error) {
 		return "", fmt.Errorf("jobs: %q: cannot tell whether %s is still driving it: %w",
 			name, state.Driver, err)
 	}
-	if _, alive := here[state.Driver]; !alive {
-		m.log.InfoContext(ctx, "the driver recorded for this job has left the cluster",
-			"job", name, "driver", state.Driver)
+
+	// The process, not the machine. A name outlives the process that held it -
+	// a supervisor hands the restarted node the old one's name, and two
+	// started by hand share it outright - so asking about the name answered
+	// "yes" for a driver that had died and "no" for nobody at all.
+	//
+	// A row with no instance was written by an older build, and the name is
+	// the best that can be said about it.
+	key, what := state.Driver, "driver"
+	if state.Instance != "" {
+		key, what = DriverKey(state.Instance), "instance"
+	}
+	if _, alive := here[key]; !alive {
+		m.log.InfoContext(ctx, "the "+what+" recorded for this job has left the cluster",
+			"job", name, "driver", state.Driver, "instance", state.Instance)
 		return "", nil
 	}
 	return state.Driver, nil
 }
 
-// claim reserves a job name for one operation and returns what gives it back.// claim reserves a job name for one operation and returns what gives it back.
+// claim reserves a job name for one operation and returns what gives it back.
 //
 // # Why a claim and not a check
 //
@@ -903,6 +1026,7 @@ func (m *Manager) launch(ctx context.Context, name string, fresh, seed bool) (bu
 		Since:    d.started,
 		Revision: revision,
 		Driver:   m.opts.Name,
+		Instance: m.instance,
 	}); err != nil {
 		m.mu.Lock()
 		if m.running[name] == d {
@@ -1011,6 +1135,7 @@ func (m *Manager) drive(ctx context.Context, d *driver) {
 		Since:    time.Now().UTC(),
 		Revision: d.revision,
 		Driver:   m.opts.Name,
+		Instance: m.instance,
 		Ending:   string(ending),
 		Last:     &final,
 	}
@@ -1283,6 +1408,13 @@ func (m *Manager) close() {
 	// Waited for outside the lock, because the drivers take it on their way
 	// out. Holding it here is a deadlock rather than a slow close.
 	m.wg.Wait()
+
+	// Gone from the registry before the context that keeps the announcement
+	// alive is cancelled, so another node stops seeing this instance as soon
+	// as it has actually stopped driving anything.
+	if m.leave != nil {
+		m.leave()
+	}
 	m.stop()
 }
 

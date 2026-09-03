@@ -98,6 +98,18 @@ type JobState struct {
 	// cluster can tell which machine to go and look at.
 	Driver string `json:"driver,omitempty"`
 
+	// Instance identifies the process, where Driver identifies the machine.
+	//
+	// A name outlives the process that held it: a supervisor restarting
+	// `scour server --drive --name n1` gives the new process the old one's
+	// name, and two of them started by hand share it outright. So a name
+	// cannot say whether the driver that wrote this row is still there, and
+	// that is the only question another node needs answered before it acts.
+	//
+	// The process announces this in the node registry, which has a TTL, and
+	// stops when it does. See [jobs.Manager.elsewhere].
+	Instance string `json:"instance,omitempty"`
+
 	// Last is what the run that just ended did.
 	//
 	// Kept because the counters live in the driver, and the driver is gone the

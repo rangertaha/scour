@@ -14,6 +14,7 @@ import (
 	ucli "github.com/urfave/cli/v3"
 
 	"github.com/rangertaha/scour/internal/bus"
+	"github.com/rangertaha/scour/internal/jobs"
 	"github.com/rangertaha/scour/internal/safefile"
 )
 
@@ -129,6 +130,16 @@ func printMembers(ctx context.Context, a *App, conn *bus.Conn) error {
 	if err != nil {
 		return Failedf("%v", err)
 	}
+	// A driving manager announces itself so that another node can tell whether
+	// the process holding a job is still there. That is a liveness token, not
+	// a machine somebody would go and look at, so it is not a node in this
+	// listing. See [jobs.DriverKey].
+	for key := range here {
+		if strings.HasPrefix(key, jobs.DriverKey("")) {
+			delete(here, key)
+		}
+	}
+
 	if len(here) == 0 {
 		// Not an error. A cluster with a broker and no nodes is a cluster
 		// somebody has just started, and it is exactly what they should be

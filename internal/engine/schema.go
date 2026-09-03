@@ -438,7 +438,7 @@ func (i *Item) Subject() string {
 	return ""
 }
 
-// Fields are what this item measures: every leaf that is not a dimension.// Fields are what this item measures: every leaf that is not a dimension.
+// Fields are what this item measures: every leaf that is not a dimension.
 //
 // The mirror of [Item.Tags], and the two are a partition of [flattened]: a
 // leaf is one or the other and never both. See [dimensions] for why this

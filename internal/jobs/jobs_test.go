@@ -1613,3 +1613,129 @@ func TestARestartedDriverDoesNotStrandItsJobs(t *testing.T) {
 		t.Errorf("stop: %v", err)
 	}
 }
+
+// TestATwinDoesNotClearALiveRow.
+//
+// A manager clears the running rows its own name is on when it starts, because
+// a supervisor restarting a node hands the new process the old one's name and
+// the row it left behind would otherwise strand the job. The name is not enough
+// to tell those apart from a manager that is still driving: the default name is
+// the hostname, so two `scour server --drive` on one machine share it by
+// default, and clearing on the name alone let the second one free the first
+// one's job for anybody to start again.
+//
+// Two drivers on one job is the politeness rule broken exactly as the
+// single-driver design exists to prevent, and the site would have been the
+// first to notice.
+func TestATwinDoesNotClearALiveRow(t *testing.T) {
+	driver, conn, dir := clusterIn(t)
+	ctx := context.Background()
+
+	held, let := heldSite(t)
+
+	if _, err := driver.Create(ctx, document(held, "news")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := driver.Start(ctx, "news", true); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	waitFor(t, driver, "news", bus.PhaseRunning)
+
+	other := standby(t, conn)
+	if _, err := other.Start(ctx, "news", true); err == nil {
+		t.Fatal("a standby started a job that is being driven")
+	}
+
+	// A second manager with the same name as the one that is driving.
+	twin, err := jobs.New(ctx, conn, jobs.Options{
+		Dir:    t.TempDir(),
+		Bodies: bodies(t),
+		Name:   "test",
+	})
+	if err != nil {
+		t.Fatalf("twin: %v", err)
+	}
+	t.Cleanup(func() { _ = twin.Close() })
+
+	// The crawl is still running, so the row it wrote still stands.
+	status, err := other.Status(ctx, "news")
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.State.Phase != bus.PhaseRunning {
+		t.Errorf("a manager sharing the driver's name cleared its live row: %s", status.State.Phase)
+	}
+	if _, err := other.Start(ctx, "news", true); err == nil {
+		t.Error("a standby started a second driver on a job that is still being crawled")
+	}
+	if _, err := twin.Start(ctx, "news", true); err == nil {
+		t.Error("the twin started a second driver on a job that is still being crawled")
+	}
+
+	let()
+	_ = dir
+}
+
+// TestAStandbyDoesNotAnswerForACrawlItCannotSee.
+//
+// Two operations were still answering from this node alone.
+//
+// Stats read the local driver map and fell back to the previous run's counters
+// plus whatever the local frontier directory held, so a standby reported zeros
+// for a crawl that was fetching - while Status on that same node correctly said
+// it was running. Two contradictory answers from one node.
+//
+// Resume looked only at the phase, and a paused row is not running, so nothing
+// stopped a standby taking it: it opened an empty frontier, seeded nothing,
+// finished at once, and wrote "done" over the paused row. The operator was told
+// the crawl had finished the site, and the queued URLs could never be resumed
+// because the row that said where they were was gone.
+func TestAStandbyDoesNotAnswerForACrawlItCannotSee(t *testing.T) {
+	driver, conn, _ := clusterIn(t)
+	other := standby(t, conn)
+	ctx := context.Background()
+
+	held, let := heldSite(t)
+
+	if _, err := driver.Create(ctx, document(held, "news")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := driver.Start(ctx, "news", true); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	waitFor(t, driver, "news", bus.PhaseRunning)
+
+	// Stats, while it is running elsewhere.
+	if got, err := other.Stats(ctx, "news"); err == nil {
+		t.Errorf("a standby answered %+v for a crawl running on another node", got)
+	} else if !strings.Contains(err.Error(), "test") {
+		t.Errorf("the refusal does not name the node driving it: %v", err)
+	}
+
+	// Its own node still answers.
+	if _, err := driver.Stats(ctx, "news"); err != nil {
+		t.Errorf("the node driving the crawl could not report its stats: %v", err)
+	}
+
+	// Now pause it there, and try to resume it here.
+	let()
+	if _, err := driver.Pause(ctx, "news"); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+
+	if _, err := other.Resume(ctx, "news"); err == nil {
+		t.Error("a standby resumed a job whose queue is on another node, " +
+			"so the crawl finishes at once and the queue is lost")
+	} else if !strings.Contains(err.Error(), "test") {
+		t.Errorf("the refusal does not name the node holding the queue: %v", err)
+	}
+
+	// And the paused row still stands, which is the half that costs the queue.
+	status, err := driver.Status(ctx, "news")
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.State.Phase != bus.PhasePaused {
+		t.Errorf("the job is %s after a standby tried to resume it, want still paused", status.State.Phase)
+	}
+}
