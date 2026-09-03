@@ -182,8 +182,13 @@ func (m *middleware) wrap(next downloader.Handler) downloader.Handler {
 	return downloader.HandlerFunc(func(ctx context.Context, req *downloader.Request) (*downloader.Response, error) {
 		key := keyFor(req)
 
-		if resp := m.hit(ctx, key, req); resp != nil {
-			return resp, nil
+		// A refresh goes to the site. It still writes on the way back, so what
+		// the key holds is replaced rather than merely bypassed - which is
+		// what "fetch even if it is cached, and replace what is there" says.
+		if !req.Refresh {
+			if resp := m.hit(ctx, key, req); resp != nil {
+				return resp, nil
+			}
 		}
 
 		resp, err := next.Handle(ctx, req)

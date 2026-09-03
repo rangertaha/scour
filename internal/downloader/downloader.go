@@ -65,6 +65,16 @@ type Request struct {
 	// Depth is how many links from a start URL this was found at. The spider's
 	// `depth` middleware sets it; the downloader only carries it.
 	Depth int
+
+	// Refresh asks the cache middleware to go to the site even if it has an
+	// answer, and to replace what it holds with what comes back.
+	//
+	// It has to be on the request because the cache answers before the fetch
+	// is reached: `scour scrape --refresh` printed "refreshing", the
+	// middleware returned the stored body, and somebody iterating on a
+	// selector after correcting the page was shown the stale one forever with
+	// a line on stderr telling them otherwise.
+	Refresh bool
 }
 
 // Clone returns a copy safe to modify, which is what a middleware that changes

@@ -136,14 +136,16 @@ func runTry(ctx context.Context, a *App, opts tryOptions) error {
 	defer fetcher.Close()
 
 	if opts.refresh {
-		// Nothing to invalidate: a refresh is a fetch whose result replaces
-		// whatever the key held, and the cache middleware writes on the way
-		// back either way.
 		a.Warnf("refreshing %s\n", target)
 	}
 
 	started := time.Now()
-	resp, err := fetcher.Handle(ctx, &downloader.Request{URL: target, Job: job.Name})
+	// The flag travels on the request, because the cache answers before the
+	// fetch is reached: saying "refreshing" and then letting the middleware
+	// return what it held is what this used to do.
+	resp, err := fetcher.Handle(ctx, &downloader.Request{
+		URL: target, Job: job.Name, Refresh: opts.refresh,
+	})
 	if err != nil {
 		return Failedf("%v", err)
 	}
@@ -165,10 +167,18 @@ func runTry(ctx context.Context, a *App, opts tryOptions) error {
 	}
 
 	if opts.json {
-		return printTryJSON(a, resp, out)
+		if err := printTryJSON(a, resp, out); err != nil {
+			return err
+		}
+	} else {
+		printScrape(a, resp, out, elapsed)
 	}
-	printScrape(a, resp, out, elapsed)
 
+	// After either rendering, not instead of one of them. This returned as
+	// soon as the JSON was written, so --strict was silently ignored whenever
+	// --json was also given - which is the pair a build runs: machine-readable
+	// output and a failing exit code. The combination that always passed was
+	// the combination CI uses.
 	if opts.strict {
 		var missing []string
 		for _, item := range out.Items {

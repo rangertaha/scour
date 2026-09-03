@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -162,6 +163,22 @@ func TestStrictIsForCI(t *testing.T) {
 	if !strings.Contains(errOut+out, "price") {
 		t.Errorf("the failure does not name the property:\n%s%s", out, errOut)
 	}
+
+	// And with --json, which is the pair a build actually uses: machine
+	// readable output and a failing exit code. The JSON was written and the
+	// function returned before the strict check ran, so the one combination CI
+	// reaches for was the one that always passed.
+	jsonOut, jsonErr, jsonCode := run(t, "scrape", "--strict", "--json", path, server.URL+"/a")
+	if jsonCode == 0 {
+		t.Errorf("--strict passed a missing required property when --json was given too:\n%s", jsonOut)
+	}
+	if !strings.Contains(jsonErr+jsonOut, "price") {
+		t.Errorf("the failure does not name the property:\n%s%s", jsonOut, jsonErr)
+	}
+	// The JSON is still written, because a build wants both.
+	if !strings.Contains(jsonOut, `"url"`) {
+		t.Errorf("--strict --json printed no JSON:\n%s", jsonOut)
+	}
 }
 
 func TestScrapeAsJSON(t *testing.T) {
@@ -279,5 +296,75 @@ func TestScrapeOnASiteThatIsNotThere(t *testing.T) {
 
 	if _, _, code := run(t, "scrape", path, "http://127.0.0.1:1/nothing"); code != 3 {
 		t.Errorf("exit %d, want a failure", code)
+	}
+}
+
+// TestRefreshGoesBackToTheSite.
+//
+// `--refresh` says "fetch even if it is cached, and replace what is there". It
+// printed "refreshing" and then served the cached body: the cache middleware
+// answers before the fetch is reached, so nothing came back to replace what the
+// key held. Somebody iterating on a selector after correcting the page was
+// shown the stale one forever, with a line on stderr telling them otherwise.
+func TestRefreshGoesBackToTheSite(t *testing.T) {
+	var title atomic.Value
+	title.Store("FIRST")
+
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<html><head><title>%s</title></head><body><h1>%s</h1>
+		  <span class="price">1.00</span></body></html>`, title.Load(), title.Load())
+	}))
+	t.Cleanup(server.Close)
+
+	path := document(t, tryJob)
+
+	// Fetched and cached.
+	if out, errOut, code := run(t, "scrape", path, server.URL+"/a"); code != 0 {
+		t.Fatalf("exit %d\n%s%s", code, out, errOut)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("the site was asked %d times for the first fetch", got)
+	}
+
+	// The page changes, and a plain scrape is answered from the cache.
+	title.Store("SECOND")
+	out, _, code := run(t, "scrape", path, server.URL+"/a")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	if !strings.Contains(out, "FIRST") {
+		t.Errorf("a second scrape did not come from the cache:\n%s", out)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("the site was asked %d times, so the cache is not being used", got)
+	}
+
+	// And --refresh goes back to the site and shows what is there now.
+	out, errOut, code := run(t, "scrape", "--refresh", path, server.URL+"/a")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s%s", code, out, errOut)
+	}
+	if got := hits.Load(); got != 2 {
+		t.Errorf("--refresh asked the site %d times in total, so it did not refetch", got)
+	}
+	if !strings.Contains(out, "SECOND") {
+		t.Errorf("--refresh showed the stale page:\n%s", out)
+	}
+
+	// And what it fetched replaced what the key held, so the next plain scrape
+	// sees the new page too.
+	out, _, code = run(t, "scrape", path, server.URL+"/a")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	if !strings.Contains(out, "SECOND") {
+		t.Errorf("--refresh did not replace what the cache held:\n%s", out)
 	}
 }
