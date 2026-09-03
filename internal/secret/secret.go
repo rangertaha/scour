@@ -221,8 +221,24 @@ func (s *Store) Names(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
-// Delete removes a secret.
+// Delete removes a secret, and says so if there was none.
+//
+// Purge succeeds on a key that is not there, so this reported "removed" for any
+// name at all: an operator rotating a credential mistyped it, was told it was
+// gone, and the real secret stayed in the bucket and stayed resolvable by every
+// node. That is the one mistake a delete has to be loud about, because the
+// whole point of making it was that the value should stop working.
+//
+// Not idempotent on purpose, unlike the deletes elsewhere in this program that
+// say so in as many words. Nothing here retries a delete, and a name that is
+// not there is a name somebody typed wrongly.
 func (s *Store) Delete(ctx context.Context, name string) error {
+	if _, err := s.kv.Get(ctx, name); err != nil {
+		if errors.Is(err, jetstream.ErrKeyNotFound) {
+			return fmt.Errorf("%w: %s", ErrNoSecret, name)
+		}
+		return fmt.Errorf("secret: delete %q: %w", name, err)
+	}
 	if err := s.kv.Purge(ctx, name); err != nil {
 		return fmt.Errorf("secret: delete %q: %w", name, err)
 	}

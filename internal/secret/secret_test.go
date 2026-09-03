@@ -361,3 +361,41 @@ func configOf(t *testing.T, src string) hcl.Body {
 	}
 	return parsed.Body
 }
+
+// TestDeletingASecretThatIsNotThereSaysSo.
+//
+// Purge succeeds on a key that is not there, so this reported "removed" for any
+// name at all. An operator rotating a credential mistypes it, is told it is
+// gone, and the real secret stays in the bucket and stays resolvable by every
+// node - which is the one mistake a delete has to be loud about, because the
+// point of making it was that the value should stop working.
+func TestDeletingASecretThatIsNotThereSaysSo(t *testing.T) {
+	s := store(t)
+	ctx := context.Background()
+
+	if err := s.Set(ctx, "acme", []byte("s3cret")); err != nil {
+		t.Fatal(err)
+	}
+
+	// A plausible typo of the name that exists.
+	err := s.Delete(ctx, "acme-s3-ky")
+	if err == nil {
+		t.Fatal("deleting a secret that was never set reported success")
+	}
+	if !errors.Is(err, secret.ErrNoSecret) {
+		t.Errorf("deleting a name that is not there reports %v, want ErrNoSecret", err)
+	}
+
+	// And the real one is untouched, which is the half that costs something.
+	if value, err := s.Resolve(ctx, "acme"); err != nil || string(value) != "s3cret" {
+		t.Errorf("acme = %q, %v", value, err)
+	}
+
+	// The name that is there still deletes.
+	if err := s.Delete(ctx, "acme"); err != nil {
+		t.Errorf("delete: %v", err)
+	}
+	if _, err := s.Resolve(ctx, "acme"); !errors.Is(err, secret.ErrNoSecret) {
+		t.Errorf("the secret is still resolvable after being deleted: %v", err)
+	}
+}
