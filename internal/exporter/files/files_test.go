@@ -10,7 +10,7 @@ import (
 	"github.com/rangertaha/scour/internal/exporter"
 	"github.com/rangertaha/scour/internal/exporter/exportertest"
 
-	_ "github.com/rangertaha/scour/internal/exporter/files"
+	"github.com/rangertaha/scour/internal/exporter/files"
 )
 
 func job(t *testing.T, blocks string) *engine.Job {
@@ -47,12 +47,19 @@ job "news" {
 	return doc.Jobs[0]
 }
 
-// TestContract runs each of the three file formats through the shared suite.
+// TestContract runs every file format this package registers through the shared
+// suite.
 //
-// They had no tests of their own at all, which is how three of the six
-// exporters came to be the ones without a `closed` guard.
+// From [files.Formats] rather than a list written out here, which is what the
+// registration reads too. They had no tests of their own at all, which is how
+// three of the six exporters came to be the ones without a `closed` guard - and
+// a second list here would have let a fourth format be registered and never run
+// against the suite that found it.
 func TestContract(t *testing.T) {
-	for _, format := range []string{"json", "jsonlines", "csv"} {
+	if len(files.Formats) == 0 {
+		t.Fatal("this package registers no formats, so the contract runs against nothing")
+	}
+	for format := range files.Formats {
 		t.Run(format, func(t *testing.T) {
 			exportertest.Run(t, func(t *testing.T, dir string) exporter.Exporter {
 				set, err := exporter.New(context.Background(), job(t, `

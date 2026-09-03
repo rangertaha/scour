@@ -38,10 +38,23 @@ import (
 	"github.com/rangertaha/scour/internal/record"
 )
 
+// Formats is what this package registers, keyed by the name a document writes.
+//
+// A map rather than three calls, because the contract suite walks it: the list
+// of formats to hold to the contract was written out a second time in the test,
+// so a fourth format would have been registered and never run against it. These
+// three had no tests at all until the suite existed, which is how they came to
+// be the three exporters missing the guard that refuses a write after Close.
+var Formats = map[string]exporter.Factory{
+	"json":      newJSON,
+	"jsonlines": newLines,
+	"csv":       newCSV,
+}
+
 func init() {
-	exporter.Register("json", newJSON)
-	exporter.Register("jsonlines", newLines)
-	exporter.Register("csv", newCSV)
+	for name, open := range Formats {
+		exporter.Register(name, open)
+	}
 }
 
 // Config is what a file exporter's block may set.
