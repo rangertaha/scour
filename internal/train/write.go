@@ -310,6 +310,10 @@ func MarkInduced(document []byte, job string) map[string]bool {
 	var item, property string
 	var inner stepping
 
+	// depth is how deep inside the item's own property block this is, zero
+	// when between them.
+	var depth int
+
 	for _, line := range lines[from:to] {
 		trimmed := strings.TrimSpace(line)
 
@@ -321,11 +325,24 @@ func MarkInduced(document []byte, job string) map[string]bool {
 			continue
 		}
 
-		switch {
-		case strings.HasPrefix(trimmed, `item "`):
-			item, property = quoted(trimmed), ""
-		case strings.HasPrefix(trimmed, `property "`):
-			if property != "" {
+		if strings.HasPrefix(trimmed, `item "`) {
+			item, property, depth = quoted(trimmed), "", 0
+			continue
+		}
+
+		// Whether the item's own property is still open, by counting braces
+		// rather than by matching a bare `}`.
+		//
+		// Matching the line was wrong for every property block that does not
+		// end on a line of its own: a one-line `property "section" { type =
+		// "str" }` - which is a first-class form, and the one this repo's own
+		// documentation uses - and a closing brace with a trailing comment
+		// both left the property set. The next property, the item's own, was
+		// then read as nested and stepped over, so its marker was never seen,
+		// scour's own locator was taken for a hand-written one, and training
+		// stopped converging on that property without saying so.
+		if strings.HasPrefix(trimmed, `property "`) {
+			if depth > 0 {
 				// Nested: the item's own property is still open. Only an
 				// item's own properties are ever induced for, so a marker
 				// under this one belongs to nothing this reports.
@@ -333,11 +350,17 @@ func MarkInduced(document []byte, job string) map[string]bool {
 				continue
 			}
 			property = quoted(trimmed)
-		case strings.Contains(line, Mark) && item != "" && property != "":
+			depth = strings.Count(line, "{") - strings.Count(line, "}")
+		} else if depth > 0 {
+			depth += strings.Count(line, "{") - strings.Count(line, "}")
+		}
+
+		// After the property is set, so a one-line block carrying its own
+		// marker is recorded rather than skipped by an earlier branch.
+		if strings.Contains(line, Mark) && item != "" && property != "" {
 			induced[item+"."+property] = true
-		case trimmed == "}":
-			// The end of the item's own property, so the next one is at the
-			// item's level again.
+		}
+		if depth <= 0 {
 			property = ""
 		}
 	}

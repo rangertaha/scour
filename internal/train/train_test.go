@@ -868,3 +868,44 @@ func TestAHeadlineWrittenOverTwoLinesStillGetsALocator(t *testing.T) {
 		t.Errorf("no locator was proposed for a headline wrapped over two lines: %v", proposals)
 	}
 }
+
+// TestAMarkerIsSeenAfterAOneLineProperty.
+//
+// MarkInduced cleared the property it was inside only on a line that is exactly
+// `}`, so a sibling that does not end that way left it set - and the next
+// property, the item's own, was then read as nested and stepped over. Its
+// marker was never seen.
+//
+// Both shapes here are ordinary. A one-line property block is a first-class
+// form (`property "topic_score" { type = str }` is in this repo's own
+// documentation) and a closing brace with a trailing comment is what somebody
+// writes when annotating a document.
+//
+// The consequence is that scour's own locator is read as hand-written, so
+// `scour job train` reports it kept and never replaces it: training stops
+// converging on that property, silently.
+func TestAMarkerIsSeenAfterAOneLineProperty(t *testing.T) {
+	for name, before := range map[string]string{
+		"one-line block":         `    property "section" { type = "str" }`,
+		"brace with a comment":   "    property \"section\" {\n      type = \"str\"\n    } # the section",
+		"one-line with a marker": `    property "section" { css = [".sec"] ` + train.Marker + ` }`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			document := []byte(`
+job "news" {
+  item "article" {
+` + before + `
+
+    property "title" {
+      css = ["h1"] ` + train.Marker + `
+    }
+  }
+}
+`)
+			induced := train.MarkInduced(document, "news")
+			if !induced["article.title"] {
+				t.Errorf("the marker on the item's own title was not seen: %v", induced)
+			}
+		})
+	}
+}

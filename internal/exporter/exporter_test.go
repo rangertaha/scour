@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -439,4 +440,30 @@ func TestOneFilePerExporterIsStillFine(t *testing.T) {
 		t.Fatalf("two exporters with their own default files were refused: %v", err)
 	}
 	set.Close()
+}
+
+// TestTheSetRefusesAfterCloseWithTheSentinel.
+//
+// The Set is what a run holds: it calls Write on this, never on a backend. So a
+// caller asking errors.Is(err, ErrClosed) about the only object it has was told
+// no, while every backend answered yes - the contract suite unwraps to the
+// individual formats, so it could not see the difference.
+func TestTheSetRefusesAfterCloseWithTheSentinel(t *testing.T) {
+	set, err := exporter.New(context.Background(), job(t, `
+  exporter "jsonlines" "article" {}
+`), map[string]io.WriteCloser{"jsonlines.article": &sink{}})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if err := set.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	err = set.Write(context.Background(), rec("https://example.com/a", "One", "Alex"))
+	if err == nil {
+		t.Fatal("a record written after Close was accepted, so a run was told it landed")
+	}
+	if !errors.Is(err, exporter.ErrClosed) {
+		t.Errorf("the set reports %v, want exporter.ErrClosed", err)
+	}
 }

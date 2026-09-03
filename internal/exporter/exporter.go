@@ -229,7 +229,10 @@ func New(ctx context.Context, job *engine.Job, out map[string]io.WriteCloser) (*
 // something for a pipeline step to use and never write it out.
 func (s *Set) Write(ctx context.Context, records ...*record.Record) error {
 	if s.closed {
-		return errors.New("exporter: the exports are closed, and these records cannot land in them")
+		// Wrapping the sentinel, because this is the object a run holds: it
+		// calls Write on the Set, never on a backend, so a caller asking
+		// errors.Is(err, ErrClosed) about the only thing it has was told no.
+		return fmt.Errorf("%w: these records cannot land in the exports", ErrClosed)
 	}
 
 	var problems []error
