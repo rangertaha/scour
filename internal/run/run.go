@@ -166,12 +166,29 @@ type Worst interface {
 // both hit the same host at once - silently, because the first one's report is
 // then discarded by the attempt fence.
 func (r *Run) hold(fetch time.Duration) time.Duration {
-	if worst, ok := r.fetch.(Worst); ok {
-		if longest := worst.Worst(); longest > 0 {
-			return max(Lease, longest+time.Minute)
-		}
+	// Both stages, because one lease covers both. It is taken before the fetch
+	// and given back after the read, and it was sized from the fetch alone: a
+	// job with `downloader { external_timeout = "30s" }` and
+	// `spider { external_timeout = "10m" }` held for six minutes and could
+	// spend ten reading, so the URL came due underneath a working worker and a
+	// second one fetched the same host. At the defaults a four-minute fetch
+	// and a three-minute read did the same thing.
+	//
+	// A stage that cannot say costs nothing here, which is right for a local
+	// spider - it is CPU work on a body already in hand - and is why this only
+	// ever grows the bound.
+	if longest := worstOf(r.fetch); longest > 0 {
+		return max(Lease, longest+worstOf(r.read)+time.Minute)
 	}
-	return Hold(fetch, r.job.Downloader.Redirects())
+	return Hold(fetch, r.job.Downloader.Redirects()) + worstOf(r.read)
+}
+
+// worstOf is how long one call to a stage may take, or zero if it cannot say.
+func worstOf(stage any) time.Duration {
+	if worst, ok := stage.(Worst); ok {
+		return max(0, worst.Worst())
+	}
+	return 0
 }
 
 // Idle is how long the loop waits when the frontier has nothing due but is not

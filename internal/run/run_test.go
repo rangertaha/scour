@@ -1292,3 +1292,54 @@ func TestAnExternalStageIsRefusedOnlyWhenItCannotBeReached(t *testing.T) {
 		})
 	}
 }
+
+// TestTheHoldCoversTheReadAsWellAsTheFetch.
+//
+// One lease covers both: it is taken before the fetch and given back after the
+// read. It was sized from the fetch stage alone, and over a cluster the two
+// stages have separate timeouts - `downloader { external_timeout = "30s" }`
+// beside `spider { external_timeout = "10m" }` took a six-minute lease and
+// could spend ten minutes reading. The URL came due underneath a working
+// worker, a second worker took it, and both fetched the same host, silently,
+// because the first one's report is then discarded by the attempt fence.
+func TestTheHoldCoversTheReadAsWellAsTheFetch(t *testing.T) {
+	server, _ := site(t)
+
+	const (
+		fetchWorst = 30 * time.Second
+		readWorst  = 10 * time.Minute
+	)
+
+	r, err := run.New(context.Background(), document(t, server, ""), run.Options{
+		Dir:   t.TempDir(),
+		Open:  func(cfg frontier.Config) (frontier.Frontier, error) { return sqlite.Open(cfg) },
+		Fetch: costing{worst: fetchWorst},
+		Read:  reading{worst: readWorst},
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Close()
+
+	if got := r.Hold(); got <= fetchWorst+readWorst {
+		t.Errorf("the lease is held for %s, and a fetch of %s followed by a read of %s takes %s: "+
+			"the URL comes due while the first worker still holds it",
+			got, fetchWorst, readWorst, fetchWorst+readWorst)
+	}
+}
+
+// costing is a fetch stage that says how long it may take.
+type costing struct{ worst time.Duration }
+
+func (c costing) Worst() time.Duration { return c.worst }
+func (c costing) Handle(context.Context, *downloader.Request) (*downloader.Response, error) {
+	return nil, errors.New("not called")
+}
+
+// reading is a read stage that says how long it may take.
+type reading struct{ worst time.Duration }
+
+func (r reading) Worst() time.Duration { return r.worst }
+func (r reading) Handle(context.Context, *downloader.Response) (*spider.Output, error) {
+	return nil, errors.New("not called")
+}

@@ -326,7 +326,23 @@ type Spider struct {
 	wait   time.Duration
 }
 
-// NewSpider returns a client for one job's spider, waiting the given time for
+// Worst is the longest one read through this client can take.
+//
+// The same answer as [Downloader.Worst] and for the same reason, and it was
+// missing: the crawl loop holds one lease across the fetch AND the read, and
+// sized it from the fetch alone. A job with `downloader { external_timeout =
+// "30s" }` and `spider { external_timeout = "10m" }` took a six-minute lease
+// and could spend ten minutes reading, so the URL came due while a worker still
+// held it, a second worker took it, and both fetched the same host - silently,
+// because the first one's report is then discarded by the attempt fence.
+func (s *Spider) Worst() time.Duration {
+	if s.wait > 0 {
+		return s.wait
+	}
+	return Timeout
+}
+
+// NewSpider returns a client for one job's spider, waiting the given time for// NewSpider returns a client for one job's spider, waiting the given time for
 // an answer. Zero means [Timeout]. See [Conn.NewDownloader] for why it is a
 // parameter.
 func (c *Conn) NewSpider(job string, bodies cache.Store, wait time.Duration) *Spider {
