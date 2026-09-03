@@ -122,13 +122,13 @@ const Shutdown = 30 * time.Second
 // six minutes in while another was still fetching perfectly happily. The run
 // then reported Stalled and blamed the store for zero refused writes.
 //
-// A function rather than an expression at the one call site, so a test can
-// assert the bound this computes rather than recomputing it and agreeing with
-// itself.
-//
-// Kept as the documented formula for a caller that has no stage to ask; the
-// loop itself now builds its bound from the hold it actually took.
-func StallFor(rate, fetch time.Duration, redirects int) time.Duration {
+// It takes the hold rather than recomputing one, because the loop's hold comes
+// from the stage that will do the work - see [Run.hold] - and only a caller
+// with no stage to ask falls back to [Hold]. Recomputing it here made this a
+// second formula: the loop built `Stall + rate + hold` inline and this built
+// its own, so the test that pins the relationship pinned neither. Deleting the
+// hold term from the loop left the whole suite green.
+func StallFor(rate, hold time.Duration) time.Duration {
 	// Built on [Hold] rather than on `fetch`, so the two bounds cannot drift
 	// apart. They answer the same question from opposite sides: a hold is how
 	// long one unit of work may take, and the stall bound is how long the loop
@@ -143,7 +143,7 @@ func StallFor(rate, fetch time.Duration, redirects int) time.Duration {
 	// blaming the store for zero refused writes. The test that guards the
 	// relationship passed throughout, because it compared against Hold with
 	// the redirects hard-coded to zero.
-	return Stall + rate + Hold(fetch, redirects)
+	return Stall + rate + hold
 }
 
 // Worst is a fetch stage that can say how long one call to it may take.
@@ -566,7 +566,7 @@ func (r *Run) Do(ctx context.Context) (Ending, error) {
 
 	stall := r.opts.Stall
 	if stall <= 0 {
-		stall = Stall + rate + hold
+		stall = StallFor(rate, hold)
 	}
 
 	for range workers {

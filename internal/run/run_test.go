@@ -976,8 +976,11 @@ func TestASlowFetchIsNotAStall(t *testing.T) {
 	// right order, and it was comparing against a hold no run ever uses.
 	redirects := j.Downloader.Redirects()
 
-	stall := run.StallFor(rate, fetch, redirects)
+	// The hold a run with no stage to ask would take, and the stall bound the
+	// loop builds from it - the same function the loop calls, so that this
+	// pins the loop's own arithmetic rather than a second copy of it.
 	hold := run.Hold(fetch, redirects)
+	stall := run.StallFor(rate, hold)
 
 	if stall <= hold {
 		t.Errorf("stall %s does not outlast a hold of %s, so a worker waiting on one fetch declares a stall",
